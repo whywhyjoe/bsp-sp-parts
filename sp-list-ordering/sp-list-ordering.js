@@ -137,6 +137,7 @@
     '      <span class="toolbar__spacer"></span>' +
     '      <span style="font:var(--type-caption1); color:var(--fg-secondary)">Drag rows or use the arrows, then Save</span>' +
     '    </div>' +
+    '    <div class="lro__scroll">' +
     '    <table class="grid grid--reorder" :aria-describedby="hid">' +
     '      <thead><tr>' +
     '        <th class="grid__drag-handle"><span class="u-sr-only">Reorder handle</span></th>' +
@@ -185,6 +186,7 @@
     '        </template>' +
     '      </tbody>' +
     '    </table>' +
+    '    </div>' +
     '  </div>' +
 
     '  <p class="u-sr-only" :id="hid">Rows can be reordered. Drag a row with the mouse, or use the Move up and Move down buttons on each row. Changes are applied only when you choose Save order.</p>' +

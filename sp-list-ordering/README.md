@@ -40,6 +40,21 @@ its own config):
    fix the `DEPLOY REPOINT` URLs for your site, upload it.
 4. Point a custom script web part at your copy of the stub.
 
+The tool is a **drop-in**: it fills the web part's container, brings no page
+chrome, and scrolls its grid horizontally when the container is narrow. The
+stub owns the per-instance presentation:
+
+- The **heading block** (title + description) is plain markup in the stub —
+  edit the copy or delete the block entirely.
+- The **section ground**: the cards read best on `--surface-subtle`, and the
+  page section containing the web part has to supply it. The stub ships a
+  `:has()` override (`#CanvasZoneContainer:has([data-sp-part="list-ordering"])`)
+  plus a plain fallback that paints the web part's own box — adjust the
+  selector to your page's canvas structure, or delete if the section already
+  has the right background.
+- Web part margins/padding collapse is the embedding page's job (the usual
+  custom-script-web-part CSS), not the tool's.
+
 Prereqs on the page/site: the design system
 (`/sites/FCUPortal/Code/bsp-design/styles.css`), self-hosted Alpine and PnPjs v2
 (`/sites/FCUPortal/Code/lib/alpine.js`, `…/pnp2.bundle.js`). The stub loads all

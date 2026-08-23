@@ -4,50 +4,51 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>sp-list-ordering · dev harness</title>
-<!-- DEV HARNESS — simulates a SharePoint page hosting the sp-list-ordering web
-     part. Opens from disk (no server needed). It exercises the real production
-     boot path: the target div is injected LATE (1.2 s after load, like a web
-     part zone rendering on SharePoint's schedule), the loader's timer+DOM-check
-     finds it, mounts the UI, and the mock data adapter kicks in because `pnp`
-     is absent. vendor/ CSS are dev-only copies of the design system; live pages
-     link /sites/FCUPortal/Code/bsp-design/styles.css instead. Alpine is CDN
-     here for convenience — production self-hosts /sites/FCUPortal/Code/lib/alpine.js. -->
+<!-- DEV HARNESS — simulates a SharePoint page hosting the sp-list-ordering
+     custom script web part as a DROP-IN: the page owns its own chrome, the
+     web part zone is a bounded container (not the whole screen), and the
+     content injected into it mirrors sp-list-ordering.webpart.html (section
+     ground override + optional heading + target div). The zone renders LATE
+     (1.2 s, like SharePoint), exercising the timer+DOM-check boot; the mock
+     data adapter activates because `pnp` is absent. vendor/ CSS + alpine are
+     dev-only copies — live pages use /sites/FCUPortal/Code/… instead. -->
 <link rel="stylesheet" href="vendor/colors_and_type.css">
 <link rel="stylesheet" href="vendor/components.css">
 <link rel="stylesheet" href="../sp-list-ordering/sp-list-ordering.css">
 <style>
-  body { margin: 0; background: var(--surface-subtle); }
+  /* Bare stand-in for a SharePoint modern page: white canvas, a fake title
+     region, and a bounded section the web part lands in. Harness-only CSS. */
+  body { margin: 0; background: #fff; font: var(--type-body1); color: var(--fg-primary); }
+  .fake-sp-chrome { padding: 24px 32px; border-bottom: 1px solid var(--stroke-divider); color: var(--fg-secondary); }
+  .fake-canvas { max-width: 1024px; margin: 0 auto; padding: 24px 32px 64px; }
+  .fake-zone { border: 1px dashed var(--stroke-divider); padding: 16px; }
+  .fake-zone-label { font: var(--type-caption2); color: var(--fg-secondary); margin: 0 0 8px; text-transform: uppercase; letter-spacing: .06em; }
 </style>
 </head>
 <body>
 
-<!-- Fake SharePoint chrome so the tool is judged in context. -->
-<header class="suite">
-  <div class="suite__inner l-wrap">
-    <span class="suite__mark">B</span>
-    <span class="suite__app">Content manager</span>
-    <span class="suite__divider"></span>
-    <span class="suite__env">Dev harness · mock data</span>
-    <span class="suite__spacer"></span>
-  </div>
-</header>
+<div class="fake-sp-chrome">SharePoint page chrome lives here (site header, nav, page title) — not the tool's concern.</div>
 
-<main class="l-wrap" style="padding-top:var(--space-240); padding-bottom:var(--space-560)">
-  <div class="section-head" style="margin-bottom:var(--space-240)">
-    <p class="section-head__eyebrow">Site tools</p>
-    <h1 class="section-head__title">List ordering</h1>
-    <p class="section-head__lede">Drag items into the order your pages should show them, then save. Ordering applies within the current filter; other scopes are untouched.</p>
-  </div>
-
-  <!-- The web part zone: empty at load. The stub's div is injected late, below. -->
-  <div id="webpart-zone"></div>
-</main>
+<div class="fake-canvas">
+  <p class="fake-zone-label">Custom script web part zone (bounded container — the tool must fill it, not the screen)</p>
+  <div class="fake-zone" id="webpart-zone"><!-- stub content injected late, below --></div>
+</div>
 
 <script>
   // Simulate SharePoint rendering the web part zone late and out of order.
+  // What lands here mirrors sp-list-ordering.webpart.html (the per-instance
+  // stub): section-ground override, optional heading, target div.
   setTimeout(function () {
-    var zone = document.getElementById('webpart-zone');
-    zone.innerHTML = '<div data-sp-part="list-ordering" data-config="../sp-list-ordering/sp-list-ordering.config.json"></div>';
+    document.getElementById('webpart-zone').innerHTML =
+      '<style>' +
+      '  .fake-zone:has([data-sp-part="list-ordering"]) { background: var(--surface-subtle); }' +
+      '  [data-sp-part="list-ordering"] { background: var(--surface-subtle); }' +
+      '</style>' +
+      '<div class="section-head" style="margin-bottom:var(--space-160)">' +
+      '  <h2 class="section-head__title">List ordering</h2>' +
+      '  <p class="section-head__lede">Drag items into the order your pages should show them, then save. Ordering applies within the current filter; other scopes are untouched.</p>' +
+      '</div>' +
+      '<div data-sp-part="list-ordering" data-config="../sp-list-ordering/sp-list-ordering.config.json"></div>';
   }, 1200);
 </script>
 

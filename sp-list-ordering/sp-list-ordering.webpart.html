@@ -7,8 +7,13 @@
           for the schema) and point data-config below at it.
        3. Point the custom script web part at your copy of this file.
 
+     The tool is a drop-in: it fills the web part's container and brings no
+     page chrome of its own (the page/SharePoint owns that). The title and
+     description below are plain per-instance markup — edit or delete freely.
+
      The shared assets (sp-list-ordering.js / .css) are deployed ONCE per site;
-     only the data-config URL should differ between copies of this stub.
+     only the data-config URL (and the copy below) should differ between
+     copies of this stub.
 
      DEPLOY REPOINT — the URLs below assume:
        design system  →  /sites/FCUPortal/Code/bsp-design/
@@ -22,6 +27,24 @@
 
 <link rel="stylesheet" href="/sites/FCUPortal/Code/bsp-design/styles.css">
 <link rel="stylesheet" href="/sites/FCUPortal/SiteAssets/sp-parts/sp-list-ordering/sp-list-ordering.css">
+
+<style>
+  /* SECTION GROUND (per-instance override) — the tool's cards read best on
+     --surface-subtle, and the page section that contains this web part has to
+     supply it. Point the :has() selector at YOUR canvas/section container for
+     the page this ships on (the usual "#CanvasZoneContainer:has(#MyWebPart)"
+     maneuver); the fallback rule below it needs no :has support and simply
+     paints the web part's own box. Delete whichever you don't want. */
+  #CanvasZoneContainer:has([data-sp-part="list-ordering"]) { background: var(--surface-subtle); }
+  [data-sp-part="list-ordering"] { background: var(--surface-subtle); }
+</style>
+
+<!-- OPTIONAL heading — per-instance copy; edit or delete. (No eyebrow, no page
+     chrome: SharePoint's page furniture surrounds this web part already.) -->
+<div class="section-head" style="margin-bottom:var(--space-160)">
+  <h2 class="section-head__title">List ordering</h2>
+  <p class="section-head__lede">Drag items into the order your pages should show them, then save. Ordering applies within the current filter; other scopes are untouched.</p>
+</div>
 
 <div data-sp-part="list-ordering"
      data-config="/sites/FCUPortal/SiteAssets/sp-parts/sp-list-ordering/sp-list-ordering.config.json"></div>

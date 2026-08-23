@@ -6,6 +6,13 @@
 
 [x-cloak] { display: none !important; }
 
+/* Drop-in sizing: the tool fills whatever container the web part gives it —
+ * no page chrome, no max-width of its own. In a narrow container the grid
+ * scrolls horizontally inside the card instead of clipping or overflowing. */
+.lro { width: 100%; min-width: 0; }
+.lro__scroll { overflow-x: auto; }
+.lro__scroll .grid { min-width: 560px; }
+
 /* Drag affordances — only real, draggable rows get the grab cursor. */
 .grid--reorder tbody tr[draggable="true"] { cursor: grab; }
 .grid--reorder tbody tr[draggable="true"]:active { cursor: grabbing; }
