@@ -1,0 +1,46 @@
+/*! sp-list-ordering v0.1.0 — bsp-sp-parts
+ * Tool-local styles on top of the bsp-design tokens. New reorder vocabulary
+ * lives here (not in components.css) because this tool is its only consumer;
+ * promote to the design system only if a second reorder surface appears.
+ * Every value is a shared token — no raw hex, no off-ramp px sizes. */
+
+[x-cloak] { display: none !important; }
+
+/* Drag affordances — only real, draggable rows get the grab cursor. */
+.grid--reorder tbody tr[draggable="true"] { cursor: grab; }
+.grid--reorder tbody tr[draggable="true"]:active { cursor: grabbing; }
+
+/* Handle + move-button cells stay narrow so content columns keep the room. */
+.grid--reorder .grid__drag-handle {
+  width: var(--space-320);
+  text-align: center;
+  color: var(--fg-secondary);
+}
+.grid--reorder .grid__move-cell {
+  width: 1%;              /* shrink-to-fit: the buttons set the real width */
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* The row being dragged dims in place; the insertion target draws a 2px accent
+ * line on the edge the drop will land on. box-shadow, not border, so rows never
+ * shift while dragging. */
+.grid--reorder tr.is-dragging td {
+  opacity: .5;
+  background: var(--surface-selected-tint);
+}
+.grid--reorder tr.is-drop-before td { box-shadow: inset 0 2px 0 var(--accent-rest); }
+.grid--reorder tr.is-drop-after td { box-shadow: inset 0 -2px 0 var(--accent-rest); }
+
+/* Screen-reader-only helper (no equivalent utility exists in the system). */
+.u-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

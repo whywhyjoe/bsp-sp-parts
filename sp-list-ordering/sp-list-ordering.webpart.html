@@ -1,0 +1,31 @@
+<!-- ═══════════════════════════════════════════════════════════════════════
+     sp-list-ordering — custom script web part stub (bsp-sp-parts v0.1.0)
+
+     PER-INSTANCE FILE. To put this tool on a page:
+       1. Copy this file next to the page/app that embeds it.
+       2. Write a config JSON for your lists (see sp-list-ordering.config.json
+          for the schema) and point data-config below at it.
+       3. Point the custom script web part at your copy of this file.
+
+     The shared assets (sp-list-ordering.js / .css) are deployed ONCE per site;
+     only the data-config URL should differ between copies of this stub.
+
+     DEPLOY REPOINT — the URLs below assume:
+       design system  →  /sites/FCUPortal/Code/bsp-design/
+       libs           →  /sites/FCUPortal/Code/lib/
+       this tool      →  /sites/FCUPortal/SiteAssets/sp-parts/sp-list-ordering/
+     Adjust for your site. Two stubs on one page are fine: the loader mounts
+     every [data-sp-part="list-ordering"] div independently, and the script/link
+     tags are safe to repeat (same-URL CSS is a no-op; pnp/Alpine keep the first
+     load).
+     ═══════════════════════════════════════════════════════════════════════ -->
+
+<link rel="stylesheet" href="/sites/FCUPortal/Code/bsp-design/styles.css">
+<link rel="stylesheet" href="/sites/FCUPortal/SiteAssets/sp-parts/sp-list-ordering/sp-list-ordering.css">
+
+<div data-sp-part="list-ordering"
+     data-config="/sites/FCUPortal/SiteAssets/sp-parts/sp-list-ordering/sp-list-ordering.config.json"></div>
+
+<script src="/sites/FCUPortal/Code/lib/pnp2.bundle.js"></script>
+<script src="/sites/FCUPortal/SiteAssets/sp-parts/sp-list-ordering/sp-list-ordering.js"></script>
+<script defer src="/sites/FCUPortal/Code/lib/alpine.js"></script>

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sp-list-ordering · dev harness</title>
+<!-- DEV HARNESS — simulates a SharePoint page hosting the sp-list-ordering web
+     part. Opens from disk (no server needed). It exercises the real production
+     boot path: the target div is injected LATE (1.2 s after load, like a web
+     part zone rendering on SharePoint's schedule), the loader's timer+DOM-check
+     finds it, mounts the UI, and the mock data adapter kicks in because `pnp`
+     is absent. vendor/ CSS are dev-only copies of the design system; live pages
+     link /sites/FCUPortal/Code/bsp-design/styles.css instead. Alpine is CDN
+     here for convenience — production self-hosts /sites/FCUPortal/Code/lib/alpine.js. -->
+<link rel="stylesheet" href="vendor/colors_and_type.css">
+<link rel="stylesheet" href="vendor/components.css">
+<link rel="stylesheet" href="../sp-list-ordering/sp-list-ordering.css">
+<style>
+  body { margin: 0; background: var(--surface-subtle); }
+</style>
+</head>
+<body>
+
+<!-- Fake SharePoint chrome so the tool is judged in context. -->
+<header class="suite">
+  <div class="suite__inner l-wrap">
+    <span class="suite__mark">B</span>
+    <span class="suite__app">Content manager</span>
+    <span class="suite__divider"></span>
+    <span class="suite__env">Dev harness · mock data</span>
+    <span class="suite__spacer"></span>
+  </div>
+</header>
+
+<main class="l-wrap" style="padding-top:var(--space-240); padding-bottom:var(--space-560)">
+  <div class="section-head" style="margin-bottom:var(--space-240)">
+    <p class="section-head__eyebrow">Site tools</p>
+    <h1 class="section-head__title">List ordering</h1>
+    <p class="section-head__lede">Drag items into the order your pages should show them, then save. Ordering applies within the current filter; other scopes are untouched.</p>
+  </div>
+
+  <!-- The web part zone: empty at load. The stub's div is injected late, below. -->
+  <div id="webpart-zone"></div>
+</main>
+
+<script>
+  // Simulate SharePoint rendering the web part zone late and out of order.
+  setTimeout(function () {
+    var zone = document.getElementById('webpart-zone');
+    zone.innerHTML = '<div data-sp-part="list-ordering" data-config="../sp-list-ordering/sp-list-ordering.config.json"></div>';
+  }, 1200);
+</script>
+
+<script src="../sp-list-ordering/sp-list-ordering.js"></script>
+<!-- Vendored Alpine (dev only) so the harness opens from disk with no network;
+     production self-hosts alpine.js in /sites/FCUPortal/Code/lib/. -->
+<script defer src="vendor/alpine.js"></script>
+
+</body>
+</html>

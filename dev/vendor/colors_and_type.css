@@ -1,0 +1,421 @@
+/*! BMO SharePoint Design System · v1.0.0 · colors_and_type.css */
+/* =====================================================================
+   BMO SharePoint Design System — Foundational tokens
+   ---------------------------------------------------------------------
+   A hybrid of three sources, layered in priority order:
+     1. BMO digital brand (authoritative for color + type)
+     2. SharePoint Online shell (host environment)
+     3. Fluent 2 design system (construction system: spacing, radii, shadow)
+   ---------------------------------------------------------------------
+   Font stack is Segoe UI with system fallbacks. The shell already loads
+   Segoe UI; no @font-face is required when rendering inside SharePoint.
+   For standalone previews we fall back through the Microsoft system
+   stack and finally to sans-serif.
+   ===================================================================== */
+
+:root {
+  /* ------------------------------------------------------------------
+     0 · VERSION — stamped by tools/Set-Version.ps1 from the VERSION file.
+     Not a design token; it exists so a deployed copy can identify itself
+     with no git and no build. Probe the live page from devtools:
+       getComputedStyle(document.documentElement).getPropertyValue('--ds-version')
+     ------------------------------------------------------------------ */
+  --ds-version: "1.0.0";
+
+  /* ------------------------------------------------------------------
+     1 · BMO BRAND COLORS — authoritative
+     ------------------------------------------------------------------ */
+  /* Logo-only red. NEVER use in UI. */
+  --bmo-red:                #ED1C24;
+
+  /* Digital interactive blues */
+  --bmo-blue:               #0079C1;   /* First Bank Blue — the single BMO interactive blue (consumed via --accent-rest). The blue the BMO intranet consistently uses; supersedes the former #0075BE Accessible Blue. */
+  --bmo-blue-hover:         #005587;   /* Ultramarine */
+  --bmo-blue-focus:         #73C3EB;   /* Cerulean — focus ring */
+
+  /* Text + structure */
+  --bmo-slate:              #001928;   /* Primary text, headings */
+  --bmo-granite:            #646C76;   /* Secondary text */
+
+  /* Surfaces */
+  --bmo-white:              #FFFFFF;
+  --bmo-albicant:           #F5F6F7;   /* Secondary surface */
+  --bmo-light-grey:         #D9DCE1;   /* Dividers, rules */
+  --bmo-pale-skyblue:       #C1E7FF;   /* Illustration tint */
+
+  /* Feedback */
+  --bmo-positive:           #0F9B2C;
+  --bmo-negative:           #D12121;
+
+  /* Chart palette — primary */
+  --bmo-chart-midnight:     #003758;
+  --bmo-chart-navy:          #005789;
+  --bmo-chart-blue:          #0079C1;
+  --bmo-chart-sky:           #00A9FB;
+  --bmo-chart-ice:           #B1E5FE;
+
+  /* Chart palette — secondary (sparingly) */
+  --bmo-chart-purple:        #974BB7;
+  --bmo-chart-lavender:      #8988E1;
+  --bmo-chart-mint:          #39D4B9;
+  --bmo-chart-chartreuse:    #CEE226;
+  --bmo-chart-orange:        #FAA451;
+
+
+  /* ------------------------------------------------------------------
+     2 · FLUENT 2 NEUTRAL RAMP — cool grays
+     Use these (NOT SharePoint's warm #323130 / #f3f2f1) inside apps.
+     ------------------------------------------------------------------ */
+  --f2-white:               #FFFFFF;
+  --f2-grey-98:             #FAFAFA;   /* neutralLighterAlt */
+  --f2-grey-96:             #F5F5F5;   /* neutralLighter */
+  --f2-grey-94:             #F0F0F0;
+  --f2-grey-92:             #EBEBEB;
+  --f2-grey-88:             #E0E0E0;   /* neutralQuaternaryAlt — dividers */
+  --f2-grey-82:             #D1D1D1;
+  --f2-grey-74:             #BDBDBD;
+  --f2-grey-58:             #919191;
+  --f2-grey-44:             #707070;
+  --f2-grey-38:             #616161;
+  --f2-grey-26:             #424242;
+  --f2-grey-14:             #242424;
+  --f2-grey-08:             #141414;
+  --f2-black:               #000000;
+
+  /* Fluent 2 brand ramp around themePrimary */
+  --f2-brand-80:            #115EA3;   /* hover dark */
+  --f2-brand-70:            #0F6CBD;   /* themePrimary — Fluent default */
+  --f2-brand-60:            #2886DE;
+  --f2-brand-50:            #479EF5;
+  --f2-brand-40:            #62ABF5;
+  --f2-brand-tint-30:       #B4D6FA;
+  --f2-brand-tint-50:       #EBF3FC;   /* selected row background */
+
+  /* Fluent 2 semantic */
+  --f2-red:                 #D13438;
+  --f2-red-dark:            #BC2F32;
+  --f2-green:               #107C10;
+  --f2-yellow:              #F2C811;
+
+
+  /* ------------------------------------------------------------------
+     3 · SEMANTIC ROLE TOKENS — what components should reference.
+     Mapped to BMO values where defined; falls back to Fluent 2.
+     ------------------------------------------------------------------ */
+
+  /* Surfaces */
+  --surface-canvas:         var(--bmo-white);       /* app default */
+  --surface-subtle:         var(--bmo-albicant);    /* secondary panels */
+  --surface-raised:         var(--f2-white);        /* cards */
+  --surface-input:          var(--f2-white);
+  --surface-selected-tint:  var(--f2-brand-tint-50);
+
+  /* Visual-interest surface tints — soft, low-saturation section grounds.
+     Additive: for richer landing/home surfaces. Solid only (no gradients). */
+  --surface-tint-neutral:   #F4F6F8;   /* cool neutral band */
+  --surface-tint-blue:      #EDF3F9;   /* pale blue band */
+  --surface-tint-sky:       #E4EEF6;   /* slightly deeper hero band */
+  --surface-image-ph:       #E9EDF1;   /* image placeholder ground */
+
+  /* Foreground (text) */
+  --fg-primary:             var(--bmo-slate);
+  --fg-secondary:           var(--bmo-granite);
+  --fg-disabled:            var(--f2-grey-74);
+  --fg-on-accent:           var(--bmo-white);
+  --fg-accent:              var(--bmo-blue);
+  --fg-accent-hover:        var(--bmo-blue-hover);
+  --fg-danger:              var(--bmo-negative);
+  --fg-success:             var(--bmo-positive);
+
+  /* Strokes */
+  --stroke-divider:         var(--bmo-light-grey);
+  --stroke-control:         var(--f2-grey-74);
+  --stroke-control-strong:  var(--bmo-granite);
+  --stroke-focus:           var(--bmo-blue-focus);
+  --stroke-accent:          var(--bmo-blue);
+
+  /* Interactive */
+  --accent-rest:            var(--bmo-blue);
+  --accent-hover:           var(--bmo-blue-hover);
+  --accent-pressed:         #003758;                /* darker Midnight */
+  --accent-focus-ring:      var(--bmo-blue-focus);
+
+  /* Feedback foregrounds + soft surface tints — used by badges, message
+     bars, status pills. Foregrounds carry contrast; tints are the quiet
+     ground behind them. Solid, low saturation (no gradients). */
+  --fg-info:                var(--bmo-blue-hover);   /* #005587 */
+  --fg-warning:             #8A6D00;
+  --fg-neutral:             var(--f2-grey-26);       /* #424242 */
+  --fg-danger-hover:        #A21B1B;                 /* darker negative — destructive hover/active */
+  --fg-success-on-dark:     #5EE36B;                 /* success glyph on the dark toast ground */
+  --surface-info-tint:      #EBF3FC;
+  --surface-success-tint:   #E7F4E9;
+  --surface-warning-tint:   #FFF6E1;
+  --surface-danger-tint:    #FBE6E6;
+  --surface-neutral-tint:   var(--f2-grey-94);       /* #F0F0F0 */
+
+  /* Feedback-tint borders — the slightly deeper edge on a message bar's
+     soft ground. One per semantic; consumed only by .msgbar--*. */
+  --stroke-info-tint:       #CFE4F7;
+  --stroke-success-tint:    #C8E6CD;
+  --stroke-warning-tint:    #F0DEA6;
+  --stroke-danger-tint:     #F1C9C9;
+  --scrim:                  rgba(0, 25, 40, .4);     /* dialog/sheet backdrop (Slate @ 40%) */
+
+
+  /* ------------------------------------------------------------------
+     4 · SPACING — Fluent 2 4px ramp
+     ------------------------------------------------------------------ */
+  --space-0:    0px;
+  --space-20:   2px;
+  --space-40:   4px;
+  --space-60:   6px;
+  --space-80:   8px;
+  --space-100:  10px;
+  --space-120:  12px;
+  --space-160:  16px;
+  --space-200:  20px;
+  --space-240:  24px;
+  --space-280:  28px;
+  --space-320:  32px;
+  --space-360:  36px;
+  --space-400:  40px;
+  --space-480:  48px;
+  --space-520:  52px;
+  --space-560:  56px;
+
+
+  /* ------------------------------------------------------------------
+     5 · CORNER RADIUS — Fluent 2
+     ------------------------------------------------------------------ */
+  --radius-none:    0;
+  --radius-small:   2px;
+  --radius-medium:  4px;   /* DEFAULT — buttons, inputs */
+  --radius-large:   8px;   /* large buttons, cards */
+  --radius-xlarge:  12px;  /* popovers, sheets */
+  --radius-circle:  50%;
+
+
+  /* ------------------------------------------------------------------
+     6 · STROKE THICKNESS — Fluent 2
+     ------------------------------------------------------------------ */
+  --stroke-thin:     1px;
+  --stroke-thick:    2px;
+  --stroke-thicker:  3px;
+  --stroke-thickest: 4px;
+
+
+  /* ------------------------------------------------------------------
+     7 · ELEVATION — Fluent 2 shadow ramp (light mode)
+     Formula: blur=n, y=0.5n, 14% + 14% opacity for low elevation.
+     For embedded SharePoint apps stay at shadow4–shadow8.
+     ------------------------------------------------------------------ */
+  --shadow-2:  0 0 2px rgba(0,0,0,.12), 0 1px 2px rgba(0,0,0,.14);
+  --shadow-4:  0 0 2px rgba(0,0,0,.12), 0 2px 4px rgba(0,0,0,.14);
+  --shadow-8:  0 0 2px rgba(0,0,0,.12), 0 4px 8px rgba(0,0,0,.14);
+  --shadow-16: 0 0 2px rgba(0,0,0,.12), 0 8px 16px rgba(0,0,0,.14);
+  --shadow-28: 0 0 8px rgba(0,0,0,.20), 0 14px 28px rgba(0,0,0,.24);
+  --shadow-64: 0 0 8px rgba(0,0,0,.20), 0 32px 64px rgba(0,0,0,.24);
+
+
+  /* ------------------------------------------------------------------
+     8 · TYPOGRAPHY — Fluent 2 web ramp on Segoe UI
+     Used at the sizes from BMO Intranet ramp where they diverge.
+     ------------------------------------------------------------------ */
+  --font-family:        "Segoe UI", "Segoe UI Web (West European)",
+                        -apple-system, BlinkMacSystemFont,
+                        "Helvetica Neue", Arial, sans-serif;
+  --font-family-mono:   Consolas, "Courier New", monospace;
+
+  --weight-regular:     400;
+  --weight-semibold:    600;
+  --weight-bold:        700;
+
+  /* Fluent 2 web type ramp */
+  --type-caption2:        400 10px/14px var(--font-family);
+  --type-caption2-strong: 600 10px/14px var(--font-family);
+  --type-caption1:        400 12px/16px var(--font-family);
+  --type-caption1-strong: 600 12px/16px var(--font-family);
+  --type-body1:           400 14px/20px var(--font-family);   /* SharePoint baseline */
+  --type-body1-strong:    600 14px/20px var(--font-family);
+  --type-body2:           400 16px/22px var(--font-family);   /* BMO intranet body */
+  --type-body2-strong:    600 16px/22px var(--font-family);
+  --type-subtitle2:       600 16px/22px var(--font-family);
+  --type-subtitle1:       600 20px/26px var(--font-family);
+  --type-title3:          600 24px/32px var(--font-family);
+  --type-title2:          600 28px/36px var(--font-family);
+  --type-title1:          600 32px/40px var(--font-family);
+  --type-large-title:     600 40px/52px var(--font-family);
+  --type-display:         600 68px/92px var(--font-family);
+
+
+  /* ------------------------------------------------------------------
+     9 · MOTION — Fluent 2 durations + curves.
+     Functional, not decorative. Honor prefers-reduced-motion always.
+     ------------------------------------------------------------------ */
+  --motion-fast:    100ms;   /* @kind other */
+  --motion-normal:  160ms;   /* @kind other */
+  --motion-slow:    250ms;   /* @kind other */
+  --motion-reveal:  550ms;   /* @kind other */
+  --ease-out:       cubic-bezier(0, 0, .2, 1);    /* @kind other */
+  --ease-in:        cubic-bezier(.4, 0, 1, 1);    /* @kind other */
+  --ease-in-out:    cubic-bezier(.4, 0, .2, 1);   /* @kind other */
+  --reveal-rise:    14px;    /* reveal-on-scroll travel */
+  --lift-rise:      3px;     /* card hover-lift travel  */
+}
+
+
+/* =====================================================================
+   Semantic element styles — drop-in defaults
+   These reflect BMO's intranet ramp (H1–H3 Regular, H4–H6 Bold)
+   layered onto Fluent 2 sizing.
+   ===================================================================== */
+
+html, body {
+  font-family: var(--font-family);
+  color: var(--fg-primary);
+  background: var(--surface-canvas);
+  font-size: 16px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, .h1 {
+  font: var(--weight-regular) 26px/1.4 var(--font-family);
+  color: var(--fg-primary);
+  margin: 0;
+}
+h2, .h2 {
+  font: var(--weight-regular) 24px/1.4 var(--font-family);
+  color: var(--fg-primary);
+  margin: 0;
+}
+h3, .h3 {
+  font: var(--weight-regular) 18px/1.4 var(--font-family);
+  color: var(--fg-primary);
+  margin: 0;
+}
+h4, .h4 {
+  font: var(--weight-bold) 16px/1.4 var(--font-family);
+  color: var(--fg-primary);
+  margin: 0;
+}
+h5, .h5 {
+  font: var(--weight-bold) 14px/1.4 var(--font-family);
+  color: var(--fg-primary);
+  margin: 0;
+}
+h6, .h6 {
+  font: var(--weight-bold) 12px/1.4 var(--font-family);
+  color: var(--fg-primary);
+  margin: 0;
+}
+
+p { margin: 0; }
+small, .caption {
+  font: 400 12px/1.4 var(--font-family);
+  color: var(--fg-secondary);
+}
+
+a {
+  color: var(--fg-accent);
+  text-decoration: none;
+}
+a:hover { text-decoration: underline; }
+a:focus-visible { color: var(--bmo-red); outline: none; }  /* BMO-approved: red focus on links */
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--stroke-divider);
+  margin: var(--space-160) 0;
+}
+
+code, .mono {
+  font-family: var(--font-family-mono);
+  font-size: 13px;
+  background: var(--f2-grey-94);
+  border-radius: var(--radius-small);
+  padding: 1px 4px;
+}
+
+
+/* =====================================================================
+   Visual-interest utilities — opt-in, additive. Drop-in classes for the
+   richer landing/home surfaces. The simpler base (plain white cards,
+   no motion) stays the default; reach for these when a surface needs
+   more engagement. Canonical usage: advanced-ui-example.html.
+   ===================================================================== */
+
+/* Striped image placeholder. Put a .lbl inside to caption what belongs
+   there ("team photo · 1040×680"). Swap for a real <img>/background later. */
+.imgph {
+  position: relative;
+  background: var(--surface-image-ph);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.imgph::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(135deg,
+    transparent 0 11px, rgba(0, 25, 40, .04) 11px 12px);
+}
+.imgph > .lbl {
+  position: relative;
+  z-index: 1;
+  font: 400 11px/1.4 var(--font-family-mono);
+  color: var(--fg-secondary);
+  letter-spacing: .03em;
+  background: rgba(255, 255, 255, .78);
+  padding: 4px 9px;
+  border-radius: var(--radius-small);
+  border: 1px solid var(--stroke-divider);
+}
+
+/* Real-image wrapper — the counterpart to .imgph. Crops any <img> to the
+   box with object-fit:cover. Use inside .card__media, .feature__media, or
+   on its own for a hero. Swap in licensed photography for production. */
+.photo {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-image-ph);
+}
+.photo > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Hover lift for interactive cards. Rises and deepens elevation. */
+.lift {
+  transition: transform var(--motion-normal) var(--ease-out),
+              box-shadow var(--motion-normal) var(--ease-out),
+              border-color var(--motion-normal) var(--ease-out);
+}
+.lift:hover {
+  transform: translateY(calc(-1 * var(--lift-rise)));
+  box-shadow: var(--shadow-16);
+  border-color: var(--f2-grey-82);
+}
+.lift:focus-visible {
+  outline: 2px solid var(--stroke-focus);
+  outline-offset: 2px;
+}
+
+/* Reveal-on-scroll. Base state is VISIBLE so print, no-JS, and
+   reduced-motion always show content. JS adds .is-in to play it;
+   the hidden start-state only exists when motion is allowed. */
+@media (prefers-reduced-motion: no-preference) {
+  .reveal {
+    opacity: 0;
+    transform: translateY(var(--reveal-rise));
+    transition: opacity var(--motion-reveal) var(--ease-out),
+                transform var(--motion-reveal) var(--ease-out);
+  }
+  .reveal.is-in { opacity: 1; transform: none; }
+}

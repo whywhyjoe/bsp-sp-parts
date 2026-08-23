@@ -1,0 +1,1022 @@
+/*! BMO SharePoint Design System · v1.0.0 · components.css */
+/* =====================================================================
+   BMO SharePoint Design System — Component layer
+   ---------------------------------------------------------------------
+   Real, drop-in component classes built ENTIRELY from the tokens in
+   colors_and_type.css. No build step, no JS framework required: link
+   this file after colors_and_type.css and write the documented markup.
+   Wire behaviour with Alpine (x-data / x-on / x-show / x-model).
+
+       <link rel="stylesheet" href="colors_and_type.css">
+       <link rel="stylesheet" href="components.css">
+
+   Every value here is a var(--token). If you need a value this file
+   doesn't expose, reach for a token — never a raw hex or off-ramp px.
+   Canonical rendered reference: Components.html.
+   ===================================================================== */
+
+
+/* ---------------------------------------------------------------------
+   Icon — inline SVG via the canonical sprite (fluent-basic-icons.svg). Inherits
+   text color via currentColor; sizes to 1.25em, or pin with a helper.
+   Two equivalent forms resolve to the same ic-fluent-* symbol:
+       no-JS :  <svg class="icon icon--16"><use href="#ic-fluent-home-24-regular"/></svg>
+       sugar :  <fluent-icon name="home-24-regular" class="icon--16"></fluent-icon>
+   Inline fluent-basic-icons.svg once per page so #id refs resolve same-document.
+   Use the size helpers for the sanctioned sizes (12/16/20/24/28/48).
+
+   These helpers are geometry only — no sprite or currentColor dependency —
+   so they apply identically to an <img> pointing at a standalone SVG file.
+   That is how the Abacus icons are used (TECHNICAL-REFERENCE §6, Form 4):
+       url   :  <img class="icon icon--24" src="abacus-icons/add-24.svg" alt="">
+   28 and 48 exist to cover the Abacus ladder (16/24/28/48).
+   --------------------------------------------------------------------- */
+.icon { width: 1.25em; height: 1.25em; flex: none; vertical-align: -0.18em; }
+.icon--12 { width: 12px; height: 12px; }
+.icon--16 { width: 16px; height: 16px; }
+.icon--20 { width: 20px; height: 20px; }
+.icon--24 { width: 24px; height: 24px; }
+.icon--28 { width: 28px; height: 28px; }
+.icon--32 { width: 32px; height: 32px; }
+.icon--48 { width: 48px; height: 48px; }
+.icon--64 { width: 64px; height: 64px; }
+
+
+/* ---------------------------------------------------------------------
+   Button
+       <button class="btn btn--primary">Submit request</button>
+       <button class="btn btn--secondary"><svg class="icon icon--16">…</svg> Filter</button>
+   Variants: primary · secondary · tertiary · subtle · ghost · danger
+   Sizes:    btn--sm · (default) · btn--lg
+   --------------------------------------------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-60);
+  height: 32px;
+  padding: 0 var(--space-160);
+  font: var(--type-body1-strong);
+  border: var(--stroke-thin) solid transparent;
+  border-radius: var(--radius-medium);
+  background: transparent;
+  color: var(--fg-primary);
+  white-space: nowrap;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: background var(--motion-normal) var(--ease-out),
+              border-color var(--motion-normal) var(--ease-out),
+              color var(--motion-normal) var(--ease-out);
+}
+.btn:focus-visible { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: 1px; }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; pointer-events: none; }
+.btn .icon { width: 16px; height: 16px; }
+
+.btn--sm { height: 26px; padding: 0 var(--space-120); font: var(--type-caption1-strong); }
+.btn--lg { height: 40px; padding: 0 var(--space-200); }
+
+.btn--primary   { background: var(--accent-rest); color: var(--fg-on-accent); border-color: var(--accent-rest); }
+.btn--primary:hover   { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn--primary:active  { background: var(--accent-pressed); border-color: var(--accent-pressed); }
+
+.btn--secondary { background: var(--bmo-white); color: var(--accent-rest); border-color: var(--accent-rest); }
+.btn--secondary:hover { color: var(--accent-hover); border-color: var(--accent-hover); }
+.btn--secondary:active { color: var(--accent-pressed); border-color: var(--accent-pressed); }
+
+.btn--tertiary  { background: transparent; color: var(--accent-rest); }
+.btn--tertiary:hover  { background: var(--f2-grey-96); }
+
+.btn--subtle    { background: var(--bmo-white); color: var(--fg-primary); border-color: var(--stroke-control); }
+.btn--subtle:hover    { background: var(--f2-grey-96); }
+
+.btn--ghost     { background: transparent; color: var(--fg-primary); }
+.btn--ghost:hover     { background: var(--f2-grey-96); }
+
+.btn--danger    { background: var(--bmo-white); color: var(--fg-danger); border-color: var(--fg-danger); }
+.btn--danger:hover    { color: var(--fg-danger-hover); border-color: var(--fg-danger-hover); }
+
+.btn--block { width: 100%; }
+.btn--start { justify-content: flex-start; }
+
+
+/* Icon-only button (toolbar actions, close, overflow). 32x32 hit target. */
+.icon-btn {
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: var(--radius-medium);
+  background: transparent; color: var(--fg-primary);
+  cursor: pointer;
+  transition: background var(--motion-normal) var(--ease-out), color var(--motion-normal) var(--ease-out);
+}
+.icon-btn:hover { background: var(--f2-grey-96); }
+.icon-btn:focus-visible { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: 1px; }
+.icon-btn[aria-pressed="true"], .icon-btn.is-active { background: var(--surface-selected-tint); color: var(--accent-rest); }
+.icon-btn .icon { width: 18px; height: 18px; }
+
+
+/* ---------------------------------------------------------------------
+   Form field — label + control + hint/error
+       <div class="field">
+         <label class="field__label">Subject <span class="field__req">*</span></label>
+         <input class="input" placeholder="…">
+         <p class="field__hint">Optional context</p>
+       </div>
+   --------------------------------------------------------------------- */
+.field { display: flex; flex-direction: column; gap: var(--space-40); }
+.field__label { font: var(--type-caption1-strong); color: var(--fg-primary); }
+.field__req   { color: var(--fg-danger); }
+.field__hint  { margin: 0; font: var(--type-caption1); color: var(--fg-secondary); }
+.field__error { margin: 0; font: var(--type-caption1); color: var(--fg-danger); }
+
+
+/* Text input, select, textarea — shared control surface */
+.input, .select, .textarea {
+  width: 100%;
+  font: var(--type-body1);
+  color: var(--fg-primary);
+  background: var(--surface-input);
+  border: var(--stroke-thin) solid var(--stroke-control);
+  border-radius: var(--radius-medium);
+  box-sizing: border-box;
+  transition: border-color var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out);
+}
+.input, .select { height: 32px; padding: 0 var(--space-100); }
+.textarea { padding: var(--space-80) var(--space-100); min-height: 72px; resize: vertical; line-height: 20px; }
+.input::placeholder, .textarea::placeholder { color: var(--fg-secondary); }
+.input:focus, .select:focus, .textarea:focus {
+  outline: none;
+  border-color: var(--stroke-accent);
+  box-shadow: 0 0 0 1px var(--stroke-accent);
+}
+.input:disabled, .select:disabled, .textarea:disabled { background: var(--f2-grey-94); color: var(--fg-disabled); cursor: not-allowed; }
+.input[aria-invalid="true"], .textarea[aria-invalid="true"] { border-color: var(--fg-danger); }
+.input[aria-invalid="true"]:focus, .textarea[aria-invalid="true"]:focus { box-shadow: 0 0 0 1px var(--fg-danger); }
+
+/* Native select chevron */
+.select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20' fill='none' stroke='%23646C76' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 8l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-80) center;
+  padding-right: var(--space-320);
+}
+
+/* Input group — icon (and/or suffix) sharing the control border.
+       <div class="input-group">
+         <svg class="icon icon--16 input-group__icon"><use href="…#ic-search"/></svg>
+         <input class="input-group__field" placeholder="Search requests">
+       </div> */
+.input-group {
+  display: flex; align-items: center; gap: var(--space-60);
+  height: 32px; padding: 0 var(--space-100);
+  background: var(--surface-input);
+  border: var(--stroke-thin) solid var(--stroke-control);
+  border-radius: var(--radius-medium);
+  transition: border-color var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out);
+}
+.input-group:focus-within { border-color: var(--stroke-accent); box-shadow: 0 0 0 1px var(--stroke-accent); }
+.input-group__icon  { color: var(--fg-secondary); }
+.input-group__field { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font: var(--type-body1); color: var(--fg-primary); }
+.input-group__field::placeholder { color: var(--fg-secondary); }
+
+
+/* Checkbox + radio — accent-colored native controls keep it lean */
+.check, .radio {
+  display: inline-flex; align-items: center; gap: var(--space-80);
+  font: var(--type-body1); color: var(--fg-primary); cursor: pointer; user-select: none;
+}
+.check input, .radio input { accent-color: var(--accent-rest); width: 16px; height: 16px; margin: 0; cursor: pointer; }
+
+
+/* Toggle switch */
+.switch { position: relative; display: inline-flex; align-items: center; gap: var(--space-80); cursor: pointer; user-select: none; }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch__track {
+  width: 40px; height: 20px; border-radius: 999px;
+  background: var(--f2-grey-74); position: relative; flex: none;
+  transition: background var(--motion-normal) var(--ease-out);
+}
+.switch__track::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: var(--radius-circle); background: var(--bmo-white);
+  box-shadow: var(--shadow-2);
+  transition: transform var(--motion-normal) var(--ease-out);
+}
+.switch input:checked + .switch__track { background: var(--accent-rest); }
+.switch input:checked + .switch__track::after { transform: translateX(20px); }
+.switch input:focus-visible + .switch__track { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: 2px; }
+
+
+/* Choice chips — a single-select row (request type, segment) */
+.chip-row { display: flex; flex-wrap: wrap; gap: var(--space-80); }
+.chip {
+  padding: var(--space-60) var(--space-120);
+  font: var(--type-caption1);
+  border: var(--stroke-thin) solid var(--stroke-control);
+  border-radius: var(--radius-medium);
+  background: var(--bmo-white); color: var(--fg-primary);
+  cursor: pointer; white-space: nowrap;
+  transition: border-color var(--motion-fast) var(--ease-out), background var(--motion-fast) var(--ease-out);
+}
+.chip:hover { border-color: var(--stroke-control-strong); }
+.chip[aria-pressed="true"], .chip.is-active {
+  border-color: var(--accent-rest); background: var(--surface-selected-tint);
+  color: var(--accent-rest); font-weight: var(--weight-semibold);
+}
+.chip:focus-visible { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: 1px; }
+
+
+/* ---------------------------------------------------------------------
+   Badge — semantic status pill. Tag — neutral metadata pill.
+       <span class="badge badge--info">Pending</span>
+       <span class="tag">Expense</span>
+   --------------------------------------------------------------------- */
+.badge {
+  display: inline-flex; align-items: center; gap: var(--space-40);
+  height: 20px; padding: 0 var(--space-80);
+  border-radius: 10px;
+  font: var(--type-caption1-strong);
+  white-space: nowrap;
+  background: var(--surface-neutral-tint); color: var(--fg-neutral);
+}
+.badge--info    { background: var(--surface-info-tint);    color: var(--fg-info); }
+.badge--success { background: var(--surface-success-tint); color: var(--fg-success); }
+.badge--warning { background: var(--surface-warning-tint); color: var(--fg-warning); }
+.badge--danger  { background: var(--surface-danger-tint);  color: var(--fg-danger); }
+.badge--strong  { background: var(--accent-rest); color: var(--fg-on-accent); }
+
+.tag {
+  display: inline-flex; align-items: center; gap: var(--space-40);
+  height: 22px; padding: 0 var(--space-80);
+  border: var(--stroke-thin) solid var(--stroke-divider); border-radius: var(--radius-medium);
+  font: var(--type-caption1); color: var(--fg-secondary); background: var(--bmo-white);
+  white-space: nowrap;
+}
+/* Selected metadata tag (e.g. an applied filter) */
+.tag.is-active { border-color: var(--accent-rest); background: var(--surface-selected-tint); color: var(--accent-rest); }
+/* Removable tag — trailing dismiss affordance. <button class="tag__remove">…dismiss icon…</button> */
+.tag__remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; margin: 0 -2px 0 var(--space-20);
+  border: 0; border-radius: var(--radius-circle);
+  background: transparent; color: var(--fg-secondary); cursor: pointer;
+}
+.tag__remove:hover { background: var(--f2-grey-92); color: var(--fg-primary); }
+.tag__remove:focus-visible { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: 1px; }
+.tag__remove .icon { width: 12px; height: 12px; }
+
+
+/* Status dot */
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: var(--radius-circle); background: var(--f2-grey-74); flex: none; }
+.dot--10 { width: 10px; height: 10px; }
+.dot--success { background: var(--fg-success); }
+.dot--warning { background: var(--f2-yellow); }
+.dot--danger  { background: var(--fg-danger); }
+.dot--info    { background: var(--accent-rest); }
+.dot--neutral { background: var(--f2-grey-74); }
+
+
+/* Avatar — set initials as text, background via inline style or a palette class.
+       <span class="avatar" style="background:#0079C1">SC</span> */
+.avatar {
+  width: 28px; height: 28px;
+  border-radius: var(--radius-circle);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent-rest); color: var(--bmo-white);
+  font: var(--weight-semibold) 11px/1 var(--font-family);
+  flex: none; overflow: hidden;
+}
+/* Size ramp — a dense-UI slice of the Fluent 2 avatar ramp. Literal px, no
+   token (the ramp isn't tokenized); initials font-size tracks ~0.4× the box. */
+.avatar--20 { width: 20px; height: 20px; font-size: 8px;  } /* flush w/ body1 line-box (14/20) */
+.avatar--22 { width: 22px; height: 22px; font-size: 9px;  } /* flush w/ body2 line-box (16/22) — inline-with-text size */
+.avatar--28 { width: 28px; height: 28px; font-size: 11px; } /* default — list rows, toolbars */
+.avatar--32 { width: 32px; height: 32px; font-size: 13px; }
+.avatar--40 { width: 40px; height: 40px; font-size: 16px; }
+.avatar--48 { width: 48px; height: 48px; font-size: 19px; } /* identity / detail panels */
+.avatar--64 { width: 64px; height: 64px; font-size: 26px; } /* profile hero */
+
+/* Avatar with a presence badge. Wrap the avatar so the dot can anchor.
+       <span class="avatar-wrap"><span class="avatar">SC</span>
+         <span class="avatar__presence avatar__presence--success"></span></span> */
+.avatar-wrap { position: relative; display: inline-flex; flex: none; }
+.avatar__presence {
+  position: absolute; right: -1px; bottom: -1px;
+  width: 10px; height: 10px; border-radius: var(--radius-circle);
+  background: var(--f2-grey-74); box-shadow: 0 0 0 2px var(--surface-canvas);
+}
+.avatar__presence--success { background: var(--fg-success); }
+.avatar__presence--warning { background: var(--f2-yellow); }
+.avatar__presence--danger  { background: var(--fg-danger); }
+.avatar__presence--away    { background: var(--f2-grey-58); }
+
+
+/* Divider */
+.divider { height: 1px; width: 100%; background: var(--stroke-divider); border: 0; }
+.divider--v { width: 1px; height: 100%; }
+
+
+/* ---------------------------------------------------------------------
+   Card — base surface. Composition parts mix freely (see advanced-ui-example.html).
+       <article class="card">…</article>     add .lift for hover-rise
+   --------------------------------------------------------------------- */
+.card {
+  background: var(--surface-raised);
+  border: var(--stroke-thin) solid var(--stroke-divider);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-4);
+  padding: var(--space-160) var(--space-200);
+}
+.card--flush { padding: 0; overflow: hidden; }      /* for grids/media that bleed to the edge */
+.card__eyebrow { font: var(--type-caption1-strong); letter-spacing: .06em; text-transform: uppercase; color: var(--accent-rest); margin: 0 0 var(--space-40); }
+.card__title   { font: var(--type-subtitle2); color: var(--fg-primary); margin: 0; }
+.card__body    { font: var(--type-body1); color: var(--fg-secondary); margin: var(--space-60) 0 0; }
+/* Footer — sits on a full-bleed divider (spans the whole card width, not
+   inset by the padding) with quiet metadata left, one CTA right. */
+.card__footer  { display: flex; align-items: center; justify-content: space-between; gap: var(--space-120); margin: var(--space-160) calc(-1 * var(--space-200)) calc(-1 * var(--space-160)); padding: var(--space-120) var(--space-200); border-top: var(--stroke-thin) solid var(--stroke-divider); }
+.card__meta    { display: inline-flex; align-items: center; gap: var(--space-60); font: var(--type-caption1); color: var(--fg-secondary); }
+.card__meta .icon { width: 14px; height: 14px; color: var(--fg-secondary); }
+/* Footer CTA — one quiet directional action; the arrow nudges on hover.
+       <a class="card__cta" href="…">Read <svg class="icon icon--16"><use href="…#ic-arrow-right"/></svg></a> */
+.card__cta { display: inline-flex; align-items: center; gap: var(--space-40); font: var(--type-body1-strong); color: var(--accent-rest); text-decoration: none; white-space: nowrap; }
+.card__cta:hover { color: var(--accent-hover); text-decoration: none; }
+.card__cta .icon { width: 16px; height: 16px; transition: transform var(--motion-normal) var(--ease-out); }
+.card__cta:hover .icon { transform: translateX(3px); }
+.card__icon-tile {
+  width: 40px; height: 40px; border-radius: var(--radius-medium);
+  background: var(--surface-tint-blue); color: var(--accent-rest);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.card__icon-tile .icon { width: 20px; height: 20px; }
+.card__icon-tile--sm { width: 32px; height: 32px; border-radius: var(--radius-large); }
+.card__icon-tile--sm .icon { width: 18px; height: 18px; }
+
+/* Media-bearing cards. Pair .card--flush (kills the base padding) with a
+   .card__content wrapper for the text, and a .card__media (wrap an <img>,
+   or an .imgph placeholder) for the image.
+       <article class="card card--flush lift">
+         <div class="card__media card__media--top"><img src="…" alt="…"></div>
+         <div class="card__content"> …eyebrow / title / body / footer… </div>
+       </article>
+   For an editorial row, add .card--row and use .card__media--left. */
+.card__content { padding: var(--space-160) var(--space-200); display: flex; flex-direction: column; }
+.card__content .card__footer { margin-top: auto; }   /* footer sinks to the bottom */
+.card--row { display: flex; align-items: stretch; }
+.card--row .card__content { flex: 1; }
+.card__media {
+  position: relative; overflow: hidden;
+  background: var(--surface-image-ph);
+}
+.card__media > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.card__media--top  { height: 152px; }                          /* full-width banner cap */
+.card__media--left { width: 44%; min-height: 200px; flex: none; }  /* full-height left rail */
+
+
+/* Stat / KPI card */
+.stat { display: flex; flex-direction: column; gap: var(--space-40); }
+/* Optional header row: a small tinted icon tile beside the label. Pair with
+   .card__icon-tile--sm for the engagement-surface stat treatment. */
+.stat__head { display: flex; align-items: center; gap: var(--space-100); margin-bottom: var(--space-40); }
+.stat__head .stat__label { margin: 0; }
+.stat__label { display: flex; align-items: center; gap: var(--space-80); font: var(--type-caption1); color: var(--fg-secondary); }
+.stat__value { font: var(--type-title2); color: var(--fg-primary); }
+.stat__row   { display: flex; align-items: baseline; gap: var(--space-80); }
+.stat__delta { display: inline-flex; align-items: center; gap: 2px; font: var(--type-caption1-strong); }
+.stat__delta--up   { color: var(--fg-success); }
+.stat__delta--down { color: var(--fg-danger); }
+.stat__delta .icon { width: 12px; height: 12px; }
+.stat__sub   { font: var(--type-caption1); color: var(--fg-secondary); }
+
+
+/* ---------------------------------------------------------------------
+   Tabs — underline style. Mark the current with .is-active / aria-selected.
+   --------------------------------------------------------------------- */
+.tabs { display: flex; gap: 0; border-bottom: var(--stroke-thin) solid var(--stroke-divider); }
+.tab {
+  display: inline-flex; align-items: center; gap: var(--space-60);
+  padding: var(--space-120) var(--space-160);
+  margin-bottom: -1px;
+  background: transparent; border: none; cursor: pointer;
+  border-bottom: var(--stroke-thick) solid transparent;
+  font: var(--type-body1); color: var(--fg-primary);
+  transition: color var(--motion-fast) var(--ease-out), border-color var(--motion-fast) var(--ease-out);
+}
+.tab:hover { color: var(--accent-hover); }
+.tab .icon { width: 16px; height: 16px; }
+.tab.is-active, .tab[aria-selected="true"] { color: var(--accent-rest); border-bottom-color: var(--accent-rest); font-weight: var(--weight-semibold); }
+.tab:focus-visible { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: -2px; border-radius: var(--radius-small); }
+
+
+/* ---------------------------------------------------------------------
+   Message bar — inline feedback band. info · success · warning · danger
+       <div class="msgbar msgbar--warning" role="status">
+         <svg class="icon icon--20 msgbar__icon"><use href="…#ic-warn"/></svg>
+         <div class="msgbar__body"><strong>Returned.</strong> Update and resubmit.</div>
+         <button class="icon-btn msgbar__close">…</button>
+       </div>
+   --------------------------------------------------------------------- */
+.msgbar {
+  display: flex; align-items: flex-start; gap: var(--space-100);
+  padding: var(--space-100) var(--space-120);
+  border: var(--stroke-thin) solid var(--stroke-divider);
+  border-radius: var(--radius-medium);
+  font: var(--type-body1); color: var(--fg-primary);
+  background: var(--surface-subtle);
+}
+.msgbar__icon { margin-top: 1px; color: var(--fg-secondary); }
+.msgbar__body { flex: 1; min-width: 0; }
+.msgbar__close { margin: -6px -4px -6px 0; }
+.msgbar--info    { background: var(--surface-info-tint);    border-color: var(--stroke-info-tint); }
+.msgbar--info    .msgbar__icon { color: var(--fg-info); }
+.msgbar--success { background: var(--surface-success-tint); border-color: var(--stroke-success-tint); }
+.msgbar--success .msgbar__icon { color: var(--fg-success); }
+.msgbar--warning { background: var(--surface-warning-tint); border-color: var(--stroke-warning-tint); }
+.msgbar--warning .msgbar__icon { color: var(--fg-warning); }
+.msgbar--danger  { background: var(--surface-danger-tint);  border-color: var(--stroke-danger-tint); }
+.msgbar--danger  .msgbar__icon { color: var(--fg-danger); }
+
+
+/* ---------------------------------------------------------------------
+   Toolbar / command bar — actions row above content
+   --------------------------------------------------------------------- */
+.toolbar {
+  display: flex; align-items: center; gap: var(--space-80);
+  padding: var(--space-80) var(--space-120);
+  background: var(--surface-subtle);
+  border-bottom: var(--stroke-thin) solid var(--stroke-divider);
+}
+.toolbar__title { font: var(--type-body1-strong); color: var(--fg-primary); }
+.toolbar__spacer { flex: 1; }
+
+
+/* ---------------------------------------------------------------------
+   Data grid — dense table. Use a real <table> for semantics.
+       <table class="grid"> <thead>…</thead> <tbody>…</tbody> </table>
+   Sortable headers: add .grid__sort and an arrow icon; mark current row
+   with .is-selected.
+   --------------------------------------------------------------------- */
+.grid { width: 100%; border-collapse: collapse; font: var(--type-body1); }
+.grid thead th {
+  text-align: left; padding: var(--space-100) var(--space-120);
+  font: var(--type-caption1-strong); letter-spacing: .04em; text-transform: uppercase;
+  color: var(--fg-secondary); border-bottom: var(--stroke-thin) solid var(--stroke-divider);
+  white-space: nowrap; user-select: none;
+}
+.grid th.num, .grid td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.grid__sort { cursor: pointer; }
+.grid__sort .icon { width: 12px; height: 12px; vertical-align: -1px; margin-left: 2px; color: var(--fg-secondary); }
+.grid tbody td { padding: var(--space-100) var(--space-120); border-bottom: var(--stroke-thin) solid var(--stroke-divider); color: var(--fg-primary); vertical-align: middle; }
+.grid tbody tr { cursor: pointer; }
+.grid tbody tr:hover td { background: var(--f2-grey-98); }
+.grid tbody tr.is-selected td { background: var(--surface-selected-tint); }
+.grid tbody tr.is-selected td:first-child { box-shadow: inset 3px 0 0 var(--accent-rest); }
+.grid .mono { font-family: var(--font-family-mono); font-size: 13px; color: var(--fg-secondary); background: none; padding: 0; }
+.grid .cell-secondary { color: var(--fg-secondary); }
+
+
+/* ---------------------------------------------------------------------
+   Side panel — master/detail right rail (or filter rail)
+   --------------------------------------------------------------------- */
+.panel {
+  display: flex; flex-direction: column;
+  background: var(--surface-canvas);
+  border-left: var(--stroke-thin) solid var(--stroke-divider);
+  box-shadow: var(--shadow-8);
+  overflow: hidden;
+}
+.panel__head { padding: var(--space-200) var(--space-240) var(--space-160); border-bottom: var(--stroke-thin) solid var(--stroke-divider); }
+.panel__body { flex: 1; overflow: auto; padding: var(--space-200) var(--space-240); }
+.panel__foot { padding: var(--space-120) var(--space-240); border-top: var(--stroke-thin) solid var(--stroke-divider); background: var(--surface-subtle); display: flex; gap: var(--space-80); justify-content: flex-end; }
+.panel__section-label { font: var(--type-caption1-strong); text-transform: uppercase; letter-spacing: .04em; color: var(--fg-secondary); margin: 0 0 var(--space-80); }
+
+/* Key-facts list (label / value rows) */
+.facts { display: grid; grid-template-columns: 110px 1fr; gap: var(--space-100) var(--space-160); font: var(--type-body1); }
+.facts dt { color: var(--fg-secondary); margin: 0; }
+.facts dd { color: var(--fg-primary); margin: 0; }
+
+/* Activity timeline */
+.timeline { display: flex; flex-direction: column; }
+.timeline__item { display: flex; gap: var(--space-120); }
+.timeline__rail { display: flex; flex-direction: column; align-items: center; padding-top: var(--space-40); }
+.timeline__line { width: 1px; flex: 1; background: var(--stroke-divider); margin-top: var(--space-40); min-height: 12px; }
+.timeline__content { flex: 1; padding-bottom: var(--space-160); }
+.timeline__title { font: var(--type-body1); color: var(--fg-primary); }
+.timeline__when  { font: var(--type-caption1); color: var(--fg-secondary); margin-top: 1px; }
+
+
+/* ---------------------------------------------------------------------
+   Dialog / modal — scrim + centered sheet. Toggle with Alpine x-show.
+   --------------------------------------------------------------------- */
+.scrim {
+  position: fixed; inset: 0; z-index: 100;
+  background: var(--scrim);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--space-200);
+}
+.dialog {
+  background: var(--surface-canvas);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-28);
+  width: 100%; max-width: 560px; max-height: 90vh;
+  display: flex; flex-direction: column;
+}
+.dialog__head { padding: var(--space-200) var(--space-240) var(--space-120); display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-120); }
+.dialog__title { font: var(--type-title3); font-weight: var(--weight-regular); color: var(--fg-primary); margin: 0; }
+.dialog__sub   { font: var(--type-caption1); color: var(--fg-secondary); margin-top: var(--space-40); }
+.dialog__body  { padding: var(--space-80) var(--space-240) var(--space-160); overflow: auto; display: flex; flex-direction: column; gap: var(--space-160); }
+.dialog__foot  { padding: var(--space-120) var(--space-240); border-top: var(--stroke-thin) solid var(--stroke-divider); background: var(--surface-subtle); display: flex; gap: var(--space-80); justify-content: flex-end; border-radius: 0 0 var(--radius-large) var(--radius-large); }
+
+/* Dropzone (file attach) */
+.dropzone {
+  border: var(--stroke-thin) dashed var(--stroke-control); border-radius: var(--radius-medium);
+  padding: var(--space-160); text-align: center; background: var(--surface-subtle);
+  color: var(--fg-primary); font: var(--type-body1);
+}
+.dropzone .icon { color: var(--fg-secondary); }
+.dropzone__hint { font: var(--type-caption1); color: var(--fg-secondary); margin-top: var(--space-20); }
+
+
+/* ---------------------------------------------------------------------
+   Toast — transient confirmation, bottom-center
+   --------------------------------------------------------------------- */
+.toast {
+  position: fixed; bottom: var(--space-240); left: 50%; transform: translateX(-50%);
+  z-index: 200;
+  display: flex; align-items: center; gap: var(--space-100);
+  padding: var(--space-100) var(--space-160);
+  background: var(--bmo-slate); color: var(--bmo-white);
+  border-radius: var(--radius-medium); box-shadow: var(--shadow-16);
+  font: var(--type-body1);
+}
+.toast .icon { color: var(--fg-success-on-dark); }
+.toast__close { color: rgba(255,255,255,.7); background: transparent; border: none; cursor: pointer; padding: 0 var(--space-40); display: inline-flex; }
+@media (prefers-reduced-motion: no-preference) {
+  .toast { animation: toast-in var(--motion-normal) var(--ease-out) both; }
+  @keyframes toast-in { from { transform: translate(-50%, 20px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+}
+
+
+/* ---------------------------------------------------------------------
+   Floating action button (FAB) — a persistent primary action that hovers
+   over the content, bottom-right ("New", "Edit"). NOT a native Fluent 2
+   pattern (it's the Material-style floating affordance); added deliberately
+   for the "one thing you do on this page" surfaces. Circular + icon-only by
+   default; add .fab--extended for an icon+label pill. Pin it to the viewport
+   with .fab--fixed, or drop it in a position:relative container without it.
+   Ground is BMO MIDNIGHT (the suite-bar chrome tone), NOT the interactive
+   blue — a floating action must read as distinct from the page's blue links,
+   accents, and chart fills, not blend into them. It also floats on a heavier
+   rest elevation (shadow-28) than any inline control, since it hovers free of
+   the surface.
+       <button class="fab" aria-label="New request"><svg class="icon"><use href="…#ic-fluent-add-24-regular"/></svg></button>
+       <button class="fab fab--extended fab--fixed"><svg class="icon"><use href="…#ic-fluent-edit-24-regular"/></svg> Edit</button>
+   --------------------------------------------------------------------- */
+.fab {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--space-80);
+  width: 48px; height: 48px; padding: 0;
+  border: none; border-radius: var(--radius-circle);
+  background: var(--bmo-chart-midnight); color: var(--bmo-white);
+  font: var(--type-body1-strong);
+  box-shadow: var(--shadow-28);
+  cursor: pointer; white-space: nowrap;
+  transition: background var(--motion-normal) var(--ease-out),
+              box-shadow var(--motion-normal) var(--ease-out),
+              transform var(--motion-normal) var(--ease-out);
+  z-index: 90;
+}
+.fab:hover { background: var(--bmo-slate); box-shadow: var(--shadow-64); transform: translateY(calc(-1 * var(--lift-rise))); }
+.fab:active { background: var(--bmo-slate); transform: none; box-shadow: var(--shadow-28); }
+.fab:focus-visible { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: 2px; }
+.fab .icon { width: 20px; height: 20px; }
+/* Extended — icon + label pill (width follows content) */
+.fab--extended { width: auto; border-radius: 999px; padding: 0 var(--space-160); }
+/* Small — 40px hit target for denser surfaces */
+.fab--sm { width: 40px; height: 40px; }
+.fab--sm .icon { width: 18px; height: 18px; }
+.fab--sm.fab--extended { width: auto; padding: 0 var(--space-120); font: var(--type-caption1-strong); }
+/* Secondary tone — quiet white surface + accent text, a bordered elevation
+   rather than a filled midnight block. */
+.fab--secondary { background: var(--surface-raised); color: var(--accent-rest); border: var(--stroke-thin) solid var(--stroke-divider); }
+.fab--secondary:hover { background: var(--f2-grey-96); color: var(--accent-hover); }
+.fab--secondary:active { background: var(--f2-grey-94); }
+/* Pinned to the viewport, bottom-right — the canonical placement */
+.fab--fixed { position: fixed; right: var(--space-320); bottom: var(--space-320); }
+
+
+/* ---------------------------------------------------------------------
+   Empty state — fact + one action. Never apologetic, never cute.
+   --------------------------------------------------------------------- */
+.empty { padding: var(--space-480) var(--space-160); text-align: center; }
+.empty__title { font: var(--type-body2-strong); color: var(--fg-primary); }
+.empty__hint  { font: var(--type-body1); color: var(--fg-secondary); margin-top: var(--space-40); }
+
+
+/* =====================================================================
+   ENGAGEMENT LAYER — richer landing/home surfaces. Opt-in and additive;
+   the dense app components above stay the default. These pair with the
+   .lift / .reveal / .imgph / .photo utilities in colors_and_type.css and
+   the surface-tint tokens. Canonical usage: advanced-ui-example.html.
+   ===================================================================== */
+
+/* Section ground band — alternating low-saturation tints behind full-width
+   sections. Solid only, never gradients, never a blue fill behind text.
+       <div class="band band--sky"><div class="band__inner"> … </div></div> */
+.band { width: 100%; }
+.band--neutral { background: var(--surface-tint-neutral); }
+.band--blue    { background: var(--surface-tint-blue); }
+.band--sky     { background: var(--surface-tint-sky); }
+.band--white   { background: var(--surface-canvas); }
+.band__inner   { max-width: 1180px; margin: 0 auto; padding: var(--space-520) var(--space-320); }
+
+
+/* Quick-action card — a compact icon shortcut tile. Add .lift for hover.
+       <a class="qcard lift" href="…">
+         <span class="card__icon-tile"><svg class="icon icon--20">…</svg></span>
+         <span class="qcard__title">New request</span>
+         <span class="qcard__desc">Start a fresh claim</span>
+       </a> */
+.qcard {
+  display: flex; flex-direction: column; gap: var(--space-120);
+  padding: var(--space-200);
+  background: var(--surface-raised);
+  border: var(--stroke-thin) solid var(--stroke-divider);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-2);
+  text-decoration: none; color: inherit;
+}
+.qcard__title { font: var(--type-body1-strong); color: var(--fg-primary); }
+.qcard__desc  { font: var(--type-caption1); color: var(--fg-secondary); }
+
+
+/* Feature banner — split image + copy. A larger spotlight than a card;
+   one per section. Image left by default; .feature--media-right flips it.
+       <div class="feature">
+         <div class="feature__media photo"><img src="…" alt="…"></div>
+         <div class="feature__copy"> …eyebrow / h2 / p / ticks / cta… </div>
+       </div> */
+.feature {
+  display: grid;
+  grid-template-columns: .92fr 1.08fr;
+  background: var(--surface-raised);
+  border: var(--stroke-thin) solid var(--stroke-divider);
+  border-radius: var(--radius-large);
+  overflow: hidden;
+  box-shadow: var(--shadow-4);
+}
+.feature--media-right { grid-template-columns: 1.08fr .92fr; }
+.feature--media-right .feature__media { order: 2; }
+.feature__media { min-height: 300px; }
+.feature__copy {
+  display: flex; flex-direction: column; justify-content: center;
+  gap: var(--space-160);
+  padding: var(--space-400);
+}
+.feature__copy .card__eyebrow { margin: 0; }
+.feature__title { font: var(--weight-regular) 28px/36px var(--font-family); letter-spacing: -.01em; color: var(--fg-primary); margin: 0; max-width: 18ch; }
+.feature__lede  { font: var(--type-body2); color: var(--fg-secondary); margin: 0; max-width: 48ch; }
+.feature__ticks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-80); }
+.feature__ticks li { display: flex; align-items: flex-start; gap: var(--space-100); font: var(--type-body1); color: var(--fg-primary); }
+.feature__ticks .icon { color: var(--fg-success); flex: none; margin-top: 1px; }
+
+@media (max-width: 720px) {
+  .feature, .feature--media-right { grid-template-columns: 1fr; }
+  .feature--media-right .feature__media { order: 0; }
+}
+
+
+/* =====================================================================
+   PAGE-SHELL LAYER — promoted from advanced-ui-example.html. The full-width
+   page chrome (suite bar, breadcrumb, hero, section heads) and the
+   centered content shell + grid helpers those sections sit in. All
+   token-built; pair freely with the .band--* grounds above.
+   ===================================================================== */
+
+/* Centered content shell — the max-width column every section aligns to.
+   Use it directly, or use .band__inner inside a full-bleed .band. */
+.l-wrap { max-width: 1180px; margin: 0 auto; padding: 0 var(--space-320); }
+
+/* Section rhythm — vertical padding for a content section inside a band. */
+.l-section { padding: var(--space-520) 0; }
+
+/* Simple responsive column grids for card rows. Collapse to fewer columns
+   on narrow viewports. Gap is the 16/20px engagement rhythm. */
+.l-grid { display: grid; gap: var(--space-200); }
+.l-grid--2 { grid-template-columns: repeat(2, 1fr); }
+.l-grid--3 { grid-template-columns: repeat(3, 1fr); }
+.l-grid--4 { grid-template-columns: repeat(4, 1fr); gap: var(--space-160); }
+@media (max-width: 980px) {
+  .l-grid--2, .l-grid--3, .l-grid--4 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+  .l-grid--2, .l-grid--3, .l-grid--4 { grid-template-columns: 1fr; }
+}
+
+
+/* SharePoint suite bar — the app's top chrome. Midnight ground, white
+   foreground. Mirrors the SharePoint Online shell.
+       <header class="suite"><div class="suite__inner l-wrap"> … </div></header> */
+.suite { background: var(--bmo-chart-midnight); color: var(--bmo-white); height: 48px; }
+.suite__inner { display: flex; align-items: center; gap: var(--space-160); height: 100%; }
+.suite__mark {
+  width: 26px; height: 26px; border-radius: var(--radius-medium);
+  background: var(--bmo-white); color: var(--bmo-chart-midnight);
+  display: inline-flex; align-items: center; justify-content: center;
+  font: var(--weight-bold) 13px/1 var(--font-family); flex: none;
+}
+.suite__app { font: var(--type-body1-strong); color: var(--bmo-white); }
+.suite__divider { width: 1px; height: 20px; background: rgba(255, 255, 255, .28); flex: none; }
+.suite__env { font: var(--type-caption1); color: rgba(255, 255, 255, .72); }
+.suite__spacer { flex: 1; }
+.suite__action {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border: 0; border-radius: var(--radius-medium);
+  background: transparent; color: rgba(255, 255, 255, .85); cursor: pointer;
+}
+.suite__action:hover { background: rgba(255, 255, 255, .14); color: var(--bmo-white); }
+.suite__action:focus-visible { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: 1px; }
+.suite__action .icon { width: 18px; height: 18px; }
+
+
+/* Breadcrumb — quiet location trail. Chevron separators are icons.
+       <nav class="crumbs"><a>…</a><svg class="icon crumbs__sep">…chevron…</svg>… */
+.crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-80); font: var(--type-caption1); color: var(--fg-secondary); }
+.crumbs a { color: var(--fg-secondary); text-decoration: none; }
+.crumbs a:hover { color: var(--accent-rest); text-decoration: none; }
+.crumbs__sep { width: 14px; height: 14px; color: var(--fg-disabled); flex: none; }
+.crumbs__current { color: var(--fg-primary); }
+
+
+/* Hero — the landing spotlight: copy + media, two columns. Sits in a
+   tinted band (.band--sky is canonical). Collapses to one column.
+       <div class="hero"> <div class="hero__copy">…</div>
+                          <div class="hero__media photo">…</div> </div> */
+.hero { display: grid; grid-template-columns: 1.04fr .96fr; gap: var(--space-480); align-items: center; padding: var(--space-400) 0 var(--space-560); }
+.hero__eyebrow { font: var(--type-caption1-strong); letter-spacing: .09em; text-transform: uppercase; color: var(--accent-rest); margin: 0 0 var(--space-120); }
+.hero__title { font: var(--weight-regular) 38px/46px var(--font-family); letter-spacing: -.01em; color: var(--fg-primary); margin: 0 0 var(--space-160); max-width: 18ch; text-wrap: balance; }
+.hero__lede { font: var(--weight-regular) 17px/26px var(--font-family); color: var(--fg-secondary); max-width: 46ch; margin: 0 0 var(--space-240); }
+.hero__cta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-120); }
+.hero__media { height: 340px; border-radius: var(--radius-large); border: var(--stroke-thin) solid var(--stroke-divider); box-shadow: var(--shadow-8); }
+
+/* Trust stats — the small proof row under hero copy. */
+.trust { display: flex; flex-wrap: wrap; gap: var(--space-280); margin-top: var(--space-280); }
+.trust__item { display: flex; flex-direction: column; gap: var(--space-20); }
+.trust__num { font: var(--type-subtitle1); color: var(--fg-primary); }
+.trust__label { font: var(--type-caption1); color: var(--fg-secondary); }
+
+@media (max-width: 980px) {
+  .hero { grid-template-columns: 1fr; gap: var(--space-280); padding: var(--space-320) 0 var(--space-400); }
+  .hero__media { height: 240px; }
+}
+
+
+/* Section head — eyebrow + title + optional lede above a section. Add
+   .section-head--flex to push a trailing action (e.g. "All tasks →") right.
+       <div class="section-head"> <p class="section-head__eyebrow">…</p>
+         <h2 class="section-head__title">…</h2> <p class="section-head__lede">…</p> </div> */
+.section-head { margin-bottom: var(--space-240); }
+.section-head--flex { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-240); }
+.section-head__eyebrow { font: var(--type-caption1-strong); letter-spacing: .09em; text-transform: uppercase; color: var(--accent-rest); margin: 0 0 var(--space-60); }
+.section-head__title { font: var(--weight-regular) 27px/34px var(--font-family); letter-spacing: -.01em; color: var(--fg-primary); margin: 0 0 var(--space-40); }
+.section-head__lede { font: var(--type-body2); color: var(--fg-secondary); max-width: 62ch; margin: 0; }
+
+
+/* =====================================================================
+   PROCESS + FILTERING LAYER — dense-app components promoted from the
+   "Component examples" showcase. Same rules as the component layer above:
+   every value is a var(--token); states are native pseudo-classes or the
+   documented .is-* contract; motion honors prefers-reduced-motion.
+   Canonical usage: examples/Component examples.html, examples/Ops Dashboard.html.
+   ===================================================================== */
+
+
+/* ---------------------------------------------------------------------
+   Spinner — indeterminate process indicator. Sizes are explicit
+   modifiers (16/20/32/48); default 20. Pair with .spinner-row for an
+   inline label; .spinner--on-accent sits on filled (blue) surfaces.
+       <span class="spinner" role="progressbar" aria-label="Loading"></span>
+       <div class="spinner-row"><span class="spinner"></span> Loading requests…</div>
+   --------------------------------------------------------------------- */
+.spinner {
+  display: inline-block; width: 20px; height: 20px; flex: none;
+  border-radius: var(--radius-circle);
+  border: var(--stroke-thick) solid var(--f2-grey-92);
+  border-top-color: var(--accent-rest);
+  animation: spinner-turn .8s linear infinite;
+  box-sizing: border-box;
+}
+.spinner--16 { width: 16px; height: 16px; }
+.spinner--32 { width: 32px; height: 32px; border-width: var(--stroke-thicker); }
+.spinner--48 { width: 48px; height: 48px; border-width: var(--stroke-thickest); }
+/* On a filled accent surface (e.g. inside .btn--primary) */
+.spinner--on-accent {
+  border-color: color-mix(in srgb, var(--fg-on-accent) 35%, transparent);
+  border-top-color: var(--fg-on-accent);
+}
+.spinner-row {
+  display: inline-flex; align-items: center; gap: var(--space-100);
+  font: var(--type-body1); color: var(--fg-secondary);
+}
+@keyframes spinner-turn { to { transform: rotate(360deg); } }
+/* A spinner exists to say "still working" — keep it moving, just slower. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 1.6s; }
+}
+
+
+/* ---------------------------------------------------------------------
+   Progress bar — determinate + indeterminate. Width of .progress__fill
+   is the one sanctioned inline value (it IS the data). States:
+       pre-start      →  width: 0 (track only)
+       indeterminate  →  .progress--indeterminate (ignore width)
+       done           →  .progress--success + width: 100%
+       error          →  .progress--danger (fill freezes where it failed)
+       <div class="progress" role="progressbar" aria-valuenow="64" aria-valuemin="0" aria-valuemax="100">
+         <div class="progress__meta"><span class="progress__label">Uploading…</span><span class="progress__value">64%</span></div>
+         <div class="progress__track"><div class="progress__fill" style="width:64%"></div></div>
+       </div>
+   --------------------------------------------------------------------- */
+.progress { display: flex; flex-direction: column; gap: var(--space-60); }
+.progress__meta { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-120); }
+.progress__label { font: var(--type-caption1-strong); color: var(--fg-primary); display: inline-flex; align-items: center; gap: var(--space-60); }
+.progress__label .icon { width: 14px; height: 14px; }
+.progress__value { font: var(--type-caption1); color: var(--fg-secondary); font-variant-numeric: tabular-nums; }
+.progress__track {
+  position: relative; height: 4px; overflow: hidden;
+  border-radius: var(--radius-small);   /* 2px = half the 4px track height — a pill; --radius-circle (50%) would lens-distort a wide bar */
+  background: var(--f2-grey-92);
+}
+.progress__fill {
+  height: 100%; width: 0;
+  border-radius: inherit;
+  background: var(--accent-rest);
+  transition: width var(--motion-slow) var(--ease-out);
+}
+.progress--success .progress__fill { background: var(--fg-success); }
+.progress--success .progress__label .icon { color: var(--fg-success); }
+.progress--danger .progress__fill { background: var(--fg-danger); }
+.progress--danger .progress__label .icon { color: var(--fg-danger); }
+.progress--danger .progress__value { color: var(--fg-danger); }
+/* Subtle variant — softened fill on a tinted track, for dense surfaces
+   where full-strength semantic color is too loud. Combine freely:
+   .progress--subtle.progress--success / .progress--subtle.progress--danger */
+.progress--subtle .progress__track { background: var(--f2-grey-96); }
+.progress--subtle .progress__fill { background: color-mix(in srgb, var(--accent-rest) 45%, var(--bmo-white)); }
+.progress--subtle.progress--success .progress__track { background: var(--surface-success-tint); }
+.progress--subtle.progress--success .progress__fill { background: color-mix(in srgb, var(--fg-success) 45%, var(--bmo-white)); }
+.progress--subtle.progress--danger .progress__track { background: var(--surface-danger-tint); }
+.progress--subtle.progress--danger .progress__fill { background: color-mix(in srgb, var(--fg-danger) 45%, var(--bmo-white)); }
+/* Thick variant — opt-in 8px track for hero/landing surfaces */
+.progress--thick .progress__track { height: 8px; border-radius: var(--radius-medium); }
+/* Animated diagonal stripes — the alternative "working" state when no
+   percentage is available: always render the fill FULL-WIDTH. The stripe
+   is a functional motion pattern, not a decorative gradient. */
+.progress--striped .progress__fill {
+  width: 100%;
+  background-image: linear-gradient(45deg,
+    color-mix(in srgb, var(--bmo-white) 24%, transparent) 25%, transparent 25%,
+    transparent 50%, color-mix(in srgb, var(--bmo-white) 24%, transparent) 50%,
+    color-mix(in srgb, var(--bmo-white) 24%, transparent) 75%, transparent 75%, transparent);
+  background-size: 16px 16px;
+  animation: progress-stripes .9s linear infinite;
+}
+@keyframes progress-stripes { to { background-position: 16px 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .progress--striped .progress__fill { animation: none; }
+}
+.progress--indeterminate .progress__fill { width: 33%; animation: progress-slide 1.5s var(--ease-in-out) infinite; }
+@keyframes progress-slide {
+  from { transform: translateX(-110%); }
+  to   { transform: translateX(315%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress--indeterminate .progress__fill { animation-duration: 3s; }
+}
+
+
+/* ---------------------------------------------------------------------
+   Stepper — multi-step form indicator. Steps are equal-width; the
+   connector is drawn by the step's ::before. State contract:
+       .is-done → completed (accent dot + checkmark), .is-current → active,
+       .is-error → step with a validation problem. Future steps: no class.
+       <ol class="stepper">
+         <li class="stepper__step is-done"><span class="stepper__dot"><svg class="icon icon--12">…check…</svg></span><span class="stepper__label">Requester</span></li>
+         <li class="stepper__step is-current"><span class="stepper__dot">2</span><span class="stepper__label">Details</span></li>
+         <li class="stepper__step"><span class="stepper__dot">3</span><span class="stepper__label">Review</span></li>
+       </ol>
+   --------------------------------------------------------------------- */
+.stepper { display: flex; list-style: none; margin: 0; padding: 0; }
+.stepper__step {
+  position: relative; flex: 1;
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-60);
+  text-align: center;
+}
+.stepper__step:not(:first-child)::before {
+  content: ""; position: absolute; top: 11px;
+  left: calc(-50% + 18px); right: calc(50% + 18px);
+  height: var(--stroke-thick);
+  background: var(--stroke-divider);
+}
+/* The connector INTO a reached step is accent */
+.stepper__step.is-done::before,
+.stepper__step.is-current::before { background: var(--accent-rest); }
+.stepper__dot {
+  position: relative; z-index: 1; box-sizing: border-box;
+  width: 24px; height: 24px; border-radius: var(--radius-circle);
+  display: inline-flex; align-items: center; justify-content: center;
+  font: var(--type-caption1-strong);
+  background: var(--surface-canvas); color: var(--fg-secondary);
+  border: var(--stroke-thick) solid var(--stroke-control);
+  transition: background var(--motion-normal) var(--ease-out), border-color var(--motion-normal) var(--ease-out);
+}
+.stepper__step.is-current .stepper__dot { border-color: var(--accent-rest); color: var(--accent-rest); }
+.stepper__step.is-done .stepper__dot { background: var(--accent-rest); border-color: var(--accent-rest); color: var(--fg-on-accent); }
+.stepper__step.is-error .stepper__dot { border-color: var(--fg-danger); color: var(--fg-danger); }
+.stepper__label { font: var(--type-caption1); color: var(--fg-secondary); }
+.stepper__step.is-current .stepper__label { color: var(--fg-primary); font-weight: var(--weight-semibold); }
+.stepper__step.is-error .stepper__label { color: var(--fg-danger); }
+
+
+/* ---------------------------------------------------------------------
+   Filter bar — a standalone filters / sort / view-options surface that
+   is NOT attached to a grid or toolbar. Drop it above any content
+   (card grids, lists, embedded views). Groups keep a caption label
+   beside the control; .filterbar__spacer pushes trailing groups right.
+       <div class="filterbar">
+         <div class="input-group">…search…</div>
+         <div class="filterbar__group"><span class="filterbar__label">Type</span><div class="chip-row">…</div></div>
+         <span class="filterbar__spacer"></span>
+         <div class="filterbar__group"><span class="filterbar__label">Sort</span><select class="select">…</select></div>
+       </div>
+   --------------------------------------------------------------------- */
+.filterbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-120) var(--space-160);
+  padding: var(--space-120) var(--space-160);
+  background: var(--surface-raised);
+  border: var(--stroke-thin) solid var(--stroke-divider);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-2);
+}
+.filterbar__group { display: flex; align-items: center; gap: var(--space-80); }
+.filterbar__label { font: var(--type-caption1-strong); color: var(--fg-secondary); white-space: nowrap; }
+.filterbar__spacer { flex: 1; }
+/* Give inline selects/search a sane width inside the flex row */
+.filterbar .select { width: auto; min-width: 160px; }
+.filterbar .input-group { min-width: 220px; }
+
+
+/* ---------------------------------------------------------------------
+   Grid header filter — a funnel menu on a column heading, a la a
+   SharePoint list. The th gets .grid__filter-host (position anchor);
+   the menu is a small raised sheet toggled by the icon-btn. Show the
+   active filter by adding .is-active to the icon-btn.
+       <th class="grid__filter-host">Status
+         <button class="icon-btn grid__filter-btn" aria-label="Filter status">…funnel…</button>
+         <div class="grid__filter-menu">…chips / checks…</div>
+       </th>
+   --------------------------------------------------------------------- */
+.grid__filter-host { position: relative; }
+.grid__filter-btn { width: 24px; height: 24px; vertical-align: middle; margin: calc(-1 * var(--space-60)) 0 calc(-1 * var(--space-60)) var(--space-20); }
+.grid__filter-btn .icon { width: 14px; height: 14px; }
+.grid__filter-menu {
+  position: absolute; top: calc(100% - var(--space-40)); left: 0; z-index: 50;
+  min-width: 180px;
+  display: flex; flex-direction: column; gap: var(--space-20);
+  padding: var(--space-60);
+  background: var(--surface-raised);
+  border: var(--stroke-thin) solid var(--stroke-divider);
+  border-radius: var(--radius-medium);
+  box-shadow: var(--shadow-16);
+  text-transform: none; letter-spacing: normal;
+}
+.grid__filter-item {
+  display: flex; align-items: center; gap: var(--space-80);
+  padding: var(--space-60) var(--space-100);
+  border: 0; border-radius: var(--radius-small);
+  background: transparent; text-align: left; cursor: pointer;
+  font: var(--type-body1); color: var(--fg-primary);
+}
+.grid__filter-item:hover { background: var(--f2-grey-96); }
+.grid__filter-item.is-active { background: var(--surface-selected-tint); color: var(--accent-rest); font-weight: var(--weight-semibold); }
+
+
+/* ---------------------------------------------------------------------
+   Stat strip — card-less stats: value-first, sitting directly on the
+   surface. Reuses the .stat element vocabulary with a --plain modifier.
+       <div class="stat-strip">
+         <div class="stat stat--plain">
+           <span class="stat__value">$77B</span>
+           <span class="stat__label">Total assets</span>
+           <span class="stat__delta stat__delta--up"><svg class="icon">…arrow…</svg> 12.4%</span>
+         </div> …
+       </div>
+   Mini charts: .stat__spark is a small inline SVG slot (sparkline or
+   open donut) — it inherits currentColor, so set a chart token on it.
+   --------------------------------------------------------------------- */
+.stat-strip { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-240) var(--space-480); }
+.stat--plain { gap: var(--space-40); }
+.stat--plain .stat__value { font: var(--type-title1); font-weight: var(--weight-semibold); letter-spacing: -.01em; }
+.stat--plain .stat__label { font: var(--type-body1); }
+.stat__spark { width: 104px; height: 36px; color: var(--bmo-chart-blue); flex: none; }
+.stat__spark--donut { width: 40px; height: 40px; }

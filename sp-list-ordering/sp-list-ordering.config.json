@@ -1,0 +1,24 @@
+{
+  "webUrl": "/sites/FCUPortal",
+  "lists": [
+    {
+      "title": "FAQ Entries",
+      "label": "FAQ entries",
+      "sortField": "SortOrder",
+      "filterField": { "internalName": "Category", "label": "Category", "type": "Choice" },
+      "displayFields": [
+        { "internalName": "Category", "label": "Category", "type": "Choice" },
+        { "internalName": "Owner", "label": "Owner", "type": "Text" },
+        { "internalName": "Modified", "label": "Modified", "type": "DateTime" }
+      ]
+    },
+    {
+      "title": "Quick Links",
+      "label": "Quick links",
+      "sortField": "SortOrder",
+      "displayFields": [
+        { "internalName": "Url", "label": "Destination", "type": "Text" }
+      ]
+    }
+  ]
+}
