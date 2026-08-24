@@ -10,8 +10,9 @@
      content injected into it mirrors sp-list-ordering.webpart.html (section
      ground override + optional heading + target div). The zone renders LATE
      (1.2 s, like SharePoint), exercising the timer+DOM-check boot; the mock
-     data adapter activates because `pnp` is absent. vendor/ CSS + alpine are
-     dev-only copies — live pages use /sites/FCUPortal/Code/… instead. -->
+     data adapter activates because `pnp2` is absent. Everything in vendor/ is a
+     dev-only copy — live pages use /sites/FCUPortal/Code/… instead. See
+     vendor/README.md for the source URLs to update when prod moves. -->
 <link rel="stylesheet" href="vendor/colors_and_type.css">
 <link rel="stylesheet" href="vendor/components.css">
 <link rel="stylesheet" href="../sp-list-ordering/sp-list-ordering.css">
@@ -35,6 +36,7 @@
   <div class="harness-bar">
     <button class="btn btn--subtle btn--sm" type="button" id="btn-spa">Simulate SPA navigation</button>
     <button class="btn btn--subtle btn--sm" type="button" id="btn-edit">Toggle edit mode</button>
+    <a class="harness-bar__note" id="harness-mode" href="#" style="text-decoration:underline"></a>
     <span class="harness-bar__note" id="harness-note"></span>
   </div>
   <p class="fake-zone-label">Custom script web part zone (bounded container — the tool must fill it, not the screen)</p>
@@ -64,33 +66,75 @@
     window.__harnessNavigate();
   });
   document.getElementById('btn-edit').addEventListener('click', function () {
-    document.body.classList.toggle('editmode');
-    var on = document.body.classList.contains('editmode');
+    var on = !document.body.classList.contains('editmode');
+    document.body.classList.toggle('editmode', on);
+    // In integrated mode __dcsIsEditMode() wins over the body class, and it reads
+    // this per-path sessionStorage intent key — so drive that too, or the real
+    // detector would simply say "not editing" and ignore the toggle.
+    try {
+      var key = 'dcs:mode=edit:intent:' + location.pathname;
+      if (on) sessionStorage.setItem(key, '1'); else sessionStorage.removeItem(key);
+    } catch (e) { /* private mode */ }
     document.getElementById('harness-note').textContent =
       on ? 'Edit mode ON — expect the placeholder, no grid.' : 'Edit mode OFF — live tool should return.';
-    // dcs-part-boot re-checks on its own timers; nudge it for an instant result.
     var part = window.dcsParts && window.dcsParts['sp-list-ordering'];
     if (part) part.mountAll();
+  });
+
+  // Show which mode the harness is in.
+  document.addEventListener('DOMContentLoaded', function () {
+    var std = window.__HARNESS_STANDALONE;
+    document.getElementById('harness-mode').textContent = std
+      ? 'STANDALONE — using dcs-part-boot stand-ins'
+      : 'INTEGRATED — using vendored fcu-standard.js + std-spa-loader.js (mirrors prod)';
+    document.getElementById('harness-mode').href = std ? location.pathname : location.pathname + '?standalone=1';
+    document.getElementById('harness-mode').title = std ? 'Switch to integrated' : 'Switch to standalone';
   });
 </script>
 
 <script>
-  // Minimal stand-in for std-spa-loader.js so the harness exercises the real
-  // SPA re-mount path. fcu-standard.js is NOT loaded here, so dcs-part-boot.js
-  // supplies its own waitForElement / waitForPnP2 / dcsRegisterAlpineComponent.
+  // ── HARNESS MODE ────────────────────────────────────────────────────────────
+  // Default = INTEGRATED: loads the vendored prod includes (fcu-standard.js +
+  // std-spa-loader.js), so the tool runs against the REAL waitForElement /
+  // waitForPnP2 / dcsOnSpaNavigation / __dcsIsEditMode — i.e. what actually
+  // happens on a SharePoint page.
+  //   ?standalone=1  skips them, exercising the stand-ins in dcs-part-boot.js
+  //                  (the path used on a page without the standard include).
+  // document.write is deliberate: it runs at parse time and preserves script
+  // order, which a dynamically appended <script> would not guarantee here.
+  window.__HARNESS_STANDALONE = new URLSearchParams(location.search).has('standalone');
+  if (!window.__HARNESS_STANDALONE) {
+    document.write('<script src="vendor/fcu-standard.js"><\/script>');
+    document.write('<script src="vendor/std-spa-loader.js"><\/script>');
+  }
+</script>
+<script>
+  // Stand-in for the SPA bus, ONLY in standalone mode. Patches history.pushState
+  // the same way std-spa-loader.js does, so __harnessNavigate below is identical
+  // in both modes.
   (function () {
+    if (typeof window.dcsOnSpaNavigation === 'function') return;   // real one won
     var subs = [];
     window.dcsOnSpaNavigation = function (id, cb) { subs.push({ id: id, cb: cb }); };
-    window.__harnessNavigate = function () {
-      history.pushState({}, '', location.pathname + '?nav=' + Date.now());
-      var zone = document.getElementById('webpart-zone');
-      zone.innerHTML = '';                       // SharePoint tears the zone down…
-      setTimeout(function () {                   // …then re-renders it a beat later
-        renderWebPartStub();
-        subs.forEach(function (s) { s.cb({ id: s.id, reason: 'pushState' }); });
-      }, 400);
+    var origPush = history.pushState;
+    history.pushState = function () {
+      var r = origPush.apply(this, arguments);
+      setTimeout(function () {
+        subs.forEach(function (s) {
+          setTimeout(function () { s.cb({ id: s.id, reason: 'pushState' }); }, 300);
+        });
+      }, 100);
+      return r;
     };
   })();
+
+  // Tear the zone down and re-render it a beat later, exactly as SharePoint does
+  // on SPA navigation. Whichever bus is installed notifies subscribers itself.
+  window.__harnessNavigate = function () {
+    history.pushState({}, '', location.pathname + location.search.replace(/[?&]nav=\d+/, '') + (location.search ? '&' : '?') + 'nav=' + Date.now());
+    document.getElementById('webpart-zone').innerHTML = '';
+    setTimeout(renderWebPartStub, 400);
+  };
 </script>
 <script src="../_shared/dcs-part-boot.js"></script>
 <script src="../sp-list-ordering/sp-list-ordering.js"></script>

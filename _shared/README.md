@@ -46,10 +46,7 @@ Note `waitForElement` is `querySelector`-based (first match only), so it serves 
 the "something appeared" trigger; `dcsMountPart` then queries **all** unmounted hosts
 itself. That is what lets two copies of a web part live on one page.
 
-## `fcu-standard-additions.js` (NOT deployed — a proposal)
+## Proposed `fcu-standard.js` improvements
 
-Backward-compatible improvements to `fcu-standard.js`, which lives with the prod page
-includes rather than in this repo. Drop-in replacements plus two bug fixes; **no existing
-call signature changes**. The important one: `waitForPnP2` and `waitForElement` currently
-report a timeout only to the console, so a caller cannot distinguish "still waiting" from
-"never coming" — which is exactly how a tool ends up silently inert on a live page.
+Moved to [`dev/vendor/fcu-standard-additions.js`](../dev/vendor/), alongside the vendored
+copy of `fcu-standard.js` itself, so the whole prod-adjacent set relocates together.
