@@ -20,8 +20,8 @@ deployment**, never as a dependency to rebuild.
   **copied** (never invented) from `whywhyjoe/bsp-fluent-icon-library`, with
   `fill` normalized to `currentColor`.
 - **SharePoint data = PnPjs v2** (self-hosted `Code/lib/pnp2.bundle.js`, global
-  `pnp`). Keep every pnpjs touchpoint inside one adapter object per tool, with a
-  mock twin implementing the same interface.
+  **`pnp2`**). Keep every pnpjs touchpoint inside one adapter object per tool, with
+  a mock twin implementing the same interface.
 
 ## Boot contract — do not hand-roll it
 Tools **must** delegate startup to `dcsMountPart()` in `_shared/dcs-part-boot.js` rather
@@ -49,16 +49,19 @@ this repo can ship.
 1. **Stub** `<tool>.webpart.html` — per-instance; a page copies it and points
    `data-config` at its own JSON. Keep it tiny; all environment URLs live here
    and in the config, never in the JS.
-2. **Engine** `<tool>.js` — mounts into every
-   `[data-sp-part="<tool>"]:not([data-*-mounted])` div. Boot uses a **timer +
-   DOM check** (`waitFor`) — SharePoint renders web part zones late and out of
-   order, and a MutationObserver alone is not reliable there; the observer is
-   attached only as an accelerator. Wait for `window.Alpine` the same way and
-   render a plain-HTML `.msgbar--danger` on timeout. Alpine v3 auto-initializes
-   injected trees, so mount order vs. Alpine load order doesn't matter.
-3. **Mock mode** — when `pnp` is missing or the page is on `file:`, the mock
-   adapter activates; every tool must be fully exercisable from disk via its
-   `dev/<tool>.dev.html` harness (which injects the target div late on purpose).
+2. **Engine** `<tool>.js` — declares WHAT to render; `dcsMountPart()` decides WHEN.
+   Mounting is **idempotent and guard-driven** (`data-dcs-mounted="<id>"`), and the
+   helper keeps re-running it: a debounced MutationObserver plus one bounded poll.
+   Never treat "a host exists" as "work is done" — that mistake cost a late second
+   instance its mount, and let a stale outgoing host swallow the SPA re-mount.
+   Alpine v3 auto-initializes injected trees, so mount order vs. Alpine load order
+   doesn't matter; wait for `window.Alpine` only so a missing script tag produces a
+   visible `.msgbar--danger` instead of inert markup.
+3. **Mock mode is opt-in** — `file:` protocol, or `data-mock` on the host div. It is
+   never a fallback: a missing `pnp2` on a live page is a visible error. Every tool
+   must still be fully exercisable from disk via its `dev/<tool>.dev.html` harness
+   (which injects the target div late on purpose, and defaults to loading the
+   vendored prod includes so the real boot path is what gets tested).
 
 ## Live URLs (the portal deployment this repo targets)
 - Design system: `/sites/FCUPortal/Code/bsp-design/styles.css` (or the two CSS

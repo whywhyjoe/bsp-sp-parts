@@ -105,14 +105,23 @@ Title and Sort order columns always show. Keep display/filter fields to simple
 types (Text, Choice, Number, DateTime) — Lookup/Person columns need `$expand`
 and aren't supported in v1.
 
-The tool loads at most 500 items per list and warns if that truncates; reorder
-inside a filter scope for bigger lists.
+Filtering happens **server-side**: choosing a filter value re-queries the list with
+that scope, so the 500-row cap applies to the scope rather than to the whole list.
+If a single scope still exceeds 500 rows the tool loads the first 500, says so, and
+**disables Save** — renumbering a partial scope would collide with rows it never
+fetched. Narrow the filter in that case.
 
 ## The SortOrder column
 
 A plain **Number** column (integers in practice; the column type allows decimals
 if a future strategy wants midpoint inserts). New items can default to `0` or
-blank — either way they surface as *Needs placement* here.
+blank — either way they surface as *Needs placement* here, since Save numbers from
+10 upward and any value at or below zero is treated as unplaced.
+
+**Concurrency:** before writing, the tool re-reads the scope and compares it to what
+it loaded. If someone else changed the list meanwhile it saves nothing, reloads, and
+tells you to redo the ordering. Writes still use ETag `"*"`, so this narrows the
+window rather than locking — see the note in `makeLiveApi`.
 
 ## Dev / mock mode
 
@@ -122,9 +131,12 @@ opened from `file:` or when the host div carries `data-mock`. On a real page a m
 actual list. The demo lists include one missing and one duplicated sort value so the
 *Needs placement* path is visible.
 
-Open `../dev/sp-list-ordering.dev.html` straight from disk. The harness simulates the
-web part zone rendering late (exercising the boot waiter) and adds two buttons:
-**Simulate SPA navigation** (tears the zone down and re-renders it, proving re-mount)
-and **Toggle edit mode** (proving the placeholder path). It deliberately does *not*
-load `fcu-standard.js`, so it also exercises the stand-in helpers in
-`_shared/dcs-part-boot.js`.
+Open `../dev/sp-list-ordering.dev.html` straight from disk. It simulates the web part
+zone rendering late (exercising the boot watcher) and adds two buttons: **Simulate SPA
+navigation** (tears the zone down and re-renders it, proving re-mount) and **Toggle edit
+mode** (proving the placeholder path).
+
+By default it loads the vendored `fcu-standard.js` + `std-spa-loader.js`, so the tool
+runs against the **real** prod helpers. Append **`?standalone=1`** — or use the toolbar
+link — to skip them and exercise the stand-ins in `_shared/dcs-part-boot.js` instead.
+Test both: they are different code paths.
