@@ -28,7 +28,13 @@ the console on a real page.
 | Style | When | Re-mount means |
 | --- | --- | --- |
 | **injected** (`render`) | The tool renders its own markup into a host div — most tools here | re-inject; Alpine v3's document observer initializes the new tree |
-| **static** (`initTree: true`) | The markup is already in the page (e.g. `#dcs-app` with `x-ignore`), as in the Fraud Journeys app | remove `x-ignore`, call `Alpine.initTree(host)` — Alpine already owns that tree |
+| **static** (`initTree: true`) | The markup is already in the page (e.g. `#dcs-app` with `x-ignore`), as in the Fraud Journeys app | remove `x-ignore`, call `Alpine.initTree(host)` — Alpine already owns that tree. This is the only style that needs `dcsRegisterAlpineComponent` |
+
+**Alpine registration.** Tools use a plain global factory —
+`window.<toolName> = function () {…}` with `x-data="<toolName>()"` — matching
+bsp-design-system, which ships no `Alpine.data()` layer by design. `dcsRegisterAlpineComponent`
+is still shimmed here, but only for the static-mount case (`initTree: true`), where Alpine
+already owns the tree and must resolve the component by name.
 
 **Relationship to `fcu-standard.js`.** This file never overrides the standard include. It
 uses `waitForElement`, `waitForPnP2`, `dcsOnSpaNavigation`, `dcsRegisterAlpineComponent`

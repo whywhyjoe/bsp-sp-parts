@@ -20,6 +20,10 @@
  *
  *  Boot: delegated to dcsMountPart() in _shared/dcs-part-boot.js, which owns the
  *  host wait, multi-instance mounting, edit-mode placeholder, and SPA re-mount.
+ *
+ *  Alpine: a plain global factory (window.listReorderTool) used as x-data="listReorderTool()",
+ *  matching bsp-design-system, which ships no Alpine.data() layer by design. See the comment
+ *  above the factory for the full rationale.
  */
 (function () {
   'use strict';
@@ -90,7 +94,7 @@
      Alpine root). Composed from the canonical bsp-design vocabulary. */
   var MARKUP =
     '<div class="spinner-row" data-lro-boot><span class="spinner spinner--16" aria-hidden="true"></span> Loading list ordering…</div>' +
-    '<div class="lro" x-data="listReorderTool" x-cloak>' +
+    '<div class="lro" x-data="listReorderTool()" x-cloak>' +
 
     '  <div class="filterbar">' +
     '    <div class="filterbar__group">' +
@@ -205,11 +209,27 @@
 
     '</div>';
 
-  /* ════════ Alpine component factory — registered by name via the house helper
-     (dcsRegisterAlpineComponent → Alpine.data), so the markup is x-data="listReorderTool".
-     Registration happens on alpine:init AND immediately if Alpine is already running,
-     so injected markup resolves the name in either load order. */
-  function listReorderToolFactory() {
+  /* ════════ Alpine component factory — a plain global, called from the markup as
+     x-data="listReorderTool()".
+
+     WHY THIS FORM and not Alpine.data() / dcsRegisterAlpineComponent: bsp-design-system,
+     which this tool is built from, ships no Alpine.data() factory layer BY DESIGN and says
+     so in CLAUDE.md, AGENTS.md, copilot-instructions.md, index.html and TECHNICAL-REFERENCE
+     §. Its own pages use inline x-data objects or a global factory — there is not a single
+     Alpine.data() registration in the repo. Matching that keeps these tools readable to
+     anyone who knows the design system, and keeps the code greppable: x-data="listReorderTool()"
+     is visibly a function call, so Ctrl+F on the name lands here. The registered-name form
+     (x-data="listReorderTool") gives no clue where the code lives — you have to know Alpine
+     keeps a component registry and that something wrote into it.
+
+     dcsRegisterAlpineComponent still exists in _shared/dcs-part-boot.js and remains the right
+     call for an app-shaped tool whose markup is STATIC in the page (the Fraud Journeys
+     #dcs-app + x-ignore + Alpine.initTree pattern). This tool INJECTS its markup, so Alpine's
+     document observer initializes it with no registration step at all.
+
+     Note this choice is independent of startup: host waiting, multi-instance mounting,
+     edit-mode and SPA re-mount all live in dcsMountPart() and work the same either way. */
+  window.listReorderTool = function () {
     return {
       hid: 'lro-help-' + (++seq),
       configUrl: '', config: null, api: null, mock: false,
@@ -457,7 +477,7 @@
         this.toastMsg = '';
       }
     };
-  }
+  };
 
   /* ════════ Config validation ════════ */
   function validateConfig(cfg) {
@@ -641,9 +661,6 @@
     holder.innerHTML = SPRITE;
     document.body.insertBefore(holder, document.body.firstChild);
   }
-
-  // Register the component by name before anything mounts.
-  window.dcsRegisterAlpineComponent({ name: 'listReorderTool', factory: listReorderToolFactory });
 
   if (typeof window.dcsMountPart !== 'function') {
     console.error('[sp-list-ordering] _shared/dcs-part-boot.js is not loaded — ' +

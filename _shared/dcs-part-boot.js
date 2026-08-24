@@ -61,6 +61,18 @@
     };
   }
 
+  /* NOTE ON ALPINE REGISTRATION — tools in this repo do NOT normally use this.
+     bsp-design-system ships no Alpine.data() factory layer by design (stated in its
+     CLAUDE.md, AGENTS.md, copilot-instructions.md, index.html and TECHNICAL-REFERENCE),
+     and its own pages use inline x-data objects or a plain global factory. Tools built
+     on that system match it: window.<toolName> = function () {…} with
+     x-data="<toolName>()". That is greppable — the markup is visibly a function call.
+
+     This helper stays for the one case where registration genuinely earns its keep: an
+     app-shaped tool whose markup is STATIC in the page and therefore needs
+     dcsMountPart({ initTree: true }) to remove x-ignore and call Alpine.initTree(), as
+     the Fraud Journeys #dcs-app does. Registration by name is required there because
+     Alpine already owns the tree. */
   if (typeof window.dcsRegisterAlpineComponent !== 'function') {
     window.dcsRegisterAlpineComponent = function (options) {
       if (!options || !options.name || typeof options.factory !== 'function') {

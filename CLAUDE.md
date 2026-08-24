@@ -26,10 +26,18 @@ deployment**, never as a dependency to rebuild.
 ## Boot contract — do not hand-roll it
 Tools **must** delegate startup to `dcsMountPart()` in `_shared/dcs-part-boot.js` rather
 than writing their own waiters. It owns the host wait, multi-instance idempotent mounting,
-the edit-mode placeholder, and SPA re-mount. Register Alpine components through
-`dcsRegisterAlpineComponent({ name, factory })` (house standard → `Alpine.data`), so markup
-uses `x-data="<name>"` with no parentheses. See `_shared/README.md` for the two mount styles
-(injected vs static) and why re-mount differs between them.
+the edit-mode placeholder, and SPA re-mount. See `_shared/README.md` for the two mount
+styles (injected vs static) and why re-mount differs between them.
+
+**Alpine components are plain global factories** — `window.<toolName> = function () {…}`,
+used from the markup as `x-data="<toolName>()"`. This matches bsp-design-system, which
+ships **no `Alpine.data()` factory layer by design** and says so in its CLAUDE.md,
+AGENTS.md, copilot-instructions.md, index.html and TECHNICAL-REFERENCE; its own pages use
+inline `x-data` objects or a global factory, with zero `Alpine.data()` registrations. It is
+also the more greppable form: the markup is visibly a function call, so searching the name
+lands on the code. Do **not** reach for `dcsRegisterAlpineComponent` for an ordinary tool —
+it exists for the one case that needs it: an app-shaped tool with **static** markup using
+`dcsMountPart({ initTree: true })`, as the Fraud Journeys `#dcs-app` does.
 
 PnPjs v2 is the global **`pnp2`** (not `pnp`). Never decide mock-vs-live from a synchronous
 `typeof` check: wait via `waitForPnP2`, and on a live page treat a missing `pnp2` as a
