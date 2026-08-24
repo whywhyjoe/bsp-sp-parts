@@ -32,6 +32,9 @@
   var SPRITE_WRAP_ID = 'bsp-sprite-sp-parts';
   var GAP = 10;      // Save renumbers the visible scope to GAP, 2*GAP, 3*GAP …
   var FETCH_TOP = 500;
+  // '' already means "All", so items whose filter field is empty need their own
+  // sentinel or that scope can never be selected and reordered on its own.
+  var BLANK = '\u0000blank';
   var seq = 0;       // per-instance id counter (aria-describedby targets)
 
   /* ════════ Icon sprite — the canonical bsp-design sprite, inlined once per
@@ -99,7 +102,7 @@
     '  <div class="filterbar">' +
     '    <div class="filterbar__group">' +
     '      <span class="filterbar__label">List</span>' +
-    '      <select class="select" style="width:auto" aria-label="Choose a list" x-model="listKey" @change="onListChange()" :disabled="loading || saving">' +
+    '      <select class="select" style="width:auto" aria-label="Choose a list" x-model="listKey" @change="onListChange()" :disabled="loading || saving || orderChanged">' +
     '        <template x-for="l in (config ? config.lists : [])" :key="l.title">' +
     '          <option :value="l.title" x-text="l.label || l.title"></option>' +
     '        </template>' +
@@ -107,13 +110,15 @@
     '    </div>' +
     '    <div class="filterbar__group" x-show="filterField" x-cloak>' +
     '      <span class="filterbar__label" x-text="filterField ? (filterField.label || filterField.internalName) : \'Filter\'"></span>' +
-    '      <select class="select" style="width:auto" aria-label="Filter items" x-model="filterValue" :disabled="loading || saving">' +
+    '      <select class="select" style="width:auto" aria-label="Filter items" x-model="filterValue" @change="onFilterChange()" :disabled="loading || saving || orderChanged">' +
     '        <option value="">All</option>' +
+    '        <option :value="BLANK">(no value)</option>' +
     '        <template x-for="c in filterChoices" :key="c"><option :value="c" x-text="c"></option></template>' +
     '      </select>' +
     '    </div>' +
     '    <span class="filterbar__spacer"></span>' +
     '    <span class="badge badge--warning" x-show="orderChanged" x-cloak>Unsaved order</span>' +
+    '    <span style="font:var(--type-caption1); color:var(--fg-secondary)" x-show="orderChanged" x-cloak>Save or reset before changing list or filter</span>' +
     '    <button class="btn btn--subtle" type="button" @click="reset()" :disabled="!orderChanged || saving">Reset</button>' +
     '    <button class="btn btn--primary" type="button" @click="save()" :disabled="!dirty || saving || loading">' +
     '      <span class="spinner spinner--16 spinner--on-accent" x-show="saving" x-cloak aria-hidden="true"></span>' +
@@ -164,7 +169,7 @@
     '          </div>' +
     '        </td></tr>' +
     '        <template x-for="(row, i) in visible" :key="row.id">' +
-    '          <tr draggable="true" x-show="!loading"' +
+    '          <tr :draggable="!saving && !loading" x-show="!loading"' +
     '              @dragstart="onDragStart($event, row.id)"' +
     '              @dragover.prevent="onDragOver($event, row.id)"' +
     '              @drop.prevent="onDrop($event, row.id)"' +
@@ -182,10 +187,10 @@
     '              <template x-if="!row.needsPlacement"><span x-text="row.sort"></span></template>' +
     '            </td>' +
     '            <td class="grid__move-cell">' +
-    '              <button class="icon-btn" type="button" @click="moveUp(row.id)" :disabled="i === 0 || saving" :aria-label="\'Move \' + row.title + \' up\'">' +
+    '              <button class="icon-btn" type="button" @click="moveUp(row.id)" :aria-disabled="i === 0 || saving" :class="{ \'is-at-edge\': i === 0 || saving }" :aria-label="\'Move \' + row.title + \' up\'">' +
     '                <svg class="icon icon--16"><use href="#ic-fluent-arrow-up-24-regular"></use></svg>' +
     '              </button>' +
-    '              <button class="icon-btn" type="button" @click="moveDown(row.id)" :disabled="i === visible.length - 1 || saving" :aria-label="\'Move \' + row.title + \' down\'">' +
+    '              <button class="icon-btn" type="button" @click="moveDown(row.id)" :aria-disabled="i === visible.length - 1 || saving" :class="{ \'is-at-edge\': i === visible.length - 1 || saving }" :aria-label="\'Move \' + row.title + \' down\'">' +
     '                <svg class="icon icon--16"><use href="#ic-fluent-arrow-down-24-regular"></use></svg>' +
     '              </button>' +
     '            </td>' +
@@ -232,11 +237,13 @@
   window.listReorderTool = function () {
     return {
       hid: 'lro-help-' + (++seq),
+      BLANK: BLANK,          // exposed so the markup can offer the blank-scope option
       configUrl: '', config: null, api: null, mock: false,
       listKey: '', filterValue: '', filterChoices: [],
       items: [],      // working copy, in on-screen order: {id, title, sort, needsPlacement, fields}
       original: [],   // pristine snapshot of the fetched order: [{id, sort}]
       loading: true, saving: false, error: '', toastMsg: '', toastTimer: null,
+      overflow: false,   // the server had more rows in this scope than FETCH_TOP
       dragId: null, dropId: null, dropPos: 'before',
       announce: '',
 
@@ -254,6 +261,12 @@
       get visible() {
         if (!this.filterField || !this.filterValue) return this.items;
         var name = this.filterField.internalName, val = this.filterValue;
+        if (val === BLANK) {
+          return this.items.filter(function (r) {
+            var v = r.fields[name];
+            return v === null || v === undefined || v === '';
+          });
+        }
         return this.items.filter(function (r) { return String(r.fields[name] == null ? '' : r.fields[name]) === val; });
       },
       // What Save writes: renumber the visible scope to GAP, 2*GAP…, keeping only rows whose stored value differs.
@@ -277,13 +290,15 @@
         return false;
       },
       get needsCount() { return this.visible.filter(function (r) { return r.needsPlacement; }).length; },
-      get truncated() { return this.items.length >= FETCH_TOP; },
+      get truncated() { return this.overflow; },
       // Save is enabled for a manual reorder OR to normalize missing/duplicate values in scope.
-      get dirty() { return (this.orderChanged || this.needsCount > 0) && this.pending.length > 0; },
+      // Saving a truncated scope would renumber a partial view and collide with rows
+      // that were never fetched, so overflow disables Save outright.
+      get dirty() { return !this.overflow && (this.orderChanged || this.needsCount > 0) && this.pending.length > 0; },
       get warnText() {
         var parts = [];
         if (this.needsCount > 0) parts.push(this.needsCount + (this.needsCount === 1 ? ' item has' : ' items have') + ' a missing or duplicate sort value — Save will renumber everything shown here.');
-        if (this.truncated) parts.push('Only the first ' + FETCH_TOP + ' items were loaded; reorder in a filtered scope instead.');
+        if (this.truncated) parts.push('This scope holds more than ' + FETCH_TOP + ' items and only the first ' + FETCH_TOP + ' were loaded, so saving is disabled — narrow the filter.');
         return parts.join(' ');
       },
 
@@ -328,7 +343,9 @@
         this.loading = true; this.error = '';
         this.dragId = this.dropId = null;
         try {
-          var raw = await this.api.getItems(cfg);
+          var res = await this.api.getItems(cfg, this.filterValue, BLANK);
+          var raw = res.rows;
+          this.overflow = !!res.overflow;
           var rows = raw.map(function (it) {
             var fields = {};
             (cfg.displayFields || []).forEach(function (f) { fields[f.internalName] = it[f.internalName]; });
@@ -351,8 +368,11 @@
             return String(fv == null ? '' : fv) + ' ' + r.sort;
           };
           var counts = {};
-          rows.forEach(function (r) { if (r.sort !== null) { var k = scopeKey(r); counts[k] = (counts[k] || 0) + 1; } });
-          rows.forEach(function (r) { r.needsPlacement = r.sort === null || counts[scopeKey(r)] > 1; });
+          rows.forEach(function (r) { if (r.sort !== null && r.sort > 0) { var k = scopeKey(r); counts[k] = (counts[k] || 0) + 1; } });
+          // <= 0 is unplaced: the README documents 0 (or blank) as a new item's
+          // default, and Save numbers from GAP upward — so a lone 0 would otherwise
+          // sit there forever with Save disabled and no badge to explain why.
+          rows.forEach(function (r) { r.needsPlacement = r.sort === null || r.sort <= 0 || counts[scopeKey(r)] > 1; });
           // Unplaced/colliding rows first (by ID), then everything else by sort value (ties by ID).
           rows.sort(function (a, b) {
             if (a.needsPlacement !== b.needsPlacement) return a.needsPlacement ? -1 : 1;
@@ -361,16 +381,17 @@
           });
           this.items = rows;
           this.original = rows.map(function (r) { return { id: r.id, sort: r.sort }; });
-          this.filterChoices = this.filterField ? await this.api.getFilterChoices(cfg, rows) : [];
-          if (this.filterValue && this.filterChoices.indexOf(this.filterValue) === -1) this.filterValue = '';
+          this.filterChoices = this.filterField ? await this.api.getFilterChoices(cfg) : [];
+          if (this.filterValue && this.filterValue !== BLANK && this.filterChoices.indexOf(this.filterValue) === -1) this.filterValue = '';
         } catch (e) {
           this.error = 'Could not load items from “' + cfg.title + '”: ' + (e.message || e);
-          this.items = []; this.original = []; this.filterChoices = [];
+          this.items = []; this.original = []; this.filterChoices = []; this.overflow = false;
         } finally {
           this.loading = false;
         }
       },
       onListChange() { this.filterValue = ''; this.load(); },
+      onFilterChange() { this.load(); },
       reset() {
         var pos = {};
         this.original.forEach(function (o, i) { pos[o.id] = i; });
@@ -383,16 +404,62 @@
         this.saving = true; this.error = '';
         var changes = this.pending;
         try {
+          /* Concurrency. Writes go out with ETag "*", so SharePoint will not stop a
+             stale client from overwriting someone else's save — and because we only
+             write rows that changed relative to OUR snapshot, two overlapping saves
+             can interleave into an order neither person chose. Re-read the scope and
+             compare against what we loaded; if it moved underneath us, refuse and
+             reload rather than write over it. A narrow window, not a lock: the check
+             and the write are not atomic. */
+          if (await this.hasConflict(cfg)) {
+            await this.load();
+            this.error = 'Someone else changed this list while you were reordering, so nothing was saved. '
+              + 'It has been reloaded with their changes — redo your ordering and save again.';
+            this.say('Save cancelled — the list changed underneath you');
+            return;
+          }
+
           await this.api.saveOrder(cfg, changes);
           await this.load();
           var msg = 'Order saved — ' + changes.length + (changes.length === 1 ? ' item' : ' items') + ' updated';
           this.toast(msg); this.say(msg);
         } catch (e) {
-          // On failure keep the local order so nothing the user arranged is lost.
-          this.error = 'Save failed: ' + (e.message || e) + ' Your on-screen order is unchanged — try Save again.';
+          /* SharePoint has no cross-batch transaction: saveOrder commits in chunks, so
+             a failure partway leaves EARLIER chunks written. Saying "your order is
+             unchanged" would be false and would invite a retry stacked on a
+             half-applied state. Reload so the grid shows what the server really has. */
+          var wrote = (e && typeof e.committed === 'number') ? e.committed : null;
+          try { await this.load(); } catch (e2) { /* keep the original error */ }
+          this.error = 'Save failed: ' + ((e && e.message) || e) + ' '
+            + (wrote === null
+                ? 'The list has been reloaded so you can see the current server state.'
+                : wrote === 0
+                  ? 'Nothing was written.'
+                  : wrote + ' of ' + changes.length + ' item(s) were written before the failure. '
+                    + 'The grid now shows the actual server state — check the order and save again.');
         } finally {
           this.saving = false;
         }
+      },
+
+      /* True when the server no longer matches the snapshot this component loaded. */
+      async hasConflict(cfg) {
+        if (this.mock) return false;
+        var fresh;
+        try { fresh = await this.api.getItems(cfg, this.filterValue, BLANK); }
+        catch (e) { return false; }          // a read failure is the write path's problem
+        if (fresh.rows.length !== this.original.length) return true;
+        var now = {};
+        fresh.rows.forEach(function (it) {
+          var v = it[cfg.sortField];
+          now[it.Id] = (typeof v === 'number' && isFinite(v)) ? v : null;
+        });
+        for (var i = 0; i < this.original.length; i++) {
+          var r = this.original[i];
+          if (!(r.id in now)) return true;   // row vanished from the scope
+          if (now[r.id] !== r.sort) return true;
+        }
+        return false;
       },
 
       /* ---- reordering ---- */
@@ -410,12 +477,14 @@
         this.sayPosition(row);
       },
       moveUp(id) {
+        if (this.saving || this.loading) return;
         var vis = this.visible, vi = -1;
         for (var i = 0; i < vis.length; i++) if (vis[i].id === id) { vi = i; break; }
         if (vi <= 0) return;
         this.moveNear(id, vis[vi - 1].id, 'before');
       },
       moveDown(id) {
+        if (this.saving || this.loading) return;
         var vis = this.visible, vi = -1;
         for (var i = 0; i < vis.length; i++) if (vis[i].id === id) { vi = i; break; }
         if (vi < 0 || vi >= vis.length - 1) return;
@@ -424,6 +493,10 @@
 
       /* ---- drag layer (hand-rolled HTML5 DnD) ---- */
       onDragStart(e, id) {
+        // Save snapshots `pending` once. A drag landing mid-save would change the
+        // local order without changing what is being written, and the reload
+        // afterwards would silently discard it.
+        if (this.saving || this.loading) { e.preventDefault(); return; }
         this.dragId = id;
         try { e.dataTransfer.setData('text/plain', String(id)); } catch (err) { /* IE quirk */ }
         e.dataTransfer.effectAllowed = 'move';
@@ -549,7 +622,7 @@
         SP().sp.setup({ sp: { baseUrl: baseUrl } });
         return cfg;
       },
-      getFilterChoices: async function (cfg, rows) {
+      getFilterChoices: async function (cfg) {
         var ff = cfg.filterField;
         if (ff.type === 'Choice') {
           try {
@@ -559,18 +632,44 @@
             if (field && field.Choices && field.Choices.length) return field.Choices;
           } catch (e) { /* fall back to observed values */ }
         }
-        return distinctValues(rows, ff.internalName);
+        // Non-Choice: read the column across the WHOLE list. Deriving choices from
+        // the current (server-scoped) page would only ever offer the value already
+        // selected.
+        var cq = SP().sp.web.lists.getByTitle(cfg.title).items;
+        return distinctValues(await cq.select(ff.internalName).top(FETCH_TOP).get(), ff.internalName);
       },
-      getItems: async function (cfg) {
+      /* Scope on the SERVER once a filter value is chosen. Filtering client-side
+         after .top(N) is wrong at scale: the cap applies to the whole list first, so
+         rows in the chosen scope can fall outside the window entirely — and Save then
+         renumbers a partial scope and collides with rows it never saw. Asking for
+         FETCH_TOP + 1 distinguishes "exactly full" from "there is more". */
+      getItems: async function (cfg, filterValue, blankSentinel) {
         var select = ['Id', 'Title', cfg.sortField];
         (cfg.displayFields || []).forEach(function (f) { select.push(f.internalName); });
         if (cfg.filterField) select.push(cfg.filterField.internalName);
         var uniq = select.filter(function (s, i) { return select.indexOf(s) === i; });
-        var items = SP().sp.web.lists.getByTitle(cfg.title).items;
-        return items.select.apply(items, uniq).top(FETCH_TOP).orderBy(cfg.sortField, true).get();
+
+        var q = SP().sp.web.lists.getByTitle(cfg.title).items;
+        q = q.select.apply(q, uniq);
+        if (cfg.filterField && filterValue) {
+          var fname = cfg.filterField.internalName;
+          q = q.filter(filterValue === blankSentinel
+            ? fname + ' eq null'
+            : fname + " eq '" + String(filterValue).replace(/'/g, "''") + "'");
+        }
+        var rows = await q.top(FETCH_TOP + 1).orderBy(cfg.sortField, true).get();
+        return { rows: rows.slice(0, FETCH_TOP), overflow: rows.length > FETCH_TOP };
       },
+      /* ETags: updates go out with "*" (force). Reading real per-item ETags needs an
+         OData metadata level this rollup may not be configured for, so switching blind
+         could break every save; the stale-write window is covered by hasConflict()
+         re-reading the scope immediately before this runs. Real ETags remain a
+         follow-up to validate against the live tenant.
+         Chunks are NOT a transaction — on failure we attach how many rows committed so
+         the caller can tell the user the truth instead of "nothing changed". */
       saveOrder: async function (cfg, changes) {
         var list = SP().sp.web.lists.getByTitle(cfg.title);
+        var committed = 0;
         for (var i = 0; i < changes.length; i += 100) {
           var chunk = changes.slice(i, i + 100);
           var batch = SP().sp.web.createBatch();
@@ -579,7 +678,9 @@
             payload[cfg.sortField] = c.value;
             list.items.getById(c.id).inBatch(batch).update(payload, '*');
           });
-          await batch.execute();
+          try { await batch.execute(); }
+          catch (e) { e.committed = committed; throw e; }
+          committed += chunk.length;
         }
       }
     };
@@ -632,8 +733,31 @@
     function delay(ms) { return new Promise(function (r) { window.setTimeout(r, ms); }); }
     return {
       getConfig: async function () { await delay(250); return JSON.parse(JSON.stringify(MOCK_CONFIG)); },
-      getFilterChoices: async function (cfg, rows) { await delay(80); return distinctValues(rows, cfg.filterField.internalName); },
-      getItems: async function (cfg) { await delay(350); return JSON.parse(JSON.stringify(MOCK_ITEMS[cfg.title] || [])); },
+      getFilterChoices: async function (cfg) {
+        await delay(80);
+        return distinctValues(MOCK_ITEMS[cfg.title] || [], cfg.filterField.internalName);
+      },
+      getItems: async function (cfg, filterValue, blankSentinel) {
+        await delay(350);
+        var all = JSON.parse(JSON.stringify(MOCK_ITEMS[cfg.title] || []));
+        var ff = cfg.filterField;
+        if (ff && filterValue) {
+          var n = ff.internalName;
+          all = all.filter(function (it) {
+            var v = it[n];
+            return filterValue === blankSentinel
+              ? (v === null || v === undefined || v === '')
+              : String(v == null ? '' : v) === filterValue;
+          });
+        }
+        all.sort(function (a, b) {
+          var av = a[cfg.sortField], bv = b[cfg.sortField];
+          if (av == null) return bv == null ? a.Id - b.Id : -1;
+          if (bv == null) return 1;
+          return (av - bv) || (a.Id - b.Id);
+        });
+        return { rows: all.slice(0, FETCH_TOP), overflow: all.length > FETCH_TOP };
+      },
       saveOrder: async function (cfg, changes) {
         await delay(450);
         var items = MOCK_ITEMS[cfg.title] || [];

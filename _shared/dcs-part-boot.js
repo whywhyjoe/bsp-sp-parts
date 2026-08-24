@@ -156,6 +156,7 @@
     var editPolicy = o.editMode || 'placeholder';
     var label = o.label || o.id;
     var subscribed = false;
+    var pollTimer = null, pollUntil = 0, observer = null, debounceTimer = null;
 
     // Guard value encodes the mode, so leaving edit mode re-mounts the live tool.
     function guardValue(editing) { return editing ? o.id + ':edit' : o.id; }
@@ -202,10 +203,42 @@
       return mounted;
     }
 
+    /* ── Why this is a persistent watcher and not a one-shot wait ──────────────
+       An earlier version waited once via waitForElement and then mounted. Two ways
+       that loses:
+         · waitForElement is querySelector-based, so it resolves as soon as ANY host
+           exists. A second web part instance rendered later never got mounted.
+         · On SPA navigation the OUTGOING host is often still in the DOM. The wait
+           resolved against it, mountAll() no-opped because its guard already matched,
+           and the incoming host — which arrived after — was never mounted.
+       Both are the same mistake: treating "a host exists" as "work is done". mountAll()
+       is idempotent and guard-driven, so the fix is simply to keep calling it. A
+       debounced MutationObserver catches DOM arrivals (including SharePoint's authoring
+       canvas appearing, which is how an edit-mode transition is noticed), and a single
+       bounded poll covers anything the observer misses. There is exactly ONE poll timer
+       ever: repeated navigations extend its deadline instead of stacking new loops. */
+    function schedulePoll(ms) {
+      pollUntil = Math.max(pollUntil, Date.now() + ms);
+      if (pollTimer) return;                       // never accumulate loops
+      pollTimer = window.setInterval(function () {
+        mountAll();
+        if (Date.now() > pollUntil) { window.clearInterval(pollTimer); pollTimer = null; }
+      }, 150);
+    }
+
+    function startObserving() {
+      if (observer || !window.MutationObserver || !document.documentElement) return;
+      observer = new MutationObserver(function () {
+        if (debounceTimer) return;
+        debounceTimer = window.setTimeout(function () { debounceTimer = null; mountAll(); }, 150);
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    }
+
     function boot() {
-      // waitForElement is querySelector-based (first match only) — it is just the
-      // "something showed up" trigger. mountAll() then handles EVERY host itself.
-      window.waitForElement(o.selector, function () { mountAll(); }, o.timeout || 30000, 150);
+      mountAll();
+      schedulePoll(o.timeout || 30000);
+      startObserving();
     }
 
     function subscribeOnce() {
@@ -222,11 +255,20 @@
     boot();
     subscribeOnce();
 
-    // Edit mode can flip without a navigation (author clicks Edit). Re-check briefly.
-    window.setTimeout(mountAll, 800);
-    window.setTimeout(mountAll, 2500);
-
-    var handle = { id: o.id, remount: boot, mountAll: mountAll, isEditMode: isEditMode };
+    var handle = {
+      id: o.id,
+      remount: boot,
+      mountAll: mountAll,
+      isEditMode: isEditMode,
+      /* Drop every guard and re-render. Used when what render() would produce has
+         changed for reasons the guard cannot see — e.g. a dependency timed out and
+         the tool now wants to paint an error into hosts it already mounted. */
+      refresh: function () {
+        var hosts = document.querySelectorAll(o.selector);
+        for (var i = 0; i < hosts.length; i++) hosts[i].removeAttribute(GUARD);
+        return mountAll();
+      }
+    };
     window.dcsParts[o.id] = handle;   // debugging surface: dcsParts['sp-list-ordering'].mountAll()
     return handle;
   };

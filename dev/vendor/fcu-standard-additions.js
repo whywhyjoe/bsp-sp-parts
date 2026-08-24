@@ -146,3 +146,44 @@ function waitForAlpine(callback, timeout = 15000, interval = 100, onTimeout) {
           const q = new URLSearchParams(window.location.search);
           const mode = (q.get('mode') || q.get('Mode') || '').toLowerCase();
    ───────────────────────────────────────────────────────────────────────────── */
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   6. BUG — edit intent is sticky for the life of the tab, with no way out.
+      __dcsIsEditMode() checks, in order: the ?mode=edit param, then a per-path
+      sessionStorage flag, then authoring-DOM heuristics. Step 1 WRITES that flag
+      and step 2 treats it as authoritative forever — but nothing in the includes
+      ever clears it. So after a user opens ?mode=Edit and then saves/publishes
+      (SharePoint drops the param and tears down the authoring DOM), every later
+      visit to that path in the same tab still reports "editing". Anything that
+      suspends itself during authoring — including sp-list-ordering, which shows a
+      paused placeholder — stays suspended until the tab is closed.
+
+      Fix: stop treating the stored intent as permanent. Only honour it while the
+      authoring DOM is actually present, and clear it once it isn't.
+
+          function __dcsIsEditMode() {
+            try {
+              if (__dcsHasModeEditParam()) {
+                sessionStorage.setItem(__dcsEditKey, '1');
+                return true;
+              }
+              if (sessionStorage.getItem(__dcsEditKey) === '1') {
+                // Intent survives SharePoint cleaning the URL, but not the end of
+                // the authoring session itself.
+                if (__dcsLooksLikeSpEditModeDom()) return true;
+                sessionStorage.removeItem(__dcsEditKey);
+                return false;
+              }
+              return __dcsLooksLikeSpEditModeDom();
+            } catch {
+              return __dcsHasModeEditParam() || __dcsLooksLikeSpEditModeDom();
+            }
+          }
+
+      Trade-off worth naming: the stored flag exists because the authoring DOM may
+      not have rendered yet when scripts first run, so this makes the very first
+      check after a URL cleanup slightly more likely to say "not editing". That is
+      why __dcsApplyPageModeClasses() already re-runs at +500 ms and on
+      DOMContentLoaded, and why consumers should re-check rather than latch — as
+      dcsMountPart() does via its observer.
+   ───────────────────────────────────────────────────────────────────────────── */
