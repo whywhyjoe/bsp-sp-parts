@@ -49,6 +49,15 @@
 <div data-sp-part="list-ordering"
      data-config="/sites/FCUPortal/SiteAssets/sp-parts/sp-list-ordering/sp-list-ordering.config.json"></div>
 
+<!-- pnp2.bundle.js exposes the global `pnp2`. Drop this tag if the page already
+     loads PnPjs via the standard include; a second load is harmless either way. -->
 <script src="/sites/FCUPortal/Code/lib/pnp2.bundle.js"></script>
+
+<!-- Shared boot helper (dcsMountPart). Must come BEFORE the tool script. It uses
+     fcu-standard.js's waitForElement / waitForPnP2 / dcsOnSpaNavigation /
+     dcsRegisterAlpineComponent when present, and defines stand-ins when they aren't,
+     so the tool also runs on pages without the standard include. -->
+<script src="/sites/FCUPortal/SiteAssets/sp-parts/_shared/dcs-part-boot.js"></script>
+
 <script src="/sites/FCUPortal/SiteAssets/sp-parts/sp-list-ordering/sp-list-ordering.js"></script>
 <script defer src="/sites/FCUPortal/Code/lib/alpine.js"></script>

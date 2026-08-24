@@ -17,9 +17,17 @@ Every tool is one folder with four artifacts:
 | `<tool>.css` | Tool-local styles built on design-system tokens. | Once per site |
 | `<tool>.config.json` | **Owned by the embedding page**, referenced by the stub's `data-config`. Sample ships in the tool folder. | One per instance |
 
+Plus one repo-wide shared file: **[`_shared/dcs-part-boot.js`](_shared/)** — the boot
+contract every tool delegates to (host wait, multi-instance mounting, edit-mode
+placeholder, SPA re-mount). Deployed once per site, loaded before any tool script.
+
 Shared runtime prerequisites, already live on the portal: the design system
-bundle (`Code/bsp-design/styles.css`) and the self-hosted libs
-(`Code/lib/alpine.js`, `Code/lib/pnp2.bundle.js`).
+bundle (`Code/bsp-design/styles.css`), the self-hosted libs (`Code/lib/alpine.js`,
+`Code/lib/pnp2.bundle.js` → global **`pnp2`**), and `fcu-standard.js`, which is
+included at the top of every page and supplies `waitForElement`, `waitForPnP2`,
+`dcsOnSpaNavigation`, `dcsRegisterAlpineComponent` and `__dcsIsEditMode`. Tools use
+those when present and fall back to stand-ins in `_shared/dcs-part-boot.js`, so they
+also run outside SharePoint.
 
 ## Tools
 

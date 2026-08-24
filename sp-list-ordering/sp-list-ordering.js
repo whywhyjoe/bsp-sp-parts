@@ -14,9 +14,12 @@
  *  next Save — which is also what self-heals collisions created when items move
  *  between filter categories. Consuming apps should sort by SortOrder asc, ID asc.
  *
- *  Data layer: PnPjs v2 (self-hosted pnp2.bundle.js → global `pnp`). When `pnp`
- *  is absent (or the page is opened from disk) a mock adapter with canned data
- *  takes over, so the tool is fully exercisable outside SharePoint.
+ *  Data layer: PnPjs v2 (self-hosted pnp2.bundle.js → global `pnp2`). Mock data is
+ *  opt-in only (file: protocol, or data-mock on the host div) — on a live page a
+ *  missing pnp2 raises a visible error rather than quietly showing demo rows.
+ *
+ *  Boot: delegated to dcsMountPart() in _shared/dcs-part-boot.js, which owns the
+ *  host wait, multi-instance mounting, edit-mode placeholder, and SPA re-mount.
  */
 (function () {
   'use strict';
@@ -87,7 +90,7 @@
      Alpine root). Composed from the canonical bsp-design vocabulary. */
   var MARKUP =
     '<div class="spinner-row" data-lro-boot><span class="spinner spinner--16" aria-hidden="true"></span> Loading list ordering…</div>' +
-    '<div class="lro" x-data="listReorderTool()" x-cloak>' +
+    '<div class="lro" x-data="listReorderTool" x-cloak>' +
 
     '  <div class="filterbar">' +
     '    <div class="filterbar__group">' +
@@ -202,8 +205,11 @@
 
     '</div>';
 
-  /* ════════ Alpine component factory (global — the injected markup's x-data). */
-  window.listReorderTool = function () {
+  /* ════════ Alpine component factory — registered by name via the house helper
+     (dcsRegisterAlpineComponent → Alpine.data), so the markup is x-data="listReorderTool".
+     Registration happens on alpine:init AND immediately if Alpine is already running,
+     so injected markup resolves the name in either load order. */
+  function listReorderToolFactory() {
     return {
       hid: 'lro-help-' + (++seq),
       configUrl: '', config: null, api: null, mock: false,
@@ -269,8 +275,24 @@
           if (boot) boot.parentNode.removeChild(boot);
         }
         this.configUrl = (host && host.getAttribute('data-config')) || 'sp-list-ordering.config.json';
-        this.mock = window.location.protocol === 'file:' || typeof window.pnp === 'undefined';
-        this.api = this.mock ? makeMockApi() : makeLiveApi(this.configUrl);
+
+        // Mock is opt-in, never a silent fallback: only off a real web server, or when
+        // the host div explicitly asks for it. On a live page a missing PnPjs is an
+        // error the user can see — not demo data quietly standing in for their list.
+        this.mock = window.location.protocol === 'file:' || (host && host.hasAttribute('data-mock'));
+        if (this.mock) {
+          this.api = makeMockApi();
+        } else {
+          try {
+            await waitForSP();
+          } catch (e) {
+            this.error = 'PnPjs (pnp2) did not load, so the list could not be reached. '
+              + 'Check the pnp2.bundle.js script URL in the web part HTML.';
+            this.loading = false;
+            return;
+          }
+          this.api = makeLiveApi(this.configUrl);
+        }
         try {
           this.config = validateConfig(await this.api.getConfig());
           this.listKey = this.config.lists[0].title;
@@ -435,7 +457,7 @@
         this.toastMsg = '';
       }
     };
-  };
+  }
 
   /* ════════ Config validation ════════ */
   function validateConfig(cfg) {
@@ -464,8 +486,37 @@
     return out.sort();
   }
 
-  /* ════════ Live adapter — PnPjs v2 (global `pnp`), the only place SharePoint
-     is touched. Swap this object out to change the transport. ════════ */
+  /* ════════ PnPjs access ════════
+     The prod rollup exposes PnPjs v2 as the global `pnp2` (fcu-standard.js's
+     waitForPnP2 checks window.pnp2.sp.web). `pnp` is accepted as a fallback in case
+     a page loads an unwrapped bundle. Keep every reference going through SP() so the
+     global name lives in exactly one place. */
+  function SP() { return window.pnp2 || window.pnp; }
+
+  /* Resolve once PnPjs is genuinely usable. Prefers the house waiter; falls back to
+     an equivalent poll so the tool still works without fcu-standard.js. */
+  function waitForSP(timeout) {
+    timeout = timeout || 15000;
+    return new Promise(function (resolve, reject) {
+      if (typeof window.waitForPnP2 === 'function') {
+        var settled = false;
+        window.waitForPnP2(function (api) { settled = true; resolve(api); }, timeout, 100);
+        // waitForPnP2 has no timeout callback today, so guard the silent-hang case.
+        window.setTimeout(function () { if (!settled) reject(new Error('pnp2 timeout')); }, timeout + 250);
+        return;
+      }
+      var start = Date.now();
+      (function check() {
+        var api = SP();
+        if (api && api.sp && api.sp.web) { resolve(api); return; }
+        if (Date.now() - start >= timeout) { reject(new Error('pnp2 timeout')); return; }
+        window.setTimeout(check, 100);
+      })();
+    });
+  }
+
+  /* ════════ Live adapter — PnPjs v2, the only place SharePoint is touched.
+     Swap this object out to change the transport. ════════ */
   function makeLiveApi(configUrl) {
     return {
       getConfig: async function () {
@@ -475,14 +526,14 @@
         var ctx = window._spPageContextInfo;
         var baseUrl = (ctx && (ctx.webAbsoluteUrl || ctx.webServerRelativeUrl)) || cfg.webUrl;
         if (!baseUrl) throw new Error('no web URL — set "webUrl" in the config JSON.');
-        window.pnp.sp.setup({ sp: { baseUrl: baseUrl } });
+        SP().sp.setup({ sp: { baseUrl: baseUrl } });
         return cfg;
       },
       getFilterChoices: async function (cfg, rows) {
         var ff = cfg.filterField;
         if (ff.type === 'Choice') {
           try {
-            var field = await window.pnp.sp.web.lists.getByTitle(cfg.title)
+            var field = await SP().sp.web.lists.getByTitle(cfg.title)
               .fields.getByInternalNameOrTitle(ff.internalName)
               .select('Choices', 'TypeAsString').get();
             if (field && field.Choices && field.Choices.length) return field.Choices;
@@ -495,14 +546,14 @@
         (cfg.displayFields || []).forEach(function (f) { select.push(f.internalName); });
         if (cfg.filterField) select.push(cfg.filterField.internalName);
         var uniq = select.filter(function (s, i) { return select.indexOf(s) === i; });
-        var items = window.pnp.sp.web.lists.getByTitle(cfg.title).items;
+        var items = SP().sp.web.lists.getByTitle(cfg.title).items;
         return items.select.apply(items, uniq).top(FETCH_TOP).orderBy(cfg.sortField, true).get();
       },
       saveOrder: async function (cfg, changes) {
-        var list = window.pnp.sp.web.lists.getByTitle(cfg.title);
+        var list = SP().sp.web.lists.getByTitle(cfg.title);
         for (var i = 0; i < changes.length; i += 100) {
           var chunk = changes.slice(i, i + 100);
-          var batch = window.pnp.sp.web.createBatch();
+          var batch = SP().sp.web.createBatch();
           chunk.forEach(function (c) {
             var payload = {};
             payload[cfg.sortField] = c.value;
@@ -575,36 +626,11 @@
     };
   }
 
-  /* ════════ Boot — SharePoint renders web part markup on its own schedule, so a
-     plain timer + DOM check is the reliable primary mechanism (a MutationObserver
-     is attached as an accelerator only). Swappable for the house wait pattern. */
-  function waitFor(test, opts) {
-    opts = opts || {};
-    var interval = opts.interval || 150;
-    var timeout = opts.timeout || 20000;
-    return new Promise(function (resolve, reject) {
-      var timer = null, mo = null, start = Date.now(), done = false;
-      function finish(ok, v) {
-        if (done) return;
-        done = true;
-        if (timer) window.clearInterval(timer);
-        if (mo) mo.disconnect();
-        if (ok) resolve(v); else reject(new Error('waitFor timed out'));
-      }
-      function tick() {
-        var v = null;
-        try { v = test(); } catch (e) { v = null; }
-        if (v) { finish(true, v); return; }
-        if (Date.now() - start > timeout) finish(false);
-      }
-      timer = window.setInterval(tick, interval);
-      if (opts.observe && window.MutationObserver && document.documentElement) {
-        mo = new MutationObserver(tick);
-        mo.observe(document.documentElement, { childList: true, subtree: true });
-      }
-      tick();
-    });
-  }
+  /* ════════ Boot ════════
+     Everything timing-related lives in _shared/dcs-part-boot.js: waiting for the host
+     element(s), mounting every instance idempotently, showing a placeholder while the
+     page is being authored, and re-mounting after SharePoint SPA navigation. This file
+     only says WHAT to render; dcsMountPart says WHEN. */
 
   function injectSprite() {
     if (document.getElementById(SPRITE_WRAP_ID)) return;
@@ -616,34 +642,30 @@
     document.body.insertBefore(holder, document.body.firstChild);
   }
 
-  function plainError(msg) {
-    return '<div class="msgbar msgbar--danger" role="alert">' +
-      '<svg class="icon icon--20 msgbar__icon" aria-hidden="true"><use href="#ic-fluent-dismiss-circle-24-regular"></use></svg>' +
-      '<div class="msgbar__body">' + msg + '</div></div>';
+  // Register the component by name before anything mounts.
+  window.dcsRegisterAlpineComponent({ name: 'listReorderTool', factory: listReorderToolFactory });
+
+  if (typeof window.dcsMountPart !== 'function') {
+    console.error('[sp-list-ordering] _shared/dcs-part-boot.js is not loaded — ' +
+      'add its <script> tag before this one in the web part HTML.');
+    return;
   }
 
-  function mountAll() {
-    injectSprite();
-    var hosts = document.querySelectorAll(MOUNT_SELECTOR + ':not([data-lro-mounted])');
+  window.dcsMountPart({
+    id: 'sp-list-ordering',   // handle available at window.dcsParts['sp-list-ordering']
+    selector: MOUNT_SELECTOR,
+    label: 'List ordering',
+    editMode: 'placeholder',
+    render: function () { injectSprite(); return MARKUP; }
+  });
+
+  // Surface a missing Alpine rather than rendering inert markup forever.
+  window.waitForAlpine(function () {}, 20000, 100, function () {
+    var hosts = document.querySelectorAll(MOUNT_SELECTOR);
     for (var i = 0; i < hosts.length; i++) {
-      hosts[i].setAttribute('data-lro-mounted', '');
-      hosts[i].innerHTML = MARKUP;
+      hosts[i].innerHTML = '<div class="msgbar msgbar--danger" role="alert">' +
+        '<svg class="icon icon--20 msgbar__icon" aria-hidden="true"><use href="#ic-fluent-dismiss-circle-24-regular"></use></svg>' +
+        '<div class="msgbar__body">Alpine.js did not load — check the alpine.js script URL in the web part HTML.</div></div>';
     }
-  }
-
-  waitFor(function () { return document.querySelector(MOUNT_SELECTOR + ':not([data-lro-mounted])'); },
-    { observe: true, timeout: 30000 })
-    .then(function () {
-      mountAll();
-      // Alpine v3 auto-initializes trees that are already in (or later added to)
-      // the document, so mounting before or after Alpine starts both work. We
-      // only wait here so a missing script tag produces a visible error.
-      return waitFor(function () { return window.Alpine; }, { timeout: 20000 }).catch(function () {
-        var hosts = document.querySelectorAll(MOUNT_SELECTOR);
-        for (var i = 0; i < hosts.length; i++) {
-          hosts[i].innerHTML = plainError('Alpine.js did not load — check the alpine.js script URL in the web part HTML.');
-        }
-      });
-    })
-    .catch(function () { /* no host div on this page — nothing to mount */ });
+  });
 })();

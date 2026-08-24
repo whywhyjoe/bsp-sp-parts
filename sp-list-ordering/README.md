@@ -32,8 +32,10 @@ The shared assets deploy **once per site**; the stub + config are
 **per-instance** (each embedding page has its own copy of the stub pointing at
 its own config):
 
-1. Upload `sp-list-ordering.js`, `sp-list-ordering.css` to the site (e.g.
-   `SiteAssets/sp-parts/sp-list-ordering/`).
+1. Upload `_shared/dcs-part-boot.js` (e.g. `SiteAssets/sp-parts/_shared/`) and
+   `sp-list-ordering.js`, `sp-list-ordering.css` (e.g.
+   `SiteAssets/sp-parts/sp-list-ordering/`). The boot helper is shared by every tool in
+   this repo — upload it once per site.
 2. Write a config JSON for your lists (schema below) and upload it wherever the
    embedding app keeps its assets.
 3. Copy `sp-list-ordering.webpart.html`, point its `data-config` at your JSON,
@@ -57,8 +59,14 @@ stub owns the per-instance presentation:
 
 Prereqs on the page/site: the design system
 (`/sites/FCUPortal/Code/bsp-design/styles.css`), self-hosted Alpine and PnPjs v2
-(`/sites/FCUPortal/Code/lib/alpine.js`, `…/pnp2.bundle.js`). The stub loads all
-of these; duplicate tags are harmless if the page already has them.
+(`/sites/FCUPortal/Code/lib/alpine.js`, `…/pnp2.bundle.js` → global **`pnp2`**). The stub
+loads all of these; duplicate tags are harmless if the page already has them.
+
+**Behavior on a real page.** The tool survives SharePoint SPA navigation (it re-mounts via
+`dcsOnSpaNavigation`), shows a paused placeholder instead of the live grid while the page is
+in edit mode, and — if `pnp2` never loads — shows a visible error rather than quietly
+falling back to demo data. Mock data appears only when opened from disk or when the host div
+carries `data-mock`.
 
 Two stubs on one page work: the loader mounts every
 `[data-sp-part="list-ordering"]` div independently, each with its own config.
@@ -108,8 +116,15 @@ blank — either way they surface as *Needs placement* here.
 
 ## Dev / mock mode
 
-When `pnp` is absent (or the page is opened from `file:`), a mock adapter with
-built-in demo lists takes over automatically — including one missing and one
-duplicated sort value so the *Needs placement* path is visible. Open
-`../dev/sp-list-ordering.dev.html` straight from disk; it also simulates the web
-part zone rendering late, which exercises the timer-based boot.
+Mock data is **opt-in, never a silent fallback**: it engages only when the page is
+opened from `file:` or when the host div carries `data-mock`. On a real page a missing
+`pnp2` produces a visible error instead — demo rows must never stand in for a user's
+actual list. The demo lists include one missing and one duplicated sort value so the
+*Needs placement* path is visible.
+
+Open `../dev/sp-list-ordering.dev.html` straight from disk. The harness simulates the
+web part zone rendering late (exercising the boot waiter) and adds two buttons:
+**Simulate SPA navigation** (tears the zone down and re-renders it, proving re-mount)
+and **Toggle edit mode** (proving the placeholder path). It deliberately does *not*
+load `fcu-standard.js`, so it also exercises the stand-in helpers in
+`_shared/dcs-part-boot.js`.

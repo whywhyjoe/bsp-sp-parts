@@ -23,6 +23,20 @@ deployment**, never as a dependency to rebuild.
   `pnp`). Keep every pnpjs touchpoint inside one adapter object per tool, with a
   mock twin implementing the same interface.
 
+## Boot contract — do not hand-roll it
+Tools **must** delegate startup to `dcsMountPart()` in `_shared/dcs-part-boot.js` rather
+than writing their own waiters. It owns the host wait, multi-instance idempotent mounting,
+the edit-mode placeholder, and SPA re-mount. Register Alpine components through
+`dcsRegisterAlpineComponent({ name, factory })` (house standard → `Alpine.data`), so markup
+uses `x-data="<name>"` with no parentheses. See `_shared/README.md` for the two mount styles
+(injected vs static) and why re-mount differs between them.
+
+PnPjs v2 is the global **`pnp2`** (not `pnp`). Never decide mock-vs-live from a synchronous
+`typeof` check: wait via `waitForPnP2`, and on a live page treat a missing `pnp2` as a
+**visible error**. Mock data must be opt-in only (`file:` protocol or `data-mock` on the
+host) — silently substituting demo rows for a user's real list is the worst failure mode
+this repo can ship.
+
 ## The web part pattern (what every tool follows)
 1. **Stub** `<tool>.webpart.html` — per-instance; a page copies it and points
    `data-config` at its own JSON. Keep it tiny; all environment URLs live here
