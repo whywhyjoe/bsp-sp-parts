@@ -1,0 +1,32 @@
+<!-- classic-referrer-redirects: paste this into the custom script web part
+     on the landing page that SharePoint redirects old-site traffic to.
+     Keep the config block ABOVE the script tag.
+
+     Hosting note: stock modern web parts can't run this — the modern Embed
+     web part only accepts iframe embeds and the classic Script Editor
+     doesn't exist on modern pages. This assumes the custom script-editor
+     web part already in use on these sites (any SPFx script-editor-style
+     web part works).
+
+     The JSON below is the live config and MUST stay identical to
+     redirects.config.json — edit that file, run `node test.js` (which
+     fails on any drift), then paste the JSON in here. Upload
+     classic-redirect.js to the new site's SiteAssets and fix the src path
+     to match. -->
+
+<script type="application/json" id="classic-redirect-config">
+{
+  "oldSiteFragment": "/sites/TandO-Classic/FCU",
+  "newSiteBase": "/sites/TandO-FCU",
+  "signalParam": "classicRedirect",
+  "fallback": "SitePages/Migration-Info.aspx",
+  "redirects": {
+    "": "SitePages/Home.aspx",
+    "NWWSH": "SitePages/NWWSH.aspx",
+    "NWWSH/blah.aspx": "SitePages/NWWSH-Blah.aspx",
+    "NWWSH/reports/monthly.aspx": "SitePages/Monthly-Reports.aspx",
+    "Training": "https://contoso.sharepoint.com/sites/OtherSite/SitePages/Training.aspx"
+  }
+}
+</script>
+<script src="/sites/TandO-FCU/SiteAssets/classic-redirect.js"></script>

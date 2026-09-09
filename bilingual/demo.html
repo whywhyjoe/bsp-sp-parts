@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The inline English below is authored fallback: the page reads fine
+     in source and degrades to EN if scripts fail. apply() overwrites it. -->
+<title data-intl="app.title">Client Onboarding</title>
+<script>
+  // Dual-DOM tier: set the language before first paint so lang-blocks.css
+  // hides the right blocks with no flash of the wrong language.
+  // Placeholder detection — keep in lockstep with detectLang() in intl.js.
+  document.documentElement.lang =
+    /[?&]lang=fr/.test(location.search) ? 'fr' : 'en';
+</script>
+<link rel="stylesheet" href="lang-blocks.css">
+<style>
+  body { font-family: "Segoe UI", system-ui, sans-serif; margin: 2rem auto; max-width: 40rem; color: #222; }
+  header { display: flex; justify-content: space-between; align-items: baseline; }
+  #langToggle { background: none; border: none; color: #0057b8; cursor: pointer; font-size: 1rem; text-decoration: underline; }
+  .search { display: flex; gap: .5rem; margin: 1rem 0; }
+  .search input { flex: 1; padding: .4rem .6rem; }
+  .muted { color: #666; font-size: .9rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 data-intl="app.title">Client Onboarding</h1>
+  <!-- Canadian convention: the toggle names the OTHER language.
+       The dictionary handles that naturally — no special casing. -->
+  <!-- lang-keep: labelled in the OTHER language on purpose; without it
+       lang-blocks.css would hide the toggle itself. -->
+  <button id="langToggle" class="lang-keep" data-intl="ui.langToggle" lang="fr">Français</button>
+</header>
+
+<p data-intl-html="app.intro">Track <strong>new client</strong> requests through review and approval.</p>
+
+<div class="search">
+  <input type="search"
+         data-intl-attr="placeholder:search.placeholder;title:search.tooltip"
+         placeholder="Search by client name…">
+  <button data-intl="search.button">Search</button>
+</div>
+
+<!-- Everything below is script-rendered via intl.t() -->
+<p id="greeting"></p>
+<p id="count"></p>
+<p id="updated" class="muted"></p>
+<p id="exportHint" class="muted"></p>
+
+<hr>
+
+<!-- QUICK TIER: a throwaway widget — no dictionary keys, both languages
+     inline in this file. data-fr rides beside the authored English. -->
+<h2 data-intl>Quick widget</h2>
+<label for="speed" data-fr="Vitesse">Speed</label>
+<input id="speed" type="range" min="0" max="100" value="40"
+       data-fr-title="Glisser pour régler" title="Drag to adjust">
+<span id="speedVal" class="muted"></span>
+
+<hr>
+
+<!-- DUAL-DOM TIER: whole blocks per language, real lang attributes,
+     hidden/shown purely by lang-blocks.css matching <html lang>.
+     Same-named input in both blocks: apply() disables the hidden copy
+     so only the visible one submits. Never duplicate ids across blocks. -->
+<section lang="en">
+  <h2>Scheduled maintenance</h2>
+  <p>Online statements will be unavailable Sunday from 2–4 a.m.</p>
+  <label>Notify me:
+    <input type="email" name="notifyEmail" placeholder="you@example.com">
+  </label>
+</section>
+<section lang="fr">
+  <h2>Entretien planifié</h2>
+  <p>Les relevés en ligne seront indisponibles dimanche, de 2 h à 4 h.</p>
+  <label>M’aviser :
+    <input type="email" name="notifyEmail" placeholder="vous@exemple.com">
+  </label>
+</section>
+
+<script src="intl.js"></script>
+<script src="strings.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  // Quick-tier heading: valueless data-intl means the English text is the
+  // key, and a flat entry supplies the French. Two lines total.
+  intl.addMessages({ 'Quick widget': 'Petit widget' });
+
+  // Vendor JSON round-trip (needs http(s), so it's inert on file://):
+  // strings.fr.json completes results.exportHint's pending translation.
+  // intl.load('strings.fr.json', 'fr');
+
+  function render() {
+    // The toggle is labelled in the language it switches TO — keep its
+    // lang attribute pointing there so screen readers pronounce it right.
+    document.getElementById('langToggle')
+      .setAttribute('lang', intl.getLang() === 'en' ? 'fr' : 'en');
+    document.getElementById('greeting').textContent =
+      intl.t('results.greeting', { name: 'Joe' });
+    // Locale-bound formatters: native Intl pinned to the active language.
+    document.getElementById('count').textContent =
+      intl.t('results.count', { count: intl.NumberFormat().format(1234) });
+    document.getElementById('updated').textContent =
+      intl.t('results.updated', {
+        date: intl.DateTimeFormat({ dateStyle: 'long' }).format(new Date())
+      });
+    // Untranslated key: falls back to English, gets logged for report().
+    document.getElementById('exportHint').textContent =
+      intl.t('results.exportHint');
+    renderSpeed();
+  }
+
+  // Quick-tier script string: inline EN/FR pair, no dictionary.
+  function renderSpeed() {
+    document.getElementById('speedVal').textContent =
+      intl.t('{n}% of maximum', '{n} % du maximum',
+             { n: document.getElementById('speed').value });
+  }
+  document.getElementById('speed').addEventListener('input', renderSpeed);
+
+  document.getElementById('langToggle').addEventListener('click', function () {
+    intl.setLang(intl.getLang() === 'en' ? 'fr' : 'en');
+  });
+
+  intl.apply();
+  render();
+  intl.onChange(render);
+  intl.report(); // console: keys still waiting on French
+})();
+</script>
+</body>
+</html>

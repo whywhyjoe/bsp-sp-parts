@@ -1,0 +1,310 @@
+{
+  "properties": {
+    "connectionReferences": {
+      "shared_sharepointonline": {
+        "api": {
+          "name": "shared_sharepointonline"
+        },
+        "connection": {
+          "connectionReferenceLogicalName": "bsp_BspNotifySharePoint"
+        },
+        "runtimeSource": "embedded"
+      },
+      "shared_office365": {
+        "api": {
+          "name": "shared_office365"
+        },
+        "connection": {
+          "connectionReferenceLogicalName": "bsp_BspNotifyOutlook"
+        },
+        "runtimeSource": "embedded"
+      },
+      "shared_teams": {
+        "api": {
+          "name": "shared_teams"
+        },
+        "connection": {
+          "connectionReferenceLogicalName": "bsp_BspNotifyTeams"
+        },
+        "runtimeSource": "embedded"
+      }
+    },
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        },
+        "$connections": {
+          "defaultValue": {},
+          "type": "Object"
+        },
+        "bsp_BspNotifySiteUrl": {
+          "defaultValue": "",
+          "type": "String",
+          "metadata": {
+            "schemaName": "bsp_BspNotifySiteUrl",
+            "description": "Absolute URL of the SharePoint site that holds the Notifications queue list"
+          }
+        },
+        "bsp_BspNotifyListName": {
+          "defaultValue": "Notifications",
+          "type": "String",
+          "metadata": {
+            "schemaName": "bsp_BspNotifyListName",
+            "description": "Title of the Notifications queue list"
+          }
+        },
+        "bsp_BspNotifySharedMailbox": {
+          "defaultValue": "",
+          "type": "String",
+          "metadata": {
+            "schemaName": "bsp_BspNotifySharedMailbox",
+            "description": "Default shared mailbox to send from when an item has no From value"
+          }
+        },
+        "bsp_BspNotifyTeamsErrorRecipient": {
+          "defaultValue": "",
+          "type": "String",
+          "metadata": {
+            "schemaName": "bsp_BspNotifyTeamsErrorRecipient",
+            "description": "Teams user the Workflow bot notifies on any error"
+          }
+        }
+      },
+      "triggers": {
+        "Recurrence": {
+          "type": "Recurrence",
+          "recurrence": {
+            "frequency": "Minute",
+            "interval": 10
+          },
+          "runtimeConfiguration": {
+            "concurrency": {
+              "runs": 1
+            }
+          }
+        }
+      },
+      "actions": {
+        "Try_main": {
+          "type": "Scope",
+          "runAfter": {},
+          "actions": {
+            "Get_queued_items": {
+              "type": "OpenApiConnection",
+              "runAfter": {},
+              "inputs": {
+                "host": {
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                  "connectionName": "shared_sharepointonline",
+                  "operationId": "GetItems"
+                },
+                "parameters": {
+                  "dataset": "@parameters('bsp_BspNotifySiteUrl')",
+                  "table": "@parameters('bsp_BspNotifyListName')",
+                  "$filter": "(NotifyStatus eq 'Queued') or (NotifyStatus eq 'Failed' and Attempts lt 3)",
+                  "$orderby": "ID asc",
+                  "$top": 25
+                },
+                "authentication": "@parameters('$authentication')"
+              }
+            },
+            "For_each_notification": {
+              "type": "Foreach",
+              "foreach": "@outputs('Get_queued_items')?['body/value']",
+              "runAfter": {
+                "Get_queued_items": [
+                  "Succeeded"
+                ]
+              },
+              "runtimeConfiguration": {
+                "concurrency": {
+                  "repetitions": 1
+                }
+              },
+              "actions": {
+                "Claim_item": {
+                  "type": "OpenApiConnection",
+                  "runAfter": {},
+                  "inputs": {
+                    "host": {
+                      "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                      "connectionName": "shared_sharepointonline",
+                      "operationId": "PatchItem"
+                    },
+                    "parameters": {
+                      "dataset": "@parameters('bsp_BspNotifySiteUrl')",
+                      "table": "@parameters('bsp_BspNotifyListName')",
+                      "id": "@items('For_each_notification')?['ID']",
+                      "item/NotifyStatus/Value": "Sending",
+                      "item/RunId": "@workflow()?['run']?['name']",
+                      "item/StatusTime": "@utcNow()",
+                      "item/Title": "@items('For_each_notification')?['Title']"
+                    },
+                    "authentication": "@parameters('$authentication')"
+                  }
+                },
+                "Try_send": {
+                  "type": "Scope",
+                  "runAfter": {
+                    "Claim_item": [
+                      "Succeeded"
+                    ]
+                  },
+                  "actions": {
+                    "Send_from_shared_mailbox": {
+                      "type": "OpenApiConnection",
+                      "runAfter": {},
+                      "inputs": {
+                        "host": {
+                          "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+                          "connectionName": "shared_office365",
+                          "operationId": "SharedMailboxSendEmailV2"
+                        },
+                        "parameters": {
+                          "emailMessage/MailboxAddress": "@if(empty(items('For_each_notification')?['From']), parameters('bsp_BspNotifySharedMailbox'), items('For_each_notification')?['From'])",
+                          "emailMessage/To": "@items('For_each_notification')?['To']",
+                          "emailMessage/Subject": "@items('For_each_notification')?['Title']",
+                          "emailMessage/Body": "@coalesce(items('For_each_notification')?['Body'], '')",
+                          "emailMessage/Cc": "@coalesce(items('For_each_notification')?['CC'], '')",
+                          "emailMessage/Bcc": "@coalesce(items('For_each_notification')?['BCC'], '')",
+                          "emailMessage/Importance": "Normal"
+                        },
+                        "authentication": "@parameters('$authentication')"
+                      }
+                    }
+                  }
+                },
+                "Resolve_sent": {
+                  "type": "OpenApiConnection",
+                  "runAfter": {
+                    "Try_send": [
+                      "Succeeded"
+                    ]
+                  },
+                  "inputs": {
+                    "host": {
+                      "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                      "connectionName": "shared_sharepointonline",
+                      "operationId": "PatchItem"
+                    },
+                    "parameters": {
+                      "dataset": "@parameters('bsp_BspNotifySiteUrl')",
+                      "table": "@parameters('bsp_BspNotifyListName')",
+                      "id": "@items('For_each_notification')?['ID']",
+                      "item/NotifyStatus/Value": "Sent",
+                      "item/StatusTime": "@utcNow()",
+                      "item/Attempts": "@add(coalesce(items('For_each_notification')?['Attempts'], 0), 1)",
+                      "item/Title": "@items('For_each_notification')?['Title']"
+                    },
+                    "authentication": "@parameters('$authentication')"
+                  }
+                },
+                "Handle_failure": {
+                  "type": "Scope",
+                  "runAfter": {
+                    "Try_send": [
+                      "Failed",
+                      "TimedOut"
+                    ]
+                  },
+                  "actions": {
+                    "Resolve_failed": {
+                      "type": "OpenApiConnection",
+                      "runAfter": {},
+                      "inputs": {
+                        "host": {
+                          "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                          "connectionName": "shared_sharepointonline",
+                          "operationId": "PatchItem"
+                        },
+                        "parameters": {
+                          "dataset": "@parameters('bsp_BspNotifySiteUrl')",
+                          "table": "@parameters('bsp_BspNotifyListName')",
+                          "id": "@items('For_each_notification')?['ID']",
+                          "item/NotifyStatus/Value": "Failed",
+                          "item/StatusTime": "@utcNow()",
+                          "item/Attempts": "@add(coalesce(items('For_each_notification')?['Attempts'], 0), 1)",
+                          "item/Detail": "@concat('BSP Notify send failed (run ', workflow()?['run']?['name'], ', ', utcNow(), '): ', string(result('Try_send')))",
+                          "item/Title": "@items('For_each_notification')?['Title']"
+                        },
+                        "authentication": "@parameters('$authentication')"
+                      }
+                    },
+                    "Notify_teams_item_error": {
+                      "type": "OpenApiConnection",
+                      "runAfter": {
+                        "Resolve_failed": [
+                          "Succeeded",
+                          "Failed"
+                        ]
+                      },
+                      "inputs": {
+                        "host": {
+                          "apiId": "/providers/Microsoft.PowerApps/apis/shared_teams",
+                          "connectionName": "shared_teams",
+                          "operationId": "PostMessageToConversation"
+                        },
+                        "parameters": {
+                          "poster": "Flow bot",
+                          "location": "Chat with Flow bot",
+                          "body/recipient": "@parameters('bsp_BspNotifyTeamsErrorRecipient')",
+                          "body/messageBody": "<p>BSP Notify: sending notification item @{items('For_each_notification')?['ID']} (\"@{items('For_each_notification')?['Title']}\", source @{items('For_each_notification')?['Source']}) failed in run @{workflow()?['run']?['name']}. The item is marked Failed on the Notifications list — see its Detail field and the flow run history.</p>"
+                        },
+                        "authentication": "@parameters('$authentication')"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "Notify_teams_run_error": {
+          "type": "OpenApiConnection",
+          "runAfter": {
+            "Try_main": [
+              "Failed",
+              "TimedOut"
+            ]
+          },
+          "inputs": {
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_teams",
+              "connectionName": "shared_teams",
+              "operationId": "PostMessageToConversation"
+            },
+            "parameters": {
+              "poster": "Flow bot",
+              "location": "Chat with Flow bot",
+              "body/recipient": "@parameters('bsp_BspNotifyTeamsErrorRecipient')",
+              "body/messageBody": "<p>BSP Notify: flow run @{workflow()?['run']?['name']} FAILED before completing the queue drain. Check the run history and look for items stuck in 'Sending' on the Notifications list.</p>"
+            },
+            "authentication": "@parameters('$authentication')"
+          }
+        },
+        "Terminate_failed": {
+          "type": "Terminate",
+          "runAfter": {
+            "Notify_teams_run_error": [
+              "Succeeded",
+              "Failed"
+            ]
+          },
+          "inputs": {
+            "runStatus": "Failed",
+            "runError": {
+              "code": "BspNotifyRunFailed",
+              "message": "BSP Notify run failed; see the Teams alert and the run history."
+            }
+          }
+        }
+      }
+    },
+    "templateName": null
+  },
+  "schemaVersion": "1.0.0.0"
+}

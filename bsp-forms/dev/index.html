@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BSP Forms · dev harness</title>
+  <!-- =================================================================
+    Local dev harness — runs the engine with ZERO SharePoint and ZERO
+    network: mock adapter, vendored Alpine, BSP CSS from the sibling
+    bsp-design-system clone.
+
+    Serve it over HTTP from the folder that CONTAINS BOTH clones
+    (the engine fetches the config + sprite, which file:// blocks):
+
+        cd <folder containing various/ and bsp-design-system/>
+        python -m http.server 8000
+        → http://localhost:8000/various/bsp-forms/dev/index.html
+
+    If your bsp-design-system clone lives elsewhere, adjust designBase
+    below. Writes land on window.__BSPF_MOCK_WRITES__ (see mock-sp.js);
+    add ?validate to the URL to also render the doctor report.
+  ================================================================== -->
+  <style>
+    /* Harness chrome only — the page around the web-part div. */
+    body { margin: 0; background: #f5f6f7; }
+    .harness-bar {
+      padding: 10px 24px; background: #001928; color: #fff;
+      font: 600 13px/1.4 "Segoe UI", sans-serif; letter-spacing: .02em;
+    }
+    .harness-bar small { font-weight: 400; opacity: .7; }
+    .harness-canvas { max-width: 860px; margin: 24px auto; background: #fff; border-radius: 8px; padding: 32px; }
+  </style>
+</head>
+<body>
+  <div class="harness-bar">BSP Forms · dev harness <small>— mock SharePoint, vendored Alpine · writes logged to <code>__BSPF_MOCK_WRITES__</code></small></div>
+
+  <!-- Simulates the modern-page canvas + the web part's own padding. -->
+  <div class="harness-canvas">
+
+    <!-- ============ the actual web part insert, dev-configured ============ -->
+    <script src="mock-sp.js"></script>
+    <script>
+      window.BSP_FORMS_SETTINGS = {
+        designBase: '../../../bsp-design-system/',   // sibling clone (adjust if yours differs)
+        alpineUrl: 'vendor/alpine.js',               // vendored, dev-only
+        mockSp: window.BSPF_MOCK_SP
+      };
+    </script>
+    <div data-bsp-form data-config="../forms/example-it-request.json"></div>
+    <script>
+      if (location.search.indexOf('validate') > -1) {
+        document.querySelector('[data-bsp-form]').setAttribute('data-validate', '');
+      }
+    </script>
+    <script src="../bsp-forms.js"></script>
+    <!-- ==================================================================== -->
+
+  </div>
+</body>
+</html>

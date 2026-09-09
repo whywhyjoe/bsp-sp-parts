@@ -1,0 +1,294 @@
+/*! BSP Forms · v0.1.0 · bsp-forms.css */
+/* =====================================================================
+   BSP Forms — additive component layer for the JSON-driven forms app.
+   ---------------------------------------------------------------------
+   Link order on a page: colors_and_type.css → components.css → THIS FILE.
+   (The engine injects all three in that order automatically.)
+
+   Rules of this layer, in the spirit of editorial.css:
+   - Scoped to .bspf; never redefines :root, never restyles base BSP classes.
+   - Built entirely from the design system's tokens. The choice-pill hues
+     are the one place new *derived* values appear: each hue is either an
+     existing feedback tint pair or a color-mix() of a chart-palette token
+     with white/slate — no free-standing hex.
+   - Composes with components.css (.field, .input, .stepper, .msgbar,
+     .dropzone, .tag, .avatar, .btn, .spinner) rather than replacing them.
+   ===================================================================== */
+
+/* Alpine pre-boot hide — lives here (not an inline <style>) so the CSP
+   never has to allow an inline style tag. */
+[x-cloak] { display: none !important; }
+
+/* ---------------------------------------------------------------------
+   Root — fills the hosting div edge-to-edge. The custom-script web part
+   already supplies outer padding/margins, so the app adds none.
+   --------------------------------------------------------------------- */
+.bspf {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  font: var(--type-body1);
+  color: var(--fg-primary);
+}
+.bspf *, .bspf *::before, .bspf *::after { box-sizing: border-box; }
+
+/* ---------------------------------------------------------------------
+   Frames — how the form sits on the page. Default is the card frame:
+   a raised surface with a tinted header band and a subtle footer for
+   the nav, all from existing surface/tint tokens. `appearance.frame:
+   "plain"` opts back into the flat, chrome-less layout.
+   --------------------------------------------------------------------- */
+.bspf--card {
+  background: var(--surface-raised);
+  border: var(--stroke-thin) solid var(--stroke-divider);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-4);
+  overflow: hidden;
+}
+.bspf--card .bspf__content { padding: var(--space-320); }
+
+/* Header (title + intro boilerplate from config, optional brand icon) */
+.bspf__head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--space-240);
+  margin-bottom: var(--space-240);
+}
+.bspf__head-copy { display: flex; flex-direction: column; gap: var(--space-80); min-width: 0; }
+.bspf__head-icon { width: 48px; height: 48px; flex: none; }
+.bspf__title { font: var(--type-title3); font-weight: var(--weight-regular); color: var(--fg-primary); margin: 0; }
+.bspf__intro { font: var(--type-body1); color: var(--fg-secondary); margin: 0; max-width: 64ch; }
+/* Band header — a low-saturation tint strip (engagement-layer grounds). */
+.bspf__head--band {
+  margin: 0;
+  padding: var(--space-320);
+  align-items: center;
+  border-bottom: var(--stroke-thin) solid var(--stroke-divider);
+}
+.bspf__head--sky     { background: var(--surface-tint-sky); }
+.bspf__head--blue    { background: var(--surface-tint-blue); }
+.bspf__head--neutral { background: var(--surface-tint-neutral); }
+
+/* Stepper row (reuses .stepper) */
+.bspf__stepper { margin: 0 0 var(--space-240); }
+.bspf .stepper__step.is-done { cursor: pointer; }
+.bspf .stepper__step.is-done:hover .stepper__label { color: var(--fg-primary); }
+
+/* Page + section scaffolding */
+.bspf-page { display: flex; flex-direction: column; gap: var(--space-240); }
+.bspf-page__title { font: var(--type-subtitle1); color: var(--fg-primary); margin: 0; }
+.bspf-page__desc  { font: var(--type-body1); color: var(--fg-secondary); margin: calc(-1 * var(--space-160)) 0 0; max-width: 64ch; }
+.bspf-section { display: flex; flex-direction: column; gap: var(--space-160); }
+.bspf-section__title { font: var(--type-body2-strong); color: var(--fg-primary); margin: 0; }
+.bspf-section__desc  { font: var(--type-caption1); color: var(--fg-secondary); margin: calc(-1 * var(--space-100)) 0 0; max-width: 64ch; }
+.bspf-fields { display: flex; flex-direction: column; gap: var(--space-160); }
+/* heading "field" — one wrapper so visibleWhen hides title + description */
+.bspf-heading { display: flex; flex-direction: column; gap: var(--space-60); }
+.bspf-heading .bspf-section__desc { margin: 0; }
+/* Hairline between sibling sections gives each page quiet structure. */
+.bspf-page .bspf-section + .bspf-section {
+  border-top: var(--stroke-thin) solid var(--stroke-divider);
+  padding-top: var(--space-240);
+}
+
+/* Field extras on top of .field */
+.bspf-field__warning { margin: 0; font: var(--type-caption1); color: var(--fg-warning); }
+.bspf .field__hint { max-width: 64ch; }
+
+/* ---------------------------------------------------------------------
+   Choice pills — the SharePoint-modern colored value pill.
+   Hue = existing feedback tint pair, or a chart-palette token mixed with
+   white (ground) / slate (text). No free-standing hex.
+   --------------------------------------------------------------------- */
+.bspf-pill {
+  display: inline-flex; align-items: center; gap: var(--space-40);
+  padding: var(--space-20) var(--space-100);
+  border-radius: 999px;
+  font: var(--type-caption1-strong);
+  background: var(--bspf-pill-bg, var(--surface-neutral-tint));
+  color: var(--bspf-pill-fg, var(--fg-neutral));
+  max-width: 100%; min-width: 0;
+}
+.bspf-pill > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bspf-pill--blue     { --bspf-pill-bg: var(--surface-info-tint);    --bspf-pill-fg: var(--fg-info); }
+.bspf-pill--green    { --bspf-pill-bg: var(--surface-success-tint); --bspf-pill-fg: var(--fg-success); }
+.bspf-pill--yellow   { --bspf-pill-bg: var(--surface-warning-tint); --bspf-pill-fg: var(--fg-warning); }
+.bspf-pill--red      { --bspf-pill-bg: var(--surface-danger-tint);  --bspf-pill-fg: var(--fg-danger); }
+.bspf-pill--gray     { --bspf-pill-bg: var(--surface-neutral-tint); --bspf-pill-fg: var(--fg-neutral); }
+.bspf-pill--sky      { --bspf-pill-bg: color-mix(in srgb, var(--bmo-chart-sky) 14%, var(--bmo-white));       --bspf-pill-fg: var(--bmo-chart-navy); }
+.bspf-pill--teal     { --bspf-pill-bg: color-mix(in srgb, var(--bmo-chart-mint) 18%, var(--bmo-white));      --bspf-pill-fg: color-mix(in srgb, var(--bmo-chart-mint) 45%, var(--bmo-slate)); }
+.bspf-pill--berry    { --bspf-pill-bg: color-mix(in srgb, var(--bmo-chart-purple) 12%, var(--bmo-white));    --bspf-pill-fg: color-mix(in srgb, var(--bmo-chart-purple) 65%, var(--bmo-slate)); }
+.bspf-pill--lavender { --bspf-pill-bg: color-mix(in srgb, var(--bmo-chart-lavender) 16%, var(--bmo-white));  --bspf-pill-fg: color-mix(in srgb, var(--bmo-chart-lavender) 55%, var(--bmo-slate)); }
+.bspf-pill--orange   { --bspf-pill-bg: color-mix(in srgb, var(--bmo-chart-orange) 20%, var(--bmo-white));    --bspf-pill-fg: color-mix(in srgb, var(--bmo-chart-orange) 45%, var(--bmo-slate)); }
+/* Remove affordance inside a selected pill (multi-choice) */
+.bspf-pill__remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; padding: 0; margin-right: calc(-1 * var(--space-20));
+  border: none; border-radius: var(--radius-circle);
+  background: transparent; color: inherit; cursor: pointer; flex: none;
+}
+.bspf-pill__remove:hover { background: rgba(0, 25, 40, .08); }
+.bspf-pill__remove:focus-visible { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: 1px; }
+.bspf-pill__remove .icon { width: 10px; height: 10px; }
+
+/* ---------------------------------------------------------------------
+   Combo — pill-valued dropdown (single + multi choice, lookup).
+   The control reads as an .input; the menu is a Fluent popover.
+   --------------------------------------------------------------------- */
+.bspf-combo { position: relative; }
+.bspf-combo__control {
+  display: flex; align-items: center; gap: var(--space-80);
+  width: 100%; min-height: 32px;
+  padding: var(--space-20) var(--space-100);
+  border: var(--stroke-thin) solid var(--stroke-control);
+  border-radius: var(--radius-medium);
+  background: var(--surface-input);
+  font: var(--type-body1); color: var(--fg-primary);
+  text-align: left; cursor: pointer;
+}
+.bspf-combo__control:hover { border-color: var(--stroke-control-strong); }
+.bspf-combo__control:focus-visible,
+.bspf-combo__control[aria-expanded="true"] {
+  outline: none;
+  border-color: var(--stroke-accent);
+  box-shadow: 0 0 0 1px var(--stroke-accent);
+}
+.bspf-combo__control[aria-invalid="true"] { border-color: var(--fg-danger); }
+.bspf-combo__control[aria-invalid="true"]:focus-visible { box-shadow: 0 0 0 1px var(--fg-danger); }
+.bspf-combo__value { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-40); }
+.bspf-combo__placeholder { color: var(--fg-secondary); }
+.bspf-combo__chevron { flex: none; color: var(--fg-secondary); }
+.bspf-combo__control[aria-expanded="true"] .bspf-combo__chevron { transform: rotate(180deg); }
+
+/* Shared popover menu (combo + people picker) */
+.bspf-combo__menu, .bspf-people__menu {
+  position: absolute; top: calc(100% + var(--space-40)); left: 0; right: 0; z-index: 60;
+  padding: var(--space-40);
+  background: var(--surface-raised);
+  border: var(--stroke-thin) solid var(--stroke-divider);
+  border-radius: var(--radius-medium);
+  box-shadow: var(--shadow-16);
+  max-height: 280px; overflow: auto;
+}
+.bspf-combo__option {
+  display: flex; align-items: center; gap: var(--space-80);
+  width: 100%; padding: var(--space-60) var(--space-80);
+  border: none; border-radius: var(--radius-small);
+  background: transparent; font: var(--type-body1); color: var(--fg-primary);
+  text-align: left; cursor: pointer;
+}
+.bspf-combo__option:hover { background: var(--f2-grey-96); }
+.bspf-combo__option[aria-selected="true"] { background: var(--surface-selected-tint); }
+.bspf-combo__option:focus-visible { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: -2px; }
+.bspf-combo__check { margin-left: auto; color: var(--accent-rest); flex: none; }
+.bspf-combo__fillin {
+  display: flex; gap: var(--space-80); align-items: center;
+  padding: var(--space-60) var(--space-80);
+  border-top: var(--stroke-thin) solid var(--stroke-divider);
+  margin-top: var(--space-40);
+}
+.bspf-combo__fillin .input { flex: 1; }
+
+/* ---------------------------------------------------------------------
+   People picker — token field + directory suggestion menu.
+   --------------------------------------------------------------------- */
+.bspf-people { position: relative; }
+.bspf-people__control {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-40);
+  width: 100%; min-height: 32px;
+  padding: var(--space-20) var(--space-80);
+  border: var(--stroke-thin) solid var(--stroke-control);
+  border-radius: var(--radius-medium);
+  background: var(--surface-input);
+  cursor: text;
+}
+.bspf-people__control:focus-within { border-color: var(--stroke-accent); box-shadow: 0 0 0 1px var(--stroke-accent); }
+.bspf-people__control[aria-invalid="true"] { border-color: var(--fg-danger); }
+.bspf-people__control[aria-invalid="true"]:focus-within { box-shadow: 0 0 0 1px var(--fg-danger); }
+.bspf-people__input {
+  flex: 1; min-width: 120px; border: none; outline: none; background: transparent;
+  font: var(--type-body1); color: var(--fg-primary); height: 24px;
+}
+.bspf-people__input::placeholder { color: var(--fg-secondary); }
+.bspf .bspf-people__tag { gap: var(--space-60); padding-left: var(--space-40); }
+.bspf-people__photo { width: 20px; height: 20px; border-radius: var(--radius-circle); object-fit: cover; flex: none; }
+.bspf-people__option {
+  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto;
+  column-gap: var(--space-100); align-items: center;
+  width: 100%; padding: var(--space-60) var(--space-80);
+  border: none; border-radius: var(--radius-small);
+  background: transparent; text-align: left; cursor: pointer;
+}
+.bspf-people__option:hover, .bspf-people__option.is-active { background: var(--f2-grey-96); }
+.bspf-people__option:focus-visible { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: -2px; }
+.bspf-people__option .avatar, .bspf-people__option .bspf-people__photo--lg { grid-row: 1 / span 2; }
+.bspf-people__photo--lg { width: 28px; height: 28px; border-radius: var(--radius-circle); object-fit: cover; }
+.bspf-people__name { font: var(--type-body1); color: var(--fg-primary); }
+.bspf-people__mail { font: var(--type-caption1); color: var(--fg-secondary); grid-column: 2; }
+.bspf-people__note {
+  padding: var(--space-80); font: var(--type-caption1); color: var(--fg-secondary);
+}
+
+/* ---------------------------------------------------------------------
+   Attachments — dropzone + file rows.
+   --------------------------------------------------------------------- */
+.bspf-attach__drop { cursor: pointer; transition: border-color var(--motion-fast) var(--ease-out), background var(--motion-fast) var(--ease-out); }
+.bspf-attach__drop.is-drag { border-color: var(--stroke-accent); background: var(--surface-selected-tint); }
+.bspf-attach__drop:focus-visible { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: 2px; }
+.bspf-attach__list { display: flex; flex-direction: column; gap: var(--space-40); margin-top: var(--space-80); }
+.bspf-attach__item {
+  display: flex; align-items: center; gap: var(--space-100);
+  padding: var(--space-60) var(--space-100);
+  border: var(--stroke-thin) solid var(--stroke-divider);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+  font: var(--type-body1);
+}
+.bspf-attach__item .icon { color: var(--fg-secondary); flex: none; }
+.bspf-attach__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bspf-attach__size { font: var(--type-caption1); color: var(--fg-secondary); flex: none; }
+.bspf-attach__item.is-failed { border-color: var(--stroke-danger-tint); background: var(--surface-danger-tint); }
+.bspf-attach__item.is-done .icon { color: var(--fg-success); }
+
+/* ---------------------------------------------------------------------
+   Navigation row + confirmation + service screens
+   --------------------------------------------------------------------- */
+.bspf-nav { display: flex; align-items: center; gap: var(--space-80); margin-top: var(--space-320); }
+.bspf-nav__spacer { flex: 1; }
+/* Footer variant used by the card frame — the .panel__foot register. */
+.bspf-nav--foot {
+  margin-top: 0;
+  padding: var(--space-120) var(--space-320);
+  background: var(--surface-subtle);
+  border-top: var(--stroke-thin) solid var(--stroke-divider);
+}
+.bspf__pageerror { margin-top: var(--space-240); }
+
+.bspf-done { display: flex; flex-direction: column; align-items: center; text-align: center; gap: var(--space-120); padding: var(--space-480) var(--space-160); }
+.bspf-done__icon { color: var(--fg-success); }
+.bspf-done__art { width: 180px; max-width: 60%; height: auto; margin-bottom: var(--space-80); }
+.bspf-done__title { font: var(--type-title3); font-weight: var(--weight-regular); color: var(--fg-primary); margin: 0; }
+.bspf-done__msg { font: var(--type-body1); color: var(--fg-secondary); margin: 0; max-width: 52ch; }
+.bspf-done .btn { margin-top: var(--space-120); }
+
+/* Edit-mode placeholder + suspension (web-part edit view) */
+.bspf-editnote {
+  display: flex; align-items: center; gap: var(--space-100);
+  padding: var(--space-160);
+  border: var(--stroke-thin) dashed var(--stroke-control);
+  border-radius: var(--radius-medium);
+  background: var(--surface-subtle);
+  font: var(--type-body1); color: var(--fg-secondary);
+}
+.bspf-editnote code { font-family: var(--font-family-mono); font-size: 12px; background: none; padding: 0; }
+[data-bsp-form].is-suspended .bspf { display: none; }
+[data-bsp-form]:not(.is-suspended) > .bspf-editnote { display: none; }
+
+/* Doctor (config validation) report */
+.bspf-doctor { margin-bottom: var(--space-240); display: flex; flex-direction: column; gap: var(--space-120); }
+.bspf-doctor .grid tbody tr { cursor: default; }
+
+/* Narrow containers (one-third columns, mobile) — tighter card padding. */
+@media (max-width: 640px) {
+  .bspf--card .bspf__content, .bspf__head--band { padding: var(--space-240); }
+  .bspf-nav--foot { padding: var(--space-120) var(--space-240); }
+}

@@ -1,12 +1,41 @@
 # bsp-sp-parts
 
-Deployable **custom script web part tools** for SharePoint sites, built on the
-[BSP design system](https://github.com/whywhyjoe/bsp-design-system) (which runs
-live on the portal at `/sites/FCUPortal/Code/bsp-design/`). Buildless and
-CDN-free at runtime, like everything in the BSP family: what's authored here is
-what runs.
+Deployable **parts** for SharePoint sites — anything added to a page. Buildless
+and CDN-free at runtime, like everything in the BSP family: what's authored
+here is what runs. Parts come in three kinds:
 
-## The pattern
+- **Web part tools** — visible UI, built on the
+  [BSP design system](https://github.com/whywhyjoe/bsp-design-system) (which
+  runs live on the portal at `/sites/FCUPortal/Code/bsp-design/`), following
+  the four-artifact pattern below.
+- **Page libraries** — invisible runtime behavior a page opts into via a
+  script include (language swapping, redirects, form engines). Dependency-free
+  or self-hosted-deps only; the four-artifact pattern and the boot contract do
+  **not** apply — each library's own README is its contract.
+- **Tenant services** — shared backend capabilities other parts **call**;
+  pages never include them directly. A thin JS wrapper plus tenant-side
+  machinery (lists, Power Automate flows) deployed per tenant; each service's
+  README is its contract.
+
+Which rules bind which part is explicit, not inferred:
+
+| Part | Kind | Boot contract (`_shared/dcs-part-boot.js`) |
+| --- | --- | --- |
+| `sp-list-ordering` | Web part tool | **Required** |
+| `bilingual` | Page library | No |
+| `bsp-forms` | Page library | No — could optionally adopt it for its mount (host wait / edit mode / SPA re-mount would genuinely help); if that ever happens, its README says so |
+| `classic-referrer-redirects` | Page library | No |
+| `bsp-notify` | Tenant service | No |
+
+New parts add a row here. A part's own README states its kind; this table and
+that statement are the authority — never assume a rule applies from folder
+adjacency.
+
+Each part deploys independently; a part that versions its deployments carries
+its own `VERSION` file in its folder (repo-standard format — see
+`C:\dev\repos\README.md`). There is no repo-wide VERSION.
+
+## The web part tool pattern
 
 Every tool is one folder with four artifacts:
 
@@ -29,12 +58,41 @@ included at the top of every page and supplies `waitForElement`, `waitForPnP2`,
 those when present and fall back to stand-ins in `_shared/dcs-part-boot.js`, so they
 also run outside SharePoint.
 
-## Tools
+## Parts
+
+Web part tools:
 
 - **[sp-list-ordering](sp-list-ordering/)** — drag-to-reorder editor for a
   numeric `SortOrder` field on SharePoint lists. Optional per-list filter,
   explicit Save that renumbers the visible scope to gapped integers, and
   self-healing for missing/duplicate values.
+
+Page libraries:
+
+- **[bilingual](bilingual/)** — dependency-free EN/FR string-swap system
+  (keyed dictionary + `data-intl` markup + `intl.t()`) for SharePoint pages,
+  with a demo page.
+- **[bsp-forms](bsp-forms/)** — JSON-configured replacement for MS Forms that
+  runs inside SharePoint pages: one shared engine renders a multi-page form on
+  the BSP design system and writes submissions (incl. multi-file attachments)
+  to a SharePoint list via the self-hosted pnpjs v2 bundle. A form is one JSON
+  file plus a two-line web part insert. Config reference in
+  `bsp-forms/docs/CONFIG-REFERENCE.md`.
+- **[classic-referrer-redirects](classic-referrer-redirects/)** —
+  referrer-based second-hop redirect script for classic→modern SharePoint
+  site migrations: JSON mapping of old-site paths to new-site pages, plus a
+  destination-page notice snippet. Dependency-free, ES5-safe, `node test.js`.
+  Being expanded for use across multiple sites.
+
+Tenant services:
+
+- **[bsp-notify](bsp-notify/)** — shared email-notification service. Parts
+  queue an item on the site's `Notifications` list via `window.bspNotify(…)`
+  (validated inputs, pnpjs v2, opt-in mock); the **BSP Notify** Power
+  Automate flow (recurrence + queue, standard connectors only) sends each
+  item from a shared mailbox and stamps `Sent`/`Failed` back on the item,
+  with Teams alerts on error. Contract, schema, latency and staleness rules
+  in [bsp-notify/README.md](bsp-notify/README.md).
 
 ## Development
 

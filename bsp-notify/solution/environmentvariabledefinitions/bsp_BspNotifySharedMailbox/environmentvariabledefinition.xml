@@ -1,0 +1,13 @@
+<environmentvariabledefinition schemaname="bsp_BspNotifySharedMailbox">
+  <description default="Default shared mailbox address emails are sent from when a queue item has no From value.">
+    <label description="Default shared mailbox address emails are sent from when a queue item has no From value." languagecode="1033" />
+  </description>
+  <displayname default="BSP Notify Shared Mailbox">
+    <label description="BSP Notify Shared Mailbox" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

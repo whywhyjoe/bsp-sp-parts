@@ -1,0 +1,13 @@
+<environmentvariabledefinition schemaname="bsp_BspNotifyListName">
+  <description default="Title of the Notifications queue list (identical on every tenant by convention).">
+    <label description="Title of the Notifications queue list (identical on every tenant by convention)." languagecode="1033" />
+  </description>
+  <displayname default="BSP Notify List Name">
+    <label description="BSP Notify List Name" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

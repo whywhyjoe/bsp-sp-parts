@@ -1,0 +1,13 @@
+{
+  "oldSiteFragment": "/sites/TandO-Classic/FCU",
+  "newSiteBase": "/sites/TandO-FCU",
+  "signalParam": "classicRedirect",
+  "fallback": "SitePages/Migration-Info.aspx",
+  "redirects": {
+    "": "SitePages/Home.aspx",
+    "NWWSH": "SitePages/NWWSH.aspx",
+    "NWWSH/blah.aspx": "SitePages/NWWSH-Blah.aspx",
+    "NWWSH/reports/monthly.aspx": "SitePages/Monthly-Reports.aspx",
+    "Training": "https://contoso.sharepoint.com/sites/OtherSite/SitePages/Training.aspx"
+  }
+}

@@ -1,0 +1,22 @@
+/*
+ * Dual-DOM language blocks — the "if you MUST" tier.
+ *
+ * Author both languages as sibling elements carrying real lang
+ * attributes; whichever doesn't match <html lang> is hidden. No classes,
+ * no JS beyond intl keeping <html lang> truthful (or the inline head
+ * snippet doing it before first paint — see README).
+ *
+ *   <section lang="en"> ...english block... </section>
+ *   <section lang="fr"> ...bloc français... </section>
+ *
+ * .lang-keep opts an element out of hiding — required on anything
+ * legitimately in the other language, like the language toggle or a
+ * quoted French phrase inside English copy.
+ *
+ * display:none specifically: screen readers and find-in-page skip the
+ * hidden copy. Never swap to visibility/off-screen tricks here.
+ */
+html[lang="en"] [lang="fr"]:not(.lang-keep),
+html[lang="fr"] [lang="en"]:not(.lang-keep) {
+  display: none !important;
+}

@@ -1,0 +1,50 @@
+<!-- classic-referrer-redirects: optional snippet for DESTINATION pages.
+     Shows a notice box when the visitor arrived via the classic-redirect
+     hop (detected from the ?classicRedirect=1 query param the redirect
+     script appends), then cleans the params back out of the address bar.
+     Runs in the same custom script web part as the redirect snippet.
+     If you changed signalParam in the config, change PARAM below too —
+     it goes into a RegExp unescaped, so stick to letters/digits/_/-
+     (the redirect script enforces the same charset on its side). -->
+
+<div id="classic-redirect-notice" style="display:none; margin:12px 0; padding:12px 16px;
+     border:1px solid #ffd66b; border-left:6px solid #f2a900; background:#fff8e5;
+     font-family:'Segoe UI',sans-serif; font-size:14px; color:#323130;">
+  <strong>You've been redirected.</strong>
+  The classic page you followed a link to
+  (<code id="classic-redirect-from">the old site</code>)
+  has moved here as part of the site migration. Please update your bookmarks.
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var PARAM = 'classicRedirect';
+
+  function param(name) {
+    var m = new RegExp('[?&]' + name + '=([^&]*)').exec(window.location.search);
+    return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')) : null;
+  }
+
+  if (param(PARAM) !== '1') return;
+
+  var box = document.getElementById('classic-redirect-notice');
+  if (box) {
+    var from = param(PARAM + 'From');
+    if (from) {
+      var code = document.getElementById('classic-redirect-from');
+      if (code) code.textContent = from;
+    }
+    box.style.display = 'block';
+  }
+
+  // Tidy the address bar so reloads/bookmarks don't keep the flag.
+  if (window.history && window.history.replaceState) {
+    var clean = window.location.search
+      .replace(new RegExp('[?&]' + PARAM + '(From)?=[^&]*', 'g'), '')
+      .replace(/^&/, '?');
+    window.history.replaceState(null, '',
+      window.location.pathname + clean + window.location.hash);
+  }
+})();
+</script>

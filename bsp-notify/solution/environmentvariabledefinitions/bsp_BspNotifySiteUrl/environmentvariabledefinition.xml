@@ -1,0 +1,13 @@
+<environmentvariabledefinition schemaname="bsp_BspNotifySiteUrl">
+  <description default="Absolute URL of the SharePoint site that holds the Notifications queue list.">
+    <label description="Absolute URL of the SharePoint site that holds the Notifications queue list." languagecode="1033" />
+  </description>
+  <displayname default="BSP Notify Site URL">
+    <label description="BSP Notify Site URL" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

@@ -1,0 +1,32 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ImportExportXml version="9.2.26074.163" SolutionPackageVersion="9.2" languagecode="1033" generatedBy="CrmLive" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" OrganizationVersion="9.2.26074.163" OrganizationSchemaType="Standard" CRMServerServiceabilityVersion="9.2.26074.00163">
+  <SolutionManifest>
+    <UniqueName>BspNotify</UniqueName>
+    <LocalizedNames>
+      <LocalizedName description="BSP Notify" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="Queue-driven shared-mailbox email notification service for BSP SharePoint parts. Polls the Notifications list every 10 minutes and sends queued items from a shared mailbox." languagecode="1033" />
+    </Descriptions>
+    <Version>1.0.0.0</Version>
+    <Managed>0</Managed>
+    <Publisher>
+      <UniqueName>bspparts</UniqueName>
+      <LocalizedNames>
+        <LocalizedName description="BSP Parts" languagecode="1033" />
+      </LocalizedNames>
+      <Descriptions>
+        <Description description="Publisher for bsp-sp-parts tenant services" languagecode="1033" />
+      </Descriptions>
+      <EMailAddress xsi:nil="true"></EMailAddress>
+      <SupportingWebsiteUrl xsi:nil="true"></SupportingWebsiteUrl>
+      <CustomizationPrefix>bsp</CustomizationPrefix>
+      <CustomizationOptionValuePrefix>78221</CustomizationOptionValuePrefix>
+      <Addresses />
+    </Publisher>
+    <RootComponents>
+      <RootComponent type="29" id="{b5a7c9e1-4f2d-4d7a-9c3e-8f6b2a1d5e90}" behavior="0" />
+    </RootComponents>
+    <MissingDependencies />
+  </SolutionManifest>
+</ImportExportXml>

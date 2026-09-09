@@ -1,0 +1,13 @@
+<environmentvariabledefinition schemaname="bsp_BspNotifyTeamsErrorRecipient">
+  <description default="Email address of the person the Workflow bot notifies in Teams on any error.">
+    <label description="Email address of the person the Workflow bot notifies in Teams on any error." languagecode="1033" />
+  </description>
+  <displayname default="BSP Notify Teams Error Recipient">
+    <label description="BSP Notify Teams Error Recipient" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

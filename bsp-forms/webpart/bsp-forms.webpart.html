@@ -1,0 +1,27 @@
+<!-- =====================================================================
+  BSP Forms — web part entry snippet
+  ---------------------------------------------------------------------
+  Point a custom-script web part (Modern Script Editor, external mode)
+  at a copy of this file, or paste its contents into the web part.
+
+  Per form, change ONLY the data-config URL (and the ?v= when the engine
+  is redeployed). The div fills its container 100% wide with no
+  padding/margin — the web part supplies the page spacing.
+
+  Optional attributes on the div:
+    data-validate   render the config-vs-list "doctor" report above the
+                    form (dev/setup aid — remove for production).
+
+  Optional page-level overrides (rarely needed — every value below is
+  the default, derived from the engine script's own URL):
+
+  <script>
+  window.BSP_FORMS_SETTINGS = {
+    designBase: "/sites/FCUPortal/Code/bsp-design/",
+    libBase:    "/sites/FCUPortal/Code/lib/"
+  };
+  </script>
+  ===================================================================== -->
+
+<div data-bsp-form data-config="/sites/FCUPortal/Code/bsp-forms/forms/example-it-request.json"></div>
+<script src="https://TENANT.sharepoint.com/sites/FCUPortal/Code/bsp-forms/bsp-forms.js?v=1"></script>

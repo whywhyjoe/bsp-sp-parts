@@ -1,11 +1,35 @@
 # bsp-sp-parts — agent guide (CLAUDE.md)
 
-This repo holds **deployable custom-script-web-part tools** for SharePoint
-sites. It is a sibling of `whywhyjoe/bsp-design-system` (the component library —
+This repo holds **deployable parts** for SharePoint sites — anything added to a
+page. Three kinds, with different rules:
+
+- **Web part tools** (e.g. `sp-list-ordering/`) — visible UI. Everything below
+  applies: the non-negotiables, the boot contract, the four-artifact pattern.
+- **Page libraries** (`bilingual/`, `bsp-forms/`, `classic-referrer-redirects/`)
+  — headless or self-rendering scripts a page opts into. The BSP family rules
+  on buildless/CDN-free runtime and self-hosted deps still apply, but the boot
+  contract, Alpine conventions, and four-artifact pattern do **not** — each
+  library carries its own README/CLAUDE.md, which is its contract. Do not
+  "upgrade" a library to the web-part pattern without a reason.
+- **Tenant services** (`bsp-notify/`) — shared backend capabilities other
+  parts call; pages never include them. A thin JS wrapper (page-library rules
+  apply to it) plus tenant-side machinery: a SharePoint list from an
+  env.json-style manifest and a Power Automate solution (standard connectors
+  only, environment variables for every tenant fact). The service's README is
+  its contract.
+
+The **kinds table in README.md** is the authority on which part is which kind
+and whether the boot contract applies — consult it before applying any rule
+below, and add a row when adding a part. Today the boot contract binds
+`sp-list-ordering` only. (`bsp-forms` renders UI and *could* adopt
+`dcsMountPart()` for its mount one day — that would be a deliberate, documented
+choice in its own README, not a default.)
+
+It is a sibling of `whywhyjoe/bsp-design-system` (the component library —
 read its CLAUDE.md before styling anything) and consumes that system **as a live
 deployment**, never as a dependency to rebuild.
 
-## Non-negotiables (inherited from the BSP family)
+## Non-negotiables for web part tools (inherited from the BSP family)
 - **Buildless, CDN-free at runtime.** No bundler, no ES `import`, nothing the
   shipped artifact needs may depend on a build. CDN tags are dev-harness-only.
 - **One BEM vocabulary on shared tokens.** Compose from `bsp-design` classes and

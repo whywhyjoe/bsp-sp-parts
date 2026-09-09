@@ -1,0 +1,155 @@
+{
+  "$comment": "Creative Digital Solutions team intake. Single page, no branching. TODO before ship: (1) replace the REQUEST-TYPE and PILLAR placeholder choices with the list's real choice values, (2) confirm every 'column' matches the list's internal column names — embed with data-validate and read the doctor report against the live list.",
+
+  "form": {
+    "title": "Creative Digital Solutions Intake",
+    "showTitle": false,
+    "appearance": {
+      "frame": "card",
+      "header": "plain"
+    }
+  },
+
+  "target": {
+    "siteUrl": null,
+    "listTitle": "Creative Digital Solutions Intake"
+  },
+
+  "confirmation": {
+    "title": "Request submitted",
+    "message": "Your request has been logged with the Creative Digital Solutions team. You'll hear from us with any follow-up questions.",
+    "allowAnother": true,
+    "illustration": "spot-illustrations/checkmark-l.svg"
+  },
+
+  "strings": {
+    "submit": "Submit request"
+  },
+
+  "pages": [
+    {
+      "id": "request",
+      "sections": [
+        {
+          "id": "about",
+          "fields": [
+            {
+              "id": "title",
+              "type": "text",
+              "label": "Title",
+              "hint": "Title your request",
+              "required": true,
+              "column": "Title"
+            },
+            {
+              "id": "requestType",
+              "type": "choice",
+              "label": "Request type",
+              "required": true,
+              "column": "RequestType",
+              "choices": [
+                "REPLACE — request type option 1",
+                "REPLACE — request type option 2",
+                "REPLACE — request type option 3"
+              ]
+            },
+            {
+              "id": "description",
+              "type": "textarea",
+              "label": "Description",
+              "hint": "Provide a complete description of your requirements, and be sure to include any links to web pages if needed. For more complex requests, note that follow-up is required.",
+              "required": true,
+              "rows": 5,
+              "column": "Description"
+            }
+          ]
+        },
+        {
+          "id": "people",
+          "fields": [
+            {
+              "id": "requestor",
+              "type": "person",
+              "label": "Requestor",
+              "required": true,
+              "column": "Requestor"
+            },
+            {
+              "id": "department",
+              "type": "text",
+              "label": "Department",
+              "hint": "The name of your team",
+              "column": "Department"
+            },
+            {
+              "id": "partners",
+              "type": "person",
+              "multiple": true,
+              "label": "Partners",
+              "hint": "Any additional contacts for the project",
+              "column": "Partners"
+            }
+          ]
+        },
+        {
+          "id": "classification",
+          "fields": [
+            {
+              "id": "pillar",
+              "type": "multichoice",
+              "label": "Pillar",
+              "required": true,
+              "column": "Pillar",
+              "choices": [
+                "REPLACE — pillar option 1",
+                "REPLACE — pillar option 2",
+                "REPLACE — pillar option 3"
+              ]
+            },
+            {
+              "id": "priority",
+              "type": "choice",
+              "label": "Priority",
+              "column": "Priority",
+              "choices": [
+                { "value": "Low", "color": "gray" },
+                { "value": "Medium", "color": "blue" },
+                { "value": "High", "color": "yellow" },
+                { "value": "Urgent", "color": "red" }
+              ]
+            },
+            {
+              "id": "priorityNote",
+              "type": "note",
+              "style": "warning",
+              "text": "Please limit escalated requests to those with a business case.",
+              "visibleWhen": { "field": "priority", "op": "in", "value": ["High", "Urgent"] }
+            },
+            {
+              "id": "launchDate",
+              "type": "date",
+              "label": "Requested launch date",
+              "required": true,
+              "column": "LaunchDate",
+              "rules": [
+                {
+                  "op": "onOrAfter",
+                  "compareTo": "@today",
+                  "mode": "block",
+                  "message": "The launch date can't be in the past."
+                },
+                {
+                  "op": "onOrAfter",
+                  "compareTo": "@today",
+                  "days": 2,
+                  "mode": "warn",
+                  "message": "Less than two business days' notice — email fcudigitalsolutions@bmo.onmicrosoft.com or contact a member of our team as soon as possible."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,282 @@
+{
+  "$comment": "BSP Forms example config — exercises every supported feature. Copy as a starting point; full key reference in docs/CONFIG-REFERENCE.md.",
+
+  "form": {
+    "title": "IT Equipment & Access Request",
+    "intro": "Use this form to request hardware, software, or system access. Requests are reviewed by the DCS team within two business days.",
+    "appearance": {
+      "frame": "card",
+      "header": "band",
+      "tint": "sky",
+      "icon": "abacus-icons/digital-form-48.svg"
+    }
+  },
+
+  "sharedColumns": ["SubCategory"],
+
+  "target": {
+    "siteUrl": null,
+    "listTitle": "IT Requests",
+    "titleTemplate": "{form:title} — {user:name} — {date}"
+  },
+
+  "confirmation": {
+    "title": "Request submitted",
+    "message": "Your request has been logged. You'll receive a confirmation email, and the DCS team will follow up within two business days.",
+    "allowAnother": true,
+    "illustration": "spot-illustrations/checkmark-l.svg"
+  },
+
+  "attachments": {
+    "enabled": true,
+    "required": false,
+    "label": "Supporting documents",
+    "hint": "Quotes, approvals, screenshots — up to 5 files, 10 MB each.",
+    "maxFiles": 5,
+    "maxFileSizeMb": 10,
+    "accept": [".pdf", ".docx", ".xlsx", ".png", ".jpg", ".msg"]
+  },
+
+  "strings": {
+    "submit": "Submit request",
+    "pageError": "A few answers need attention before you can continue."
+  },
+
+  "pages": [
+    {
+      "id": "requester",
+      "title": "Requester",
+      "description": "Who this request is for and how to reach them.",
+      "sections": [
+        {
+          "id": "who",
+          "title": "Contact details",
+          "fields": [
+            {
+              "id": "requestFor",
+              "type": "person",
+              "label": "Who is this request for?",
+              "hint": "Search the employee directory by name or email.",
+              "required": true,
+              "column": "RequestFor"
+            },
+            {
+              "id": "ccPeople",
+              "type": "person",
+              "multiple": true,
+              "label": "Keep informed (optional)",
+              "hint": "These people are copied on updates.",
+              "column": "CcPeople",
+              "validation": { "maxPeople": 5 }
+            },
+            {
+              "id": "contactEmail",
+              "type": "email",
+              "label": "Best contact email",
+              "required": true,
+              "column": "ContactEmail",
+              "placeholder": "name@bmo.com"
+            },
+            {
+              "id": "contactPhone",
+              "type": "phone",
+              "label": "Phone (optional)",
+              "column": "ContactPhone",
+              "placeholder": "(555) 555-0100"
+            },
+            {
+              "id": "costCentre",
+              "type": "text",
+              "label": "Cost centre",
+              "required": true,
+              "column": "CostCentre",
+              "validation": {
+                "pattern": "^[0-9]{4,6}$",
+                "patternMessage": "Cost centre is 4–6 digits."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "details",
+      "title": "Request details",
+      "sections": [
+        {
+          "id": "what",
+          "title": "What do you need?",
+          "fields": [
+            {
+              "id": "category",
+              "type": "choice",
+              "label": "Category",
+              "required": true,
+              "column": "Category",
+              "choices": [
+                { "value": "Hardware", "color": "blue" },
+                { "value": "Software", "color": "green" },
+                { "value": "System access", "color": "lavender" }
+              ]
+            },
+            {
+              "id": "hardwareType",
+              "type": "choice",
+              "label": "Hardware type",
+              "required": true,
+              "column": "SubCategory",
+              "visibleWhen": { "field": "category", "op": "equals", "value": "Hardware" },
+              "choices": ["Laptop", "Monitor", "Dock", "Peripherals", "Mobile device"],
+              "fillIn": true
+            },
+            {
+              "id": "softwareType",
+              "type": "choice",
+              "label": "Software product",
+              "required": true,
+              "column": "SubCategory",
+              "visibleWhen": { "field": "category", "op": "equals", "value": "Software" },
+              "choices": ["Microsoft Project", "Visio", "Adobe Acrobat Pro", "Power BI Pro"],
+              "fillIn": true,
+              "hint": "Both this field and Hardware type write to the SubCategory column — only one is ever visible."
+            },
+            {
+              "id": "accessSystems",
+              "type": "multichoice",
+              "label": "Systems access is needed for",
+              "required": true,
+              "column": "AccessSystems",
+              "visibleWhen": { "field": "category", "op": "equals", "value": "System access" },
+              "choices": ["FCU Portal", "DCS Workbench", "Reporting warehouse", "Shared drives"],
+              "fillIn": true,
+              "validation": { "maxChoices": 3 }
+            },
+            {
+              "id": "priorityJustification",
+              "type": "textarea",
+              "label": "Business justification",
+              "required": true,
+              "column": "Justification",
+              "rows": 4,
+              "validation": { "minLength": 30, "maxLength": 2000 },
+              "hint": "A sentence or two on why this is needed."
+            },
+            {
+              "id": "estimatedCost",
+              "type": "currency",
+              "label": "Estimated cost (CAD)",
+              "column": "EstimatedCost",
+              "visibleWhen": { "field": "category", "op": "in", "value": ["Hardware", "Software"] },
+              "validation": { "min": 0, "max": 50000 }
+            },
+            {
+              "id": "vendorLink",
+              "type": "link",
+              "label": "Product or vendor page (optional)",
+              "column": "VendorLink",
+              "withDescription": true,
+              "visibleWhen": { "field": "category", "op": "in", "value": ["Hardware", "Software"] }
+            },
+            {
+              "id": "assetTeam",
+              "type": "lookup",
+              "label": "Owning asset team",
+              "column": "AssetTeam",
+              "color": "teal",
+              "lookup": { "listTitle": "Asset Teams", "displayField": "Title" }
+            }
+          ]
+        },
+        {
+          "id": "urgency",
+          "title": "Timing",
+          "fields": [
+            {
+              "id": "neededBy",
+              "type": "date",
+              "label": "Needed by",
+              "required": true,
+              "column": "NeededBy",
+              "rules": [
+                {
+                  "op": "onOrAfter",
+                  "compareTo": "@today",
+                  "mode": "block",
+                  "message": "The needed-by date can't be in the past."
+                },
+                {
+                  "op": "onOrAfter",
+                  "compareTo": "@today",
+                  "days": 2,
+                  "mode": "warn",
+                  "message": "Less than 2 days' notice — same-week fulfilment isn't guaranteed."
+                }
+              ]
+            },
+            {
+              "id": "rushNote",
+              "type": "note",
+              "style": "warning",
+              "text": "Rush requests (under 2 days) may require director approval.",
+              "visibleWhen": {
+                "all": [
+                  { "field": "neededBy", "op": "notEmpty" },
+                  { "field": "neededBy", "op": "before", "compareTo": "@today", "days": 2 }
+                ]
+              }
+            },
+            {
+              "id": "isRecurring",
+              "type": "boolean",
+              "label": "This is for a recurring need (e.g. team onboarding)",
+              "column": "IsRecurring",
+              "toggleText": "Yes"
+            },
+            {
+              "id": "recurrenceEnd",
+              "type": "date",
+              "label": "Recurring until",
+              "column": "RecurrenceEnd",
+              "visibleWhen": { "field": "isRecurring", "op": "equals", "value": true },
+              "rules": [
+                {
+                  "op": "after",
+                  "compareTo": "neededBy",
+                  "mode": "block",
+                  "message": "The end date must be after the needed-by date."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "review",
+      "title": "Review & submit",
+      "sections": [
+        {
+          "id": "confirm",
+          "title": "Almost done",
+          "description": "Attach any supporting documents below, then submit.",
+          "fields": [
+            {
+              "id": "managerAware",
+              "type": "boolean",
+              "label": "My manager is aware of this request",
+              "required": true,
+              "column": "ManagerAware",
+              "toggleText": "Confirmed"
+            },
+            {
+              "id": "finalNote",
+              "type": "note",
+              "style": "info",
+              "text": "Submitting logs this request to the IT Requests list. You can attach files below before you submit."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

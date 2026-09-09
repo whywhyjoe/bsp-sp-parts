@@ -1,10 +1,16 @@
-# _shared — the boot contract for every tool in this repo
+# _shared — the boot contract for web part tools
+
+**Scope: this contract binds web part tools only** — parts that inject UI into
+a web part zone. Page libraries and tenant services do not use it; the kinds
+table in the repo README says which part is which. A page library that renders
+page UI *may* adopt `dcsMountPart()` deliberately — if it does, its own README
+says so; absence of a statement means it doesn't.
 
 ## `dcs-part-boot.js` (deployed, once per site)
 
 The saved pattern. SharePoint renders web part zones on its own schedule, navigates
-without a page reload, and lets authors edit the page live — so **every** tool needs the
-same four things. Rather than re-implementing them per tool (which guarantees drift),
+without a page reload, and lets authors edit the page live — so **every** web-part-zone
+UI needs the same four things. Rather than re-implementing them per tool (which guarantees drift),
 tools call `dcsMountPart()` and only declare *what* to render.
 
 ```js
