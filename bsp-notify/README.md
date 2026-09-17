@@ -125,7 +125,7 @@ once it's back On, the next run drains the backlog.
 | `packages/BspNotify_<v>.zip` | The importable solution artifact (built by `tools/sp/pp-pack.ps1`) |
 | `tools/sp/` | provision/verify/deploy/harness tooling (scaffold) + `pp-pack.ps1`, `pp-make-settings.ps1`, `pp-import-dev.ps1`, `pp-export.ps1` |
 | `app/` | Harness ops; `test-smoke.js` queues a REAL item through `window.bspNotify` on the live harness page |
-| `docs/` | Runbook notes + prod handoff checklist |
+| `docs/` | [`prod-deploy-checklist.md`](docs/prod-deploy-checklist.md) (the full prod procedure), `dev-import-runbook.md` (how dev was set up), `copilot-handoffs/` (dated tickets per prod import) |
 
 ## Verifying a change (dev, closed loop)
 

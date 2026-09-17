@@ -94,6 +94,26 @@ Tenant services:
   with Teams alerts on error. Contract, schema, latency and staleness rules
   in [bsp-notify/README.md](bsp-notify/README.md).
 
+## Deploying
+
+Each part deploys on its own, and its README has the steps. Upload only the
+runtime files named below — never `dev/`, `tools/`, tests or docs.
+
+Already live on the portal, **not** deployed from this repo: the design system
+(`Code/bsp-design/`), `Code/lib/alpine.js`, `Code/lib/pnp2.bundle.js` and
+`fcu-standard.js`.
+
+| Part | Once per site | Per page | Steps |
+| --- | --- | --- | --- |
+| `sp-list-ordering` | `_shared/dcs-part-boot.js`, `sp-list-ordering.js`, `sp-list-ordering.css` → `SiteAssets/sp-parts/…` | A config JSON, plus a copy of the stub with `data-config` and the `DEPLOY REPOINT` URLs set | [Deploying to a site](sp-list-ordering/README.md#deploying-to-a-site) |
+| `bsp-forms` | `bsp-forms.js`, `bsp-forms.css` → `Code/bsp-forms/` | A list, a `forms/*.json`, and a copy of the web part snippet: set `data-config`, replace `TENANT` in the script URL, bump `?v=` on every engine deploy | [Deployment layout](bsp-forms/README.md#deployment-layout), [Adding a form](bsp-forms/README.md#adding-a-form) |
+| `classic-referrer-redirects` | `classic-redirect.js` → SiteAssets | `webpart-snippet.html` pasted into the landing page, config JSON inline. Run `node test.js` first | [Setup](classic-referrer-redirects/README.md#setup) |
+| `bilingual` | `intl.js` (and `lang-blocks.css` for the dual-DOM tier), wherever the page keeps its scripts | The page's own `strings.js`. Load `intl.js`, then `strings.js`, then call `intl.apply()` | [Usage](bilingual/README.md#usage--keyed-tier) |
+| `bsp-notify` | The `Notifications` list, the **BSP Notify** flow (solution import) and `bsp-notify.js` | Nothing. Callers load `bsp-notify.js` after `pnp2` | [Prod deploy checklist](bsp-notify/docs/prod-deploy-checklist.md) |
+
+Only `sp-list-ordering` needs `_shared/`. Web part stubs and snippets are
+**copied per page**: each page keeps its own copy, pointed at its own config.
+
 ## Development
 
 `dev/` holds a disk-openable harness per tool (`dev/<tool>.dev.html`): it
