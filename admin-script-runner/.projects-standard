@@ -1,0 +1,4 @@
+version = "0.2.0"
+profile = "sp-app"
+fragments = []
+scaffolded = "2026-09-28"

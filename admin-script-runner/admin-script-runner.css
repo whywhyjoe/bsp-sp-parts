@@ -1,0 +1,195 @@
+/*! admin-script-runner v0.1.2 — bsp-sp-parts
+ *  The status panel. Built from bsp-design: .card (flush), .progress--thick,
+ *  .spinner, .btn and the Fluent glyphs, under a slim --accent-rest header (text
+ *  only on blue — the action lives on white). This file adds only the panel's
+ *  own layout. Tokens only.
+ */
+
+/* ── Shell ─────────────────────────────────────────────────────────────── */
+
+/* Narrow screens: a full-width sheet at the bottom. Wide screens: the
+   bottom-right corner, out of the page's reading line (see the media query). */
+.asr-panel {
+  position: fixed;
+  left: var(--space-160);
+  right: var(--space-160);
+  bottom: var(--space-160);
+  /* Above SharePoint's page canvas and command bars; the design system's toast
+     uses 200, which SharePoint chrome can cover. */
+  z-index: 1000;
+  border-radius: var(--radius-xlarge);
+  border: 0;
+  box-shadow: var(--shadow-64);
+  overflow: hidden;
+}
+
+@media (min-width: 48rem) {
+  .asr-panel {
+    left: auto;
+    right: var(--space-240);
+    bottom: var(--space-240);
+    width: 26rem;
+  }
+}
+
+/* .btn sets display, which would otherwise override the hidden attribute. */
+.asr-panel [hidden] { display: none; }
+
+/* ── Header band ───────────────────────────────────────────────────────── */
+
+.asr-panel__head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-120);
+  padding: var(--space-100) var(--space-200);
+  background: var(--accent-rest);
+  color: var(--fg-on-accent);
+}
+
+.asr-panel__mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-320);
+  height: var(--space-320);
+  border-radius: var(--radius-medium);
+  background: color-mix(in srgb, var(--bmo-white) 16%, transparent);
+  box-shadow: inset 0 0 0 var(--stroke-thin) color-mix(in srgb, var(--bmo-white) 38%, transparent);
+  color: var(--bmo-white);
+}
+.asr-panel__mark .icon { width: var(--space-200); height: var(--space-200); }
+
+/* Eyebrow and title share one line (wrapping only when narrow) — a slim band. */
+.asr-panel__titles {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-80);
+}
+.asr-panel__eyebrow {
+  margin: 0;
+  font: var(--type-caption1-strong);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--bmo-white) 85%, transparent);
+}
+/* BMO: headings are never bold. */
+.asr-panel__title {
+  margin: 0;
+  font: var(--type-subtitle2);
+  font-weight: var(--weight-regular);
+  color: var(--bmo-white);
+}
+
+/* ── Body ──────────────────────────────────────────────────────────────── */
+
+.asr-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-120);
+  padding: var(--space-160) var(--space-200);
+}
+.asr-panel__lede { margin: 0; font: var(--type-body1); color: var(--fg-secondary); }
+
+/* Task list — one row per task, status glyph · name · state. */
+.asr-tasks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: var(--stroke-thin) solid var(--stroke-divider);
+  border-radius: var(--radius-large);
+  background: var(--surface-subtle);
+}
+.asr-task {
+  display: flex;
+  align-items: center;
+  gap: var(--space-100);
+  padding: var(--space-80) var(--space-120);
+  font: var(--type-body1);
+  color: var(--fg-secondary);
+}
+.asr-task + .asr-task { border-top: var(--stroke-thin) solid var(--stroke-divider); }
+.asr-task__glyph {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-200);
+  height: var(--space-200);
+}
+.asr-task__name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.asr-task__state { flex: none; font: var(--type-caption1); }
+
+.asr-task.is-running { background: var(--surface-canvas); color: var(--fg-primary); }
+.asr-task.is-running .asr-task__name { font: var(--type-body1-strong); }
+.asr-task.is-running .asr-task__state { color: var(--accent-rest); }
+.asr-task.is-done .asr-task__glyph,
+.asr-task.is-done .asr-task__state { color: var(--fg-success); }
+.asr-task.is-failed .asr-task__glyph,
+.asr-task.is-failed .asr-task__state { color: var(--fg-danger); }
+.asr-task.is-running:first-child { border-radius: var(--radius-large) var(--radius-large) 0 0; }
+.asr-task.is-running:last-child { border-radius: 0 0 var(--radius-large) var(--radius-large); }
+.asr-task.is-running:only-child { border-radius: var(--radius-large); }
+
+.asr-panel__status {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font: var(--type-caption1);
+  color: var(--fg-secondary);
+  overflow-wrap: anywhere;
+}
+.asr-panel.is-error .asr-panel__status { color: var(--fg-danger); }
+
+/* ── Footer ────────────────────────────────────────────────────────────── */
+
+.asr-panel__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-160);
+  min-height: var(--space-480);
+  padding: var(--space-80) var(--space-200);
+  border-top: var(--stroke-thin) solid var(--stroke-divider);
+  background: var(--surface-subtle);
+}
+
+/* ── Motion ────────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: no-preference) {
+  .asr-panel {
+    animation: asr-panel-in var(--motion-reveal) var(--ease-out) both;
+  }
+  .asr-panel--leaving {
+    opacity: 0;
+    transform: translateY(var(--space-160));
+    transition: opacity var(--motion-slow) var(--ease-in), transform var(--motion-slow) var(--ease-in);
+  }
+  /* The wrench works while tasks run: a slow turn-and-rest, not a spinner. */
+  .asr-panel.is-running .asr-panel__mark .icon {
+    animation: asr-wrench 2.4s var(--ease-in-out) infinite;
+  }
+  .asr-panel.is-done .asr-panel__mark {
+    animation: asr-pop var(--motion-reveal) var(--ease-out) both;
+  }
+  .asr-task.is-done .asr-task__glyph {
+    animation: asr-pop var(--motion-reveal) var(--ease-out) both;
+  }
+  @keyframes asr-panel-in {
+    from { transform: translateY(var(--space-400)); opacity: 0; }
+    to   { transform: translateY(0); opacity: 1; }
+  }
+  @keyframes asr-wrench {
+    0%, 55%, 100% { transform: rotate(0deg); }
+    20%           { transform: rotate(-24deg); }
+    38%           { transform: rotate(12deg); }
+  }
+  @keyframes asr-pop {
+    0%   { transform: scale(.6); opacity: 0; }
+    70%  { transform: scale(1.08); opacity: 1; }
+    100% { transform: scale(1); }
+  }
+}
