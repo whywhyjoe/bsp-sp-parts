@@ -15,9 +15,14 @@ the `project-state` skill.
 | **Last shipped** | nothing shipped to prod yet |
 | **Branch** | merged to `main` 2026-10-01 (`fe0a624`) |
 
-Dev fixtures this part created: list library **ASR Test Output**, pages
-`_harness-admin-script-runner.aspx` and `admin-script-runner-demo.aspx`. It
-reads (never writes) the existing `Intake Test` list.
+Dev test fixtures (**ASR Test Output** library, pages
+`_harness-admin-script-runner.aspx` and `admin-script-runner-demo.aspx`) were
+recycled on 2026-10-01 at the user's request — restorable from the dev site's
+recycle bin for its retention period. To verify on dev again, recreate them:
+`tools/sp/bootstrap-dev.ps1` (harness page), then
+`node tools/sp/run-harness.js provision` (library + demo page). The deployed
+runtime in `apps/admin-script-runner/`, the `Intake Test` list it reads, and
+`TestRuns` were left in place.
 
 ## Next committed step
 
