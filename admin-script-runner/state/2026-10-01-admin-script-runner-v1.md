@@ -32,7 +32,13 @@ Copilot cannot reliably read list content.
 
 ## Next
 
-- [ ] Read Codex round-3 review (xo turn 4) of the round-2 fixes and report.
+- [ ] Codex round 3 (xo turn 4, on 203b99a..8fd750d): round-2 items 3, 4 and
+      all doc items closed; two left, user to decide whether to fix:
+      (1) no parsable watermark falls back to the save time, so a first export
+      whose Title write fails can hide a mid-export edit — proposed: treat a
+      missing/invalid watermark as due at the next slot (`needsExport`);
+      (2) a job whose due() or predecessor runs past a slot boundary keeps the
+      old slot's stamp (costs one extra check) — proposed: re-stamp before start.
 - [ ] With the user: the intake list's real config (fields, group/subgroup,
       filter, output library whose readers match the list's). Write it as a
       JSON in the prod site's SiteAssets, not in the repo.
