@@ -11,10 +11,13 @@ but has no Alpine and no four-artifact web part pattern.
 
 ## Using it on a page
 
-1. Write a config JSON for the instance and upload it anywhere the page's
-   visitors can read (e.g. the site's `SiteAssets/admin-tasks/`). Reference:
-   [`docs/03-sp-list-to-markdown.md`](docs/03-sp-list-to-markdown.md); sample:
-   [`tasks/sp-list-to-markdown/sp-list-to-markdown.config.json`](tasks/sp-list-to-markdown/sp-list-to-markdown.config.json).
+1. Copy the **annotated sample config**,
+   [`tasks/sp-list-to-markdown/sp-list-to-markdown.config.json`](tasks/sp-list-to-markdown/sp-list-to-markdown.config.json):
+   every setting is there with a `"//…"` note beside it (the notes are ignored,
+   so the file works as-is). Fill in the `YOUR-…` values and the real column
+   names, and upload it anywhere the page's visitors can read (e.g. the site's
+   `SiteAssets/admin-tasks/`). All settings apply at runtime — no redeploy.
+   Full reference: [`docs/03-sp-list-to-markdown.md`](docs/03-sp-list-to-markdown.md).
 2. Add a Script Editor web part and paste the **deployed**
    `admin-script-runner.webpart.html` (generated per environment by the deploy —
    never the repo copy, which holds `__TOKENS__`). Edit only `data-config`.

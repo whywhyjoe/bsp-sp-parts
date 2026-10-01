@@ -21,13 +21,16 @@ reads (never writes) the existing `Intake Test` list.
 
 ## Next committed step
 
-Write the real config for the intake list (fields, group/subgroup, filter,
-output folder Copilot reads) with the user, then deploy to prod.
+**Paused 2026-10-01 by the user.** When it resumes: the user writes the intake
+instance's config from the annotated sample
+(`tasks/sp-list-to-markdown/sp-list-to-markdown.config.json`) — every setting
+is runtime, no code change needed — then deploy to prod.
 
 ## Blocking
 
-- [ ] The intake list's real config: which fields, grouping, filter, and the
-      output folder/library (whose readers must match the list's readers).
+- [ ] The intake instance's config, written by the user: which list (see Open
+      questions), fields, grouping, filter, and an output library whose
+      readers match the list's readers.
 
 ## Manual gates
 
@@ -52,6 +55,14 @@ output folder Copilot reads) with the user, then deploy to prod.
   `?adminTasks=force` after editing a config.
 
 ## Open questions
+
+- **Which list is "the intake list"?** Two candidates, never settled (the
+  user paused before choosing): the list the old `various/intake-list-to-markdown`
+  exporter targeted (Title, Status, TaskType, DueDate, Submitter, Description,
+  RefLink, AssignedTo — the sample config uses these), or the
+  `Creative Digital Solutions Intake` list that `bsp-forms`'s intake form writes
+  to (Title, RequestType, Description, Requestor, Department, Partners, Pillar,
+  Priority, LaunchDate — names unconfirmed). Settled by the user.
 
 - Should the first export (file not yet there) also check folder permission, so
   a read-only first visitor is skipped instead of seeing a 403 panel? Settle it

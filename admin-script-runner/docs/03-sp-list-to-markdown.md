@@ -5,6 +5,10 @@ Copilot to read. Host: `<div data-admin-task="sp-list-to-markdown" data-config="
 
 ## Config
 
+Start from the annotated sample, `../tasks/sp-list-to-markdown/sp-list-to-markdown.config.json`
+— every key below appears there with a `"//<key>"` note. Keys starting with `//`
+are ignored, so notes can stay in a live config.
+
 | Key | Required | Default | Notes |
 | --- | --- | --- | --- |
 | `title` | | the list title | H1 of the file |

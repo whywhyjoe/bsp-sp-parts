@@ -3,7 +3,7 @@
 Last touched: 2026-10-01
 Mode: Joe
 Branch: merged to main (fe0a624) and pushed; branch admin-script-runner kept on origin
-State: 0.1.5 on main, dev-deployed and dev-verified; prod untouched
+State: PAUSED by the user 2026-10-01. 0.1.5 on main, dev-deployed and dev-verified; prod untouched
 
 ## What this is
 
@@ -23,12 +23,16 @@ Copilot cannot reliably read list content.
   findings were fixed — no round-4 review was run. Accepted-not-fixed items and
   the reasons are in docs/00-overview.md.
 - 0.1.5 deployed to dev and verified live (test-smoke 10/10, demo page).
+- Annotated sample config: every setting with a `"//<key>"` note (ignored at
+  runtime); a fast test keeps it valid and fully annotated.
 
 ## Next
 
-- [ ] With the user: the intake list's real config (fields, group/subgroup,
-      filter, output library whose readers match the list's). Write it as a
-      JSON in the prod site's SiteAssets, not in the repo.
+- [ ] Resume only when the user asks. The user writes the intake instance's
+      config themselves from the annotated sample — it is all runtime; don't
+      quiz them for it (they pushed back on that). Which list is still open:
+      see `../STATE.md` Open questions. The config lives in the prod site's
+      SiteAssets, never in the repo.
 - [ ] Prod: `git pull` + `deploy.ps1` on the prod machine, then the manual
       gates in `../STATE.md`.
 

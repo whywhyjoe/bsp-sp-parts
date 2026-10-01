@@ -255,3 +255,19 @@ test('an edit landing mid-export is exported at the next check', async () => {
   assert.equal(await task.due(taskCtx(config, null)), true, 'the mid-export edit is not lost');
 });
 
+test('the shipped sample config is valid as-is: notes ignored, every setting read', () => {
+  const sample = JSON.parse(read('../tasks/sp-list-to-markdown/sp-list-to-markdown.config.json'));
+  const r = T.normalizeConfig(sample);
+  assert.deepEqual(Array.from(r.errors), []);
+  assert.equal(r.config.group, 'AssignedTo');
+  assert.equal(r.config.subgroup, 'Status');
+  assert.equal(r.config.filter, "Status ne 'Closed'");
+  assert.equal(r.config.orderBy[0].field, 'DueDate');
+  assert.equal(r.config.output.file, 'intake.md');
+  assert.deepEqual(R.normalizeSchedule(sample.schedule), R.normalizeSchedule({ slots: [8, 10, 12, 14, 16, 18], until: 20 }));
+  // Every real key in the sample has a note.
+  for (const k of Object.keys(sample).filter((k) => !k.startsWith('//'))) {
+    assert.ok(('//' + k) in sample, 'no note for ' + k);
+  }
+});
+

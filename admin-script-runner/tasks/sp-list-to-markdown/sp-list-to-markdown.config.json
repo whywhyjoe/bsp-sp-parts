@@ -1,18 +1,48 @@
 {
+  "//": "SAMPLE instance config for the sp-list-to-markdown task. Copy it, fill in the YOUR-... values, save it where the page's visitors can read it (e.g. the site's SiteAssets/admin-tasks/intake.json), and point the web part's data-config at it. Keys starting with // are notes: the runner ignores them, so this file works as-is. Column names are INTERNAL names (List settings > column > the Field= value in the URL). Full reference: docs/03-sp-list-to-markdown.md. Editing this file takes effect at the next check; it does not trigger an export by itself - visit the page with ?adminTasks=force for that.",
+
+  "//title": "Optional. The H1 of the Markdown file. Default: the list title.",
   "title": "Intake requests",
-  "list": { "site": "/sites/YOUR-SITE", "title": "Intake" },
-  "fields": ["Status", "TaskType", "DueDate", "StartDate", "Description", "RefLink"],
+
+  "//list": "site: optional, server-relative; default is the page's own site, and \"/\" means the tenant root site. title: required, the list's display title.",
+  "list": { "site": "/sites/YOUR-SITE", "title": "YOUR-LIST-TITLE" },
+
+  "//fields": "Required. The columns to write for each item, in this order. Group and subgroup columns are added to every item automatically, so Copilot never loses them.",
+  "fields": ["Status", "TaskType", "DueDate", "Submitter", "Description", "RefLink"],
+
+  "//heading": "Optional. The column used as each item's heading. Default: Title.",
   "heading": "Title",
+
+  "//group": "Optional. Column for ## sections (e.g. the assignee). Omit or \"\" for no grouping. Blank values land in a '(none)' group, sorted last.",
   "group": "AssignedTo",
+
+  "//subgroup": "Optional. Column for ### sections inside each group (e.g. Status). Omit for none.",
   "subgroup": "Status",
+
+  "//filter": "Optional. An OData $filter, passed as-is. Examples: \"Status ne 'Closed'\", \"Status eq 'New' or Status eq 'In progress'\". Omit to export every item (up to maxItems). Filtered columns should be indexed once a list passes 5,000 items.",
   "filter": "Status ne 'Closed'",
+
+  "//orderBy": "Optional. One or more { field, ascending } (or just a column name for ascending). Default: ID descending, i.e. newest first. Sorted columns should be indexed once a list passes 5,000 items.",
   "orderBy": [{ "field": "DueDate", "ascending": true }],
+
+  "//maxItems": "Optional. 1-5000, read in one request; default 50. When the limit is hit the file says so.",
   "maxItems": 50,
+
+  "//timeZone": "Optional. IANA zone for date+time values. Default: the zone of whichever browser runs the export, so set it. Date-only columns ignore it.",
   "timeZone": "America/New_York",
+
+  "//output": "Required. folder: server-relative folder for the .md file (it must exist). file: the file name, overwritten on each export. site: optional, default list.site. IMPORTANT: Copilot follows the FILE's permissions, so use a library whose readers are exactly the list's readers. Leave the file's Title column alone: each export writes its 'Source list as of ...' time there.",
   "output": {
     "site": "/sites/YOUR-SITE",
-    "folder": "/sites/YOUR-SITE/Shared Documents/copilot",
+    "folder": "/sites/YOUR-SITE/YOUR-LIBRARY/copilot",
     "file": "intake.md"
   },
-  "schedule": { "slots": [8, 10, 12, 14, 16, 18] }
+
+  "//schedule": "Optional (runner setting). slots: local hours at which a new check may happen; default 8,10,12,14,16,18. until: the hour the day closes, nothing starts at or after it; default two hours after the last slot (20). Weekends are included.",
+  "schedule": { "slots": [8, 10, 12, 14, 16, 18], "until": 20 },
+
+  "//label": "Optional (runner setting). The name shown for this task in the status panel. Default: 'Export list to Markdown'.",
+  "label": "Export intake list to Markdown",
+
+  "//data-id": "Not a config key: the runner remembers each instance by the web part's data-config URL. Only if that URL changes on every load (it never should for a real file) add data-id=\"some-name\" to the web part's <div>."
 }
