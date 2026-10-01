@@ -41,7 +41,8 @@ visit, per task instance:
    in the output file's Title), so an edit made while an export runs is caught
    at the next check.
 4. Otherwise the panel appears and the export runs. The day's hours are
-   re-checked when the config arrives and again before each task starts; a task
+   re-checked when the config arrives and again before each task starts (a
+   task that starts in a later slot is recorded against that slot); a task
    already running finishes even if the closing hour passes.
 
 So: per browser, at most one export per slot, only when the list changed, never
@@ -54,7 +55,7 @@ tasks automatically; `?adminTasks=force` still works.
 
 ```
 node --test admin-script-runner/tests/pure.test.mjs      # fast tier, ~0.6s
-node admin-script-runner/tests/smoke.mjs                 # full tier, ~49s, headless Chromium
+node admin-script-runner/tests/smoke.mjs                 # full tier, ~58s, headless Chromium
 python -m http.server 8646                               # then open /dev/admin-script-runner.dev.html
 ```
 

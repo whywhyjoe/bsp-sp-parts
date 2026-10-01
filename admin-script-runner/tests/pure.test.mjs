@@ -215,9 +215,9 @@ test('due decision compares the list with the watermark, not the save time', () 
   assert.equal(T.needsExport(raced, { lastItemModified: t(2) }, slot), false, 'but not twice in one slot');
   assert.equal(T.needsExport(null, null, slot), true, 'never exported');
   assert.equal(T.needsExport({ modified: t(3), canEdit: false, source: t(1) }, { lastItemModified: t(9) }, null), false, 'cannot write it');
-  // No watermark (older file, or the Title write failed): fall back to the save time.
-  assert.equal(T.needsExport({ modified: t(3), canEdit: true, source: null }, { lastItemModified: t(2) }, null), false);
-  assert.equal(T.needsExport({ modified: t(3), canEdit: true, source: null }, { lastItemModified: t(4) }, null), true);
+  // No readable watermark (Title write failed, Title edited): due, never trusted to the save time.
+  assert.equal(T.needsExport({ modified: t(3), canEdit: true, source: null }, { lastItemModified: t(2) }, null), true);
+  assert.equal(T.needsExport({ modified: t(3), canEdit: true, source: null }, { lastItemModified: t(2) }, slot), false, 'still once per slot');
 });
 
 test('settle delay waits out the second of a very recent list change, capped at 2 s', () => {

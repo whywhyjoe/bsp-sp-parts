@@ -1,4 +1,4 @@
-/*! admin-script-runner v0.1.4 — bsp-sp-parts
+/*! admin-script-runner v0.1.5 — bsp-sp-parts
  *
  *  Runs small admin tasks when a page is visited, at most once per schedule slot,
  *  and shows their progress in a status panel pinned to the bottom of the screen.
@@ -35,7 +35,7 @@
 (function (window) {
   'use strict';
 
-  var VERSION = '0.1.4';
+  var VERSION = '0.1.5';
   var LOG = '[admin-script-runner]';
   var DEFAULT_SLOTS = [8, 10, 12, 14, 16, 18];
   var STORE_KEY = 'adminScriptRunner.v2';
@@ -522,9 +522,17 @@
   }
 
   function insideHours(job) {
-    if (job.force || currentSlotStart(new Date(), job.schedule)) return true;
-    record(job.key, 'skipped', 'outside-hours');
-    return false;
+    if (job.force) return true;
+    var now = new Date();
+    var slot = currentSlotStart(now, job.schedule);
+    if (!slot) { record(job.key, 'skipped', 'outside-hours'); return false; }
+    // due() or an earlier task ran past a slot boundary: the attempt belongs to
+    // the slot it actually runs in, or a later visit there would check again.
+    if (job.slotStart && slot.getTime() !== job.slotStart.getTime()) {
+      remember(job.key, { checked: now.getTime(), schedule: job.schedule });
+      job.slotStart = slot;
+    }
+    return true;
   }
 
   function runJobs(jobs) {

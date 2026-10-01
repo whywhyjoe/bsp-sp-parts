@@ -1,4 +1,4 @@
-/*! sp-list-to-markdown v0.1.4 — an admin-script-runner task (bsp-sp-parts)
+/*! sp-list-to-markdown v0.1.5 — an admin-script-runner task (bsp-sp-parts)
  *
  *  Exports a SharePoint list to one Markdown file in a document library,
  *  overwriting the previous file, so Copilot can read list content it cannot
@@ -343,9 +343,11 @@
     if (!file.canEdit) return false;                           // this visitor could not write it
     if (slotStart && file.modified >= slotStart) return false; // already exported this slot
     // Compare against the watermark (the list's state when it was read). A file
-    // without one (older export, or the Title write failed) falls back to its
-    // save time — which can miss an edit that landed mid-export.
-    return list.lastItemModified > (file.source || file.modified);
+    // without a readable one (first export whose Title write failed, a broken
+    // Title column, a hand-edited Title) is due: its save time could hide an
+    // edit that landed mid-export. The slot gate keeps that to once per slot.
+    if (!file.source) return true;
+    return list.lastItemModified > file.source;
   }
 
   /** EffectiveBasePermissions → can the user edit items (i.e. overwrite the file)? */

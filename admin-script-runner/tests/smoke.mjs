@@ -173,6 +173,29 @@ try {
   check('a fetch that crosses the closing hour does not run', startedAt < '20:00:00' && slow.detail === 'outside-hours' && !(await late.$('.asr-panel')),
     'started ' + startedAt + ' → ' + JSON.stringify(slow));
 
+  // 11. due() finishing in the next slot (checked 09:59:57, due() takes 4 s):
+  //     the attempt is re-stamped in the 10:00 slot it actually runs in.
+  const edge = await browser.newPage();
+  edge.on('pageerror', (e) => errors.push(e.message));
+  await edge.clock.setSystemTime(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 9, 59, 54));
+  await edge.goto(base + '?nohosts=1', { waitUntil: 'domcontentloaded' });
+  await edge.waitForFunction(() => window.adminScriptRunner && window.dcsParts && window.dcsParts['admin-script-runner'], null, { timeout: 10000 });
+  await edge.waitForFunction(() => new Date().getSeconds() >= 57, null, { timeout: 10000 });
+  await edge.evaluate(() => {
+    window.__ASR_MOCK_DELAY_MS__ = 4000;
+    const h = document.createElement('div');
+    h.setAttribute('data-admin-task', 'sp-list-to-markdown');
+    h.setAttribute('data-mock', '');
+    h.setAttribute('data-id', 'edge');
+    document.body.appendChild(h);
+  });
+  await edge.waitForSelector('.asr-panel', { state: 'attached', timeout: 15000 });
+  const stampedAt = await edge.evaluate(() => {
+    const doc = JSON.parse(localStorage.getItem('adminScriptRunner.v2') || '{}');
+    return new Date(doc.instances['sp-list-to-markdown|edge'].checked).toTimeString().slice(0, 8);
+  });
+  check('a task starting in the next slot is stamped in that slot', stampedAt >= '10:00:00', 'stamped ' + stampedAt);
+
   check('no page errors', errors.length === 0, errors.join(' | '));
 } finally {
   await browser.close();

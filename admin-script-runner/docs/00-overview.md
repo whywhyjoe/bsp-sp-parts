@@ -159,6 +159,8 @@ write — show in the panel.
 - **The Title write uses `validateUpdateListItem` with `bNewDocumentUpdate`**,
   so it adds no file version (verified on dev: one export, one version). It
   answers 200 even when a field fails; check each field's `HasException`.
+  When there is no readable watermark, `due()` says yes (Codex round 3): the
+  file's save time is exactly what the watermark exists to avoid trusting.
 - **Date-only columns are stored as site-local midnight in UTC** (Eastern:
   `T04:00:00Z`). Rendering them rounds to the nearest UTC midnight, which is
   correct for any site zone within ±11 h (a UTC+12/+13 site would show the

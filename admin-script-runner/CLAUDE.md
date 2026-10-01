@@ -44,8 +44,9 @@ is not `xo-handoff` and `.xo-handoffs/`; don't cross-file them.
    `LastItemModifiedDate`). A list item's `Modified` is site-local with no zone.
    See `docs/00-overview.md` → Paid-for gotchas.
 8. **The output file's Title is the task's state** (the source watermark,
-   `Source list as of <ISO>`). Never repurpose it; an edited or missing one only
-   falls back to comparing against the file's save time.
+   `Source list as of <ISO>`). Never repurpose it. A missing or unreadable one
+   makes the instance due at the next slot — never trust the file's save time,
+   which can hide an edit made mid-export.
 9. **Tasks are types, configs are instances. Nothing list- or site-specific
    in a task script; it all comes from the instance's JSON.
 
@@ -76,7 +77,7 @@ is not `xo-handoff` and `.xo-handoffs/`; don't cross-file them.
 
 ```
 node --test admin-script-runner/tests/pure.test.mjs   # fast tier, ~0.6s
-node admin-script-runner/tests/smoke.mjs              # full tier, ~49s
+node admin-script-runner/tests/smoke.mjs              # full tier, ~58s
 node admin-script-runner/tools/sp/run-harness.js test-smoke   # live dev tenant
 ```
 

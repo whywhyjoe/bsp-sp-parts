@@ -28,8 +28,9 @@ Copilot to read. Host: `<div data-admin-task="sp-list-to-markdown" data-config="
 **The output library needs its standard Title column.** Each export writes
 `Source list as of <ISO time>` there — the list's timestamp from just before
 the items were read — and the next check compares the list against it. Don't
-edit it; if it is missing or changed, the check falls back to the file's save
-time, which can miss an edit made during an export.
+edit it. If it is missing or unreadable (a Title write failed, someone edited
+it), the instance is due at the next slot and exports again — once per slot
+until a write succeeds — rather than trusting the file's save time.
 
 The runner keys this browser's memory of an instance by the host's `data-id`
 attribute, else its `data-config` URL — set `data-id` only when the config URL
