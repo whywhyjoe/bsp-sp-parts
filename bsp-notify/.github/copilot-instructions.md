@@ -17,6 +17,14 @@ Do not reason about SharePoint structure — run scripts and read results back:
    click **run verify.js** then **run test-smoke.js**, then **copy results JSON** and paste it here.
 4. Summarize the pasted results (pass/fail, drift list). Don't re-derive them.
 
+Sending back to dev (JSFiddle is the only way out; guide the human):
+- Results: paste the results JSON, whole and unedited, into a fiddle's JS panel.
+- Code changes: never commit. Run `git add -N . && git diff`; the human pastes all of it
+  (or whole files, each headed `// FILE: <repo-relative path>`) into the JS panel.
+- Logged in to JSFiddle, use dev's fiddle URL or a new one, Save (Ctrl+S), send dev the URL
+  with user + version (`jsfiddle.net/<user>/<slug>/<n>/`). Public: no secrets/tenant URLs.
+- Once dev confirms it's pushed: `git reset; git stash -u; git pull` (keeps a local copy).
+
 First-time site setup (human, once per site): create `SitePages/_app-template.aspx` as a
 modern page whose Script Editor Web Part contains `app/sewp-snippet.html`'s content
 (literal `__SP_ENV_SCRIPT__` token). Copy it to the harness page and point the token at
@@ -27,7 +35,5 @@ maker portal; re-bind connections by exact name match — list and flow names ar
 across tenants by convention.
 
 Model use: prefer the cheapest tier; escalate only for build failures.
-
 Reference: `env.json` = what this project needs (logical names only);
-`.claude/skills/sp-project/SKILL.md` carries the same guidance if this Copilot
-supports Agent Skills (it reads `.claude/skills` automatically in current versions).
+`.claude/skills/sp-project/SKILL.md` carries the same guidance (Copilot reads `.claude/skills`).
