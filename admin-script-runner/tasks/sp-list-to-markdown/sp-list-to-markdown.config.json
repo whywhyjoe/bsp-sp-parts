@@ -1,0 +1,18 @@
+{
+  "title": "Intake requests",
+  "list": { "site": "/sites/YOUR-SITE", "title": "Intake" },
+  "fields": ["Status", "TaskType", "DueDate", "StartDate", "Description", "RefLink"],
+  "heading": "Title",
+  "group": "AssignedTo",
+  "subgroup": "Status",
+  "filter": "Status ne 'Closed'",
+  "orderBy": [{ "field": "DueDate", "ascending": true }],
+  "maxItems": 50,
+  "timeZone": "America/New_York",
+  "output": {
+    "site": "/sites/YOUR-SITE",
+    "folder": "/sites/YOUR-SITE/Shared Documents/copilot",
+    "file": "intake.md"
+  },
+  "schedule": { "slots": [8, 10, 12, 14, 16, 18] }
+}

@@ -25,6 +25,7 @@ Which rules bind which part is explicit, not inferred:
 | `bilingual` | Page library | No |
 | `bsp-forms` | Page library | No — could optionally adopt it for its mount (host wait / edit mode / SPA re-mount would genuinely help); if that ever happens, its README says so |
 | `classic-referrer-redirects` | Page library | No |
+| `admin-script-runner` | Page library | **Adopted deliberately** — `dcsMountPart()` for host discovery, the edit-mode placeholder and SPA re-mount; no Alpine, no four-artifact pattern (its README says so) |
 | `bsp-notify` | Tenant service | No |
 
 New parts add a row here. A part's own README states its kind; this table and
@@ -83,6 +84,12 @@ Page libraries:
   site migrations: JSON mapping of old-site paths to new-site pages, plus a
   destination-page notice snippet. Dependency-free, ES5-safe, `node test.js`.
   Being expanded for use across multiple sites.
+- **[admin-script-runner](admin-script-runner/)** — runs small admin tasks on
+  page visit, at most once per schedule slot (local hours, default 8–18 every
+  two hours), with progress in a bottom-of-screen status panel. Tasks are types
+  registered by script; each page instance is a stub plus a JSON config. First
+  task: **sp-list-to-markdown**, which exports a list to a Markdown file in a
+  library for Copilot. Replaces the per-site `admin-autos.js`.
 
 Tenant services:
 
@@ -109,9 +116,11 @@ Already live on the portal, **not** deployed from this repo: the design system
 | `bsp-forms` | `bsp-forms.js`, `bsp-forms.css` → `Code/bsp-forms/` | A list, a `forms/*.json`, and a copy of the web part snippet: set `data-config`, replace `TENANT` in the script URL, bump `?v=` on every engine deploy | [Deployment layout](bsp-forms/README.md#deployment-layout), [Adding a form](bsp-forms/README.md#adding-a-form) |
 | `classic-referrer-redirects` | `classic-redirect.js` → SiteAssets | `webpart-snippet.html` pasted into the landing page, config JSON inline. Run `node test.js` first | [Setup](classic-referrer-redirects/README.md#setup) |
 | `bilingual` | `intl.js` (and `lang-blocks.css` for the dual-DOM tier), wherever the page keeps its scripts | The page's own `strings.js`. Load `intl.js`, then `strings.js`, then call `intl.apply()` | [Usage](bilingual/README.md#usage--keyed-tier) |
+| `admin-script-runner` | `tools/sp/deploy.ps1` → `code` root `apps/admin-script-runner/` (runner, CSS, boot helper and every task, flat) — once per **tenant** | A config JSON, plus the **deployed** (generated) `admin-script-runner.webpart.html` with `data-config` set | [Hosting and deploy](admin-script-runner/docs/01-hosting-and-deploy.md) |
 | `bsp-notify` | The `Notifications` list, the **BSP Notify** flow (solution import) and `bsp-notify.js` | Nothing. Callers load `bsp-notify.js` after `pnp2` | [Prod deploy checklist](bsp-notify/docs/prod-deploy-checklist.md) |
 
-Only `sp-list-ordering` needs `_shared/`. Web part stubs and snippets are
+`sp-list-ordering` and `admin-script-runner` need `_shared/` (the runner's
+deploy copies it alongside its own files). Web part stubs and snippets are
 **copied per page**: each page keeps its own copy, pointed at its own config.
 
 ## Development

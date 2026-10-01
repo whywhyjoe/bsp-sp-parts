@@ -1,0 +1,72 @@
+# admin-script-runner
+
+Runs small admin tasks when a SharePoint page is visited — at most once per
+schedule slot — and shows their progress in a status panel pinned to the bottom
+of the screen. Ships with one task, **sp-list-to-markdown**, which exports a
+list to a Markdown file in a library so Copilot can read list content.
+
+**Kind:** page library (bsp-sp-parts kinds table). It adopts `dcsMountPart()`
+deliberately — for host discovery, the edit-mode placeholder and SPA re-mount —
+but has no Alpine and no four-artifact web part pattern.
+
+## Using it on a page
+
+1. Write a config JSON for the instance and upload it anywhere the page's
+   visitors can read (e.g. the site's `SiteAssets/admin-tasks/`). Reference:
+   [`docs/03-sp-list-to-markdown.md`](docs/03-sp-list-to-markdown.md); sample:
+   [`tasks/sp-list-to-markdown/sp-list-to-markdown.config.json`](tasks/sp-list-to-markdown/sp-list-to-markdown.config.json).
+2. Add a Script Editor web part and paste the **deployed**
+   `admin-script-runner.webpart.html` (generated per environment by the deploy —
+   never the repo copy, which holds `__TOKENS__`). Edit only `data-config`.
+3. Visit the page with `?adminTasks=force` once to run it immediately and check
+   the file.
+
+Everyone who can open the page can trigger a run; only visitors who can edit the
+output file actually export (others are skipped silently). See
+[`docs/00-overview.md`](docs/00-overview.md) for who sees what.
+
+## Scheduling (the whole rule)
+
+Slots are local hours, default `8, 10, 12, 14, 16, 18`; the day closes at
+`schedule.until`, default two hours after the last slot (20:00). On each page
+visit, per task instance:
+
+1. **Outside the day's hours, or this browser already checked in the current
+   slot?** Stop — decided from this browser's memory, no network. (A browser's
+   very first visit fetches the instance's config once to learn its schedule;
+   until a config has loaded successfully, the default schedule applies.)
+2. **Output file written since the slot started?** Stop.
+3. **List unchanged since the export read it?** Stop. Each export records the
+   list's timestamp from just before it read the items (the *source watermark*,
+   in the output file's Title), so an edit made while an export runs is caught
+   at the next check.
+4. Otherwise the panel appears and the export runs. The day's hours are
+   re-checked when the config arrives and again before each task starts (a
+   task that starts in a later slot is recorded against that slot); a task
+   already running finishes even if the closing hour passes.
+
+So: per browser, at most one export per slot, only when the list changed, never
+overnight. (Two tabs opened in the same instant can each export once — see
+`docs/00-overview.md`, accepted.)
+A browser that cannot store anything (storage blocked or full) never runs
+tasks automatically; `?adminTasks=force` still works.
+
+## Running it locally
+
+```
+node --test admin-script-runner/tests/pure.test.mjs      # fast tier, ~0.6s
+node admin-script-runner/tests/smoke.mjs                 # full tier, ~58s, headless Chromium
+python -m http.server 8646                               # then open /dev/admin-script-runner.dev.html
+```
+
+Dev tenant loop (sp-env): `pwsh admin-script-runner/tools/sp/deploy.ps1 -DirectUpload`,
+then `node admin-script-runner/tools/sp/run-harness.js test-smoke`.
+
+## Where to look
+
+| | |
+| --- | --- |
+| How it works | [`docs/README.md`](docs/README.md) |
+| Where things stand | [`STATE.md`](STATE.md) |
+| What shipped when | [`LOG.md`](LOG.md) |
+| Rules for agents | [`CLAUDE.md`](CLAUDE.md) |

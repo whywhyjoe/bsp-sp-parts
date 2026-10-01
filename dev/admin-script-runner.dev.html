@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>admin-script-runner · dev harness</title>
+<!-- DEV HARNESS — simulates a SharePoint page carrying the admin-script-runner
+     web part stub with one sp-list-to-markdown task. The web part zone renders
+     LATE (1.2 s, like SharePoint). Opened from disk (file:) the task uses its
+     mock adapter and sample config automatically; the Markdown it "saves" is
+     shown below. Vendored design-system CSS and prod includes as in
+     sp-list-ordering.dev.html — see vendor/README.md. ?standalone=1 skips the
+     prod includes. -->
+<link rel="stylesheet" href="vendor/colors_and_type.css">
+<link rel="stylesheet" href="vendor/components.css">
+<link rel="stylesheet" href="../admin-script-runner/admin-script-runner.css">
+<style>
+  /* Harness-only CSS: a bare stand-in for a SharePoint page. */
+  body { margin: 0; background: #fff; font: var(--type-body1); color: var(--fg-primary); }
+  .fake-sp-chrome { padding: 24px 32px; border-bottom: 1px solid var(--stroke-divider); color: var(--fg-secondary); }
+  .fake-canvas { max-width: 1024px; margin: 0 auto; padding: 24px 32px 240px; }
+  .fake-zone { border: 1px dashed var(--stroke-divider); padding: 16px; min-height: 24px; }
+  .fake-zone-label { font: var(--type-caption2); color: var(--fg-secondary); margin: 16px 0 8px; text-transform: uppercase; letter-spacing: .06em; }
+  .harness-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .harness-bar__note { font: var(--type-caption1); color: var(--fg-secondary); }
+  #harness-output { white-space: pre-wrap; font: 12px/18px Consolas, monospace; background: var(--surface-subtle); border: 1px solid var(--stroke-divider); padding: 12px; max-height: 480px; overflow: auto; }
+</style>
+</head>
+<body>
+
+<div class="fake-sp-chrome">SharePoint page chrome lives here — not the runner's concern.</div>
+
+<div class="fake-canvas">
+  <div class="harness-bar">
+    <button class="btn btn--primary btn--sm" type="button" id="btn-force">Force run (?adminTasks=force)</button>
+    <button class="btn btn--subtle btn--sm" type="button" id="btn-clear">Clear schedule memory + reload</button>
+    <button class="btn btn--subtle btn--sm" type="button" id="btn-fail">Make the next save fail</button>
+    <button class="btn btn--subtle btn--sm" type="button" id="btn-spa">Simulate SPA navigation</button>
+    <button class="btn btn--subtle btn--sm" type="button" id="btn-edit">Toggle edit mode</button>
+  </div>
+  <p class="harness-bar__note" id="harness-note">Plain load: runs if the current slot (8, 10, 12, 14, 16, 18 local) has not been checked by this browser. Reload to see the slot gate skip it.</p>
+
+  <p class="fake-zone-label">Script Editor web part zone — the stub renders nothing here in view mode</p>
+  <div class="fake-zone" id="webpart-zone"></div>
+
+  <p class="fake-zone-label">Last Markdown the mock adapter "saved"</p>
+  <pre id="harness-output">(nothing saved yet)</pre>
+  <p class="fake-zone-label">adminScriptRunner.status()</p>
+  <pre id="harness-status">{}</pre>
+</div>
+
+<script>
+  // What lands in the zone mirrors admin-script-runner.webpart.html's host div.
+  // data-config is left off: from disk the task's sample (mock) config is used.
+  // A second instance of the same task type, so the panel shows a task list.
+  // Its config is a blob URL (no fixture file), which changes every load — so
+  // data-id gives it a stable key for the runner's memory.
+  var SECOND_CONFIG = URL.createObjectURL(new Blob([JSON.stringify({
+    label: 'Export Requests list to Markdown',
+    list: { title: 'Requests' }, fields: ['Status', 'DueDate'], group: 'Status',
+    output: { folder: '/sites/mock/Shared Documents/copilot', file: 'requests.md' }
+  })], { type: 'application/json' }));
+  function renderWebPartStub() {
+    if (new URLSearchParams(location.search).has('nohosts')) return;   // ?nohosts=1: tests add their own
+    document.getElementById('webpart-zone').innerHTML =
+      '<div data-admin-task="sp-list-to-markdown" data-mock></div>' +
+      '<div data-admin-task="sp-list-to-markdown" data-mock data-id="harness-second" data-config="' + SECOND_CONFIG + '"></div>';
+  }
+  setTimeout(renderWebPartStub, 1200);
+
+  function reloadWith(search) { location.href = location.pathname + search; }
+  document.getElementById('btn-force').addEventListener('click', function () {
+    reloadWith((location.search.indexOf('standalone') >= 0 ? '?standalone=1&' : '?') + 'adminTasks=force');
+  });
+  document.getElementById('btn-clear').addEventListener('click', function () {
+    window.adminScriptRunner.clearSchedule();
+    reloadWith(location.search.replace(/[?&]adminTasks=force/, '').replace(/[?&]nav=\d+/g, ''));
+  });
+  document.getElementById('btn-fail').addEventListener('click', function () {
+    window.__ASR_MOCK_FAIL__ = true;
+    window.adminScriptRunner.clearSchedule();
+    document.getElementById('harness-note').textContent = 'Next save fails. Schedule memory cleared — click Simulate SPA navigation to re-check and run.';
+  });
+  document.getElementById('btn-spa').addEventListener('click', function () {
+    document.getElementById('harness-note').textContent = 'Navigated — zone torn down; the re-mounted host is re-checked (the slot gate usually skips it).';
+    window.__harnessNavigate();
+  });
+  document.getElementById('btn-edit').addEventListener('click', function () {
+    var on = !document.body.classList.contains('editmode');
+    document.body.classList.toggle('editmode', on);
+    try {
+      var key = 'dcs:mode=edit:intent:' + location.pathname;
+      if (on) sessionStorage.setItem(key, '1'); else sessionStorage.removeItem(key);
+    } catch (e) { /* private mode */ }
+    document.getElementById('harness-note').textContent =
+      on ? 'Edit mode ON — expect the "paused while you edit" placeholder and no run.' : 'Edit mode OFF.';
+    var part = window.dcsParts && window.dcsParts['admin-script-runner'];
+    if (part) part.mountAll();
+  });
+
+  // Mirror what the mock adapter saved and what the runner recorded.
+  setInterval(function () {
+    var files = window.__ASR_MOCK_FILES__ || {};
+    var keys = Object.keys(files);
+    if (keys.length) document.getElementById('harness-output').textContent = keys[keys.length - 1] + '\n\n' + files[keys[keys.length - 1]].text;
+    if (window.adminScriptRunner && window.adminScriptRunner.status) {
+      document.getElementById('harness-status').textContent = JSON.stringify(window.adminScriptRunner.status(), null, 2);
+    }
+  }, 500);
+</script>
+
+<script>
+  // HARNESS MODE — same as sp-list-ordering.dev.html: default INTEGRATED loads
+  // the vendored prod includes; ?standalone=1 exercises dcs-part-boot's stand-ins.
+  window.__HARNESS_STANDALONE = new URLSearchParams(location.search).has('standalone');
+  if (!window.__HARNESS_STANDALONE) {
+    document.write('<script src="vendor/fcu-standard.js"><\/script>');
+    document.write('<script src="vendor/std-spa-loader.js"><\/script>');
+  }
+</script>
+<script>
+  (function () {
+    if (typeof window.dcsOnSpaNavigation === 'function') return;   // real one won
+    var subs = [];
+    window.dcsOnSpaNavigation = function (id, cb) { subs.push({ id: id, cb: cb }); };
+    var origPush = history.pushState;
+    history.pushState = function () {
+      var r = origPush.apply(this, arguments);
+      setTimeout(function () {
+        subs.forEach(function (s) { setTimeout(function () { s.cb({ id: s.id, reason: 'pushState' }); }, 300); });
+      }, 100);
+      return r;
+    };
+  })();
+  window.__harnessNavigate = function () {
+    history.pushState({}, '', location.pathname + location.search.replace(/[?&]nav=\d+/, '') + (location.search ? '&' : '?') + 'nav=' + Date.now());
+    document.getElementById('webpart-zone').innerHTML = '';
+    setTimeout(renderWebPartStub, 400);
+  };
+</script>
+<!-- Same order as the web part stub: boot helper, task(s), runner. -->
+<script src="../_shared/dcs-part-boot.js"></script>
+<script>
+  // ?lateTask=1 loads the task script 2.5 s AFTER the runner, to exercise late
+  // registration (hosts wait for their type instead of being dropped).
+  window.__HARNESS_LATE_TASK = new URLSearchParams(location.search).has('lateTask');
+  if (!window.__HARNESS_LATE_TASK) document.write('<script src="../admin-script-runner/tasks/sp-list-to-markdown/sp-list-to-markdown.js"><\/script>');
+</script>
+<script src="../admin-script-runner/admin-script-runner.js"></script>
+<script>
+  if (window.__HARNESS_LATE_TASK) setTimeout(function () {
+    var s = document.createElement('script');
+    s.src = '../admin-script-runner/tasks/sp-list-to-markdown/sp-list-to-markdown.js';
+    document.head.appendChild(s);
+  }, 2500);
+</script>
+
+</body>
+</html>

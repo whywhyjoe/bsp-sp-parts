@@ -5,7 +5,8 @@ page. Three kinds, with different rules:
 
 - **Web part tools** (e.g. `sp-list-ordering/`) — visible UI. Everything below
   applies: the non-negotiables, the boot contract, the four-artifact pattern.
-- **Page libraries** (`bilingual/`, `bsp-forms/`, `classic-referrer-redirects/`)
+- **Page libraries** (`bilingual/`, `bsp-forms/`, `classic-referrer-redirects/`,
+  `admin-script-runner/`)
   — headless or self-rendering scripts a page opts into. The BSP family rules
   on buildless/CDN-free runtime and self-hosted deps still apply, but the boot
   contract, Alpine conventions, and four-artifact pattern do **not** — each

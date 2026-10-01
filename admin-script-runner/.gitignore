@@ -1,0 +1,13 @@
+# Generated documents live here and are never committed.
+.scratch/
+
+# sp-env: machine-local and generated deploy artifacts
+env.local.json
+*.local.json
+resolved-env.json
+push-staging/
+node_modules/
+*.pfx
+*.cer
+*.pem
+*.key
