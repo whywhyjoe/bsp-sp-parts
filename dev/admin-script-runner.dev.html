@@ -61,6 +61,7 @@
     output: { folder: '/sites/mock/Shared Documents/copilot', file: 'requests.md' }
   })], { type: 'application/json' }));
   function renderWebPartStub() {
+    if (new URLSearchParams(location.search).has('nohosts')) return;   // ?nohosts=1: tests add their own
     document.getElementById('webpart-zone').innerHTML =
       '<div data-admin-task="sp-list-to-markdown" data-mock></div>' +
       '<div data-admin-task="sp-list-to-markdown" data-mock data-id="harness-second" data-config="' + SECOND_CONFIG + '"></div>';

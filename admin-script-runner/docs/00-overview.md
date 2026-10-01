@@ -50,9 +50,11 @@ admin-script-runner.js
                (closes in 3 s) | Cancelled (closes in 3 s) | Needs attention (stays, Close)
 
 tasks/sp-list-to-markdown
-  due          GET file (TimeLastModified + edit permission) → GET list LastItemModifiedDate
-  run          list → fields → items (one request, ≤ maxItems) → Markdown → upload (overwrite)
-               → re-read the list's timestamp; changed meanwhile → export again (≤ 3 attempts)
+  due          GET file (TimeLastModified, edit permission, Title = source watermark)
+               → GET list LastItemModifiedDate; due when the list is newer than the watermark
+  run          list timestamp (= watermark) → settle ≤ 2 s if it just changed → fields
+               → items (one request, ≤ maxItems) → Markdown → upload (overwrite)
+               → write the watermark to the file's Title (no extra version)
   adapters     makeLiveAdapter (pnp2, the only SharePoint code) / makeMockAdapter (twin)
 ```
 
@@ -89,8 +91,14 @@ end the last slot would stretch to midnight. Per-instance `schedule` overrides.
 ### Accepted, not fixed (Codex review, 2026-09-30)
 
 - **Two tabs in one browser can both run an instance in the same slot** —
-  `localStorage` has no atomic read-and-stamp. Worst case: one duplicate export
-  with identical content. Locking was judged not worth it.
+  `localStorage` has no atomic read-and-stamp. Worst case: a second export
+  moments after the first (its content differs only by the export time, plus
+  any edit made in between), and a stamp for a different instance written at
+  the same instant can be lost, costing that instance one extra check. Locking
+  was judged not worth it for a handful of visitors.
+- **An instance whose config has never loaded retries on the default
+  schedule** (8–20). Its own schedule is unknowable until the config is read;
+  once it loads, it is cached and used from then on.
 - **Date-only values assume a site zone within ±11 h of UTC** (see Paid-for
   gotchas). The portal's sites are North American.
 - **The panel's status glyphs contain `#fff` strokes** — copied verbatim from
@@ -137,10 +145,20 @@ write — show in the panel.
 - **`LastItemModifiedDate` moves for more than item edits** — on dev it moved
   at the moment the provision op ensured the (unchanged) source list. The cost
   is an occasional extra export, which is harmless; don't try to make it exact.
-- **An edit landing mid-export would otherwise be lost for good**: the upload
-  finishes after the edit, so the file looks newer than the list and `due()`
-  says no until the next edit. `run()` re-reads `LastItemModifiedDate` after
-  saving and exports again if it moved (Codex review finding).
+- **An edit landing mid-export is lost if you compare against the file's save
+  time**: the upload finishes after the edit, so the file looks newer than the
+  list until the next edit. Hence the source watermark — the list's timestamp
+  from before the items were read, stored on the file's Title — and `due()`
+  compares against that. (A first fix re-exported up to three times and could
+  still lose the edit; Codex round 2.)
+- **`LastItemModifiedDate` has one-second resolution.** An edit in the same
+  second as the watermark, but after the items were read, would compare equal
+  and be missed. If the list changed in the last 2 s, `run()` waits until that
+  second is over before reading items, so any edit it misses carries a later
+  second. Assumes this browser's clock is within about a second of SharePoint's.
+- **The Title write uses `validateUpdateListItem` with `bNewDocumentUpdate`**,
+  so it adds no file version (verified on dev: one export, one version). It
+  answers 200 even when a field fails; check each field's `HasException`.
 - **Date-only columns are stored as site-local midnight in UTC** (Eastern:
   `T04:00:00Z`). Rendering them rounds to the nearest UTC midnight, which is
   correct for any site zone within ±11 h (a UTC+12/+13 site would show the

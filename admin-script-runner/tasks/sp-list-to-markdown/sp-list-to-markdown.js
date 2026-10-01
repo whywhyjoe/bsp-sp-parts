@@ -1,4 +1,4 @@
-/*! sp-list-to-markdown v0.1.0 — an admin-script-runner task (bsp-sp-parts)
+/*! sp-list-to-markdown v0.1.4 — an admin-script-runner task (bsp-sp-parts)
  *
  *  Exports a SharePoint list to one Markdown file in a document library,
  *  overwriting the previous file, so Copilot can read list content it cannot
@@ -6,10 +6,14 @@
  *  values are repeated as bullets, because Copilot reads a document in chunks and
  *  a chunk can lose the heading above it.
  *
- *  due(): one small GET for the output file (age + the visitor's edit permission),
- *  then one for the list's LastItemModifiedDate — exported only when the list
- *  changed since the file was written and the file predates the current slot.
- *  run(): fields → items (one request, maxItems ≤ 5000) → Markdown → upload.
+ *  due(): one small GET for the output file (age, the visitor's edit permission,
+ *  and its source watermark), then one for the list's LastItemModifiedDate —
+ *  exported only when the list changed after the watermark and the file
+ *  predates the current slot.
+ *  run(): list timestamp (= the watermark) → fields → items (one request,
+ *  maxItems ≤ 5000) → Markdown → upload → write the watermark into the file's
+ *  Title. The watermark is the list's state BEFORE the items were read, so an
+ *  edit landing mid-export is newer than it and the next check exports again.
  *
  *  Config reference: ../../docs/03-sp-list-to-markdown.md. Data layer: PnPjs v2
  *  (global pnp2), kept inside makeLiveAdapter(); makeMockAdapter() is its twin.
@@ -323,6 +327,27 @@
     try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time'; } catch (e) { return 'local time'; }
   }
 
+  /* The source watermark, stored in the output file's Title column. */
+  var WATERMARK_PREFIX = 'Source list as of ';
+  function watermarkText(date) { return WATERMARK_PREFIX + date.toISOString(); }
+  function parseWatermark(title) {
+    var m = /^Source list as of (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z)$/.exec(String(title || '').trim());
+    if (!m) return null;
+    var d = new Date(m[1]);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  /** due()'s decision, given the file state, the list state and the slot start. */
+  function needsExport(file, list, slotStart) {
+    if (!file) return true;                                    // never exported
+    if (!file.canEdit) return false;                           // this visitor could not write it
+    if (slotStart && file.modified >= slotStart) return false; // already exported this slot
+    // Compare against the watermark (the list's state when it was read). A file
+    // without one (older export, or the Title write failed) falls back to its
+    // save time — which can miss an edit that landed mid-export.
+    return list.lastItemModified > (file.source || file.modified);
+  }
+
   /** EffectiveBasePermissions → can the user edit items (i.e. overwrite the file)? */
   function canEdit(perms) {
     if (!perms) return false;
@@ -400,10 +425,14 @@
       fileState: function (sitePath, filePath) {
         return web(sitePath).then(function (w) {
           return w.getFileByServerRelativePath(filePath)
-            .select('TimeLastModified', 'ListItemAllFields/EffectiveBasePermissions').expand('ListItemAllFields')();
+            .select('TimeLastModified', 'ListItemAllFields/EffectiveBasePermissions', 'ListItemAllFields/Title').expand('ListItemAllFields')();
         }).then(function (file) {
           var item = file.ListItemAllFields || {};
-          return { modified: new Date(file.TimeLastModified), canEdit: canEdit(item.EffectiveBasePermissions) };
+          return {
+            modified: new Date(file.TimeLastModified),
+            canEdit: canEdit(item.EffectiveBasePermissions),
+            source: parseWatermark(item.Title)
+          };
         }, function (e) {
           if (e && e.status === 404) return null;
           throw new Error('reading ' + filePath + ': ' + spError(e));
@@ -440,6 +469,19 @@
         return wrap('saving ' + file + ' to ' + folder, web(sitePath).then(function (w) {
           return w.getFolderByServerRelativeUrl(folder).files.add(file, text, true);
         })).then(function (r) { return r && r.data ? r.data.ServerRelativeUrl : folder + '/' + file; });
+      },
+      /* Title ← watermark. validateUpdateListItem with bNewDocumentUpdate=true
+         adds no extra version; it answers 200 even when a field fails, so the
+         per-field HasException is what counts. */
+      stampSource: function (sitePath, filePath, text) {
+        return wrap('recording the source time on ' + filePath, web(sitePath).then(function (w) {
+          return w.getFileByServerRelativePath(filePath).getItem();
+        }).then(function (item) {
+          return item.validateUpdateListItem([{ FieldName: 'Title', FieldValue: text }], true);
+        })).then(function (results) {
+          var bad = (Array.isArray(results) ? results : (results && results.value) || []).filter(function (f) { return f && f.HasException; });
+          if (bad.length) throw new Error('recording the source time on ' + filePath + ': ' + (bad[0].ErrorMessage || 'the Title column rejected the value'));
+        });
       }
     };
   }
@@ -472,11 +514,12 @@
 
   function makeMockAdapter() {
     var files = window.__ASR_MOCK_FILES__ = window.__ASR_MOCK_FILES__ || {};
-    function later(value) { return new Promise(function (r) { window.setTimeout(function () { r(value); }, 350); }); }
+    var delay = typeof window.__ASR_MOCK_DELAY_MS__ === 'number' ? window.__ASR_MOCK_DELAY_MS__ : 350;
+    function later(value) { return new Promise(function (r) { window.setTimeout(function () { r(value); }, delay); }); }
     return {
       fileState: function (sitePath, filePath) {
         var f = files[filePath];
-        return later(f ? { modified: f.modified, canEdit: true } : null);
+        return later(f ? { modified: f.modified, canEdit: true, source: parseWatermark(f.title) } : null);
       },
       listState: function (sitePath, title) {
         return later({ title: title, baseTemplate: 100, lastItemModified: MOCK_LIST_MODIFIED, rootPath: (sitePath || '/sites/mock') + '/Lists/' + title });
@@ -487,7 +530,7 @@
         var path = folder + '/' + file;
         // The dev harness sets this to show the panel's error state.
         if (window.__ASR_MOCK_FAIL__) return later(null).then(function () { throw new Error('saving ' + file + ': [403] Access denied (mock)'); });
-        files[path] = { modified: new Date(), text: text };
+        files[path] = { modified: new Date(), text: text, title: '' };
         window.__ASR_MOCK_UPLOADS__ = (window.__ASR_MOCK_UPLOADS__ || 0) + 1;
         // The dev harness sets this to simulate someone editing the list mid-export.
         if (window.__ASR_MOCK_EDIT_DURING_EXPORT__) {
@@ -495,6 +538,10 @@
           MOCK_LIST_MODIFIED = new Date();
         }
         return later(path);
+      },
+      stampSource: function (sitePath, filePath, text) {
+        if (files[filePath]) files[filePath].title = text;
+        return later(undefined);
       }
     };
   }
@@ -514,78 +561,80 @@
     var a = adapterFor(ctx);
     var filePath = c.output.folder + '/' + c.output.file;
     return a.fileState(c.output.site, filePath).then(function (file) {
-      if (!file) return true;                              // never exported
-      if (!file.canEdit) { ctx.log('no edit permission on ' + filePath + ' — skipping'); return false; }
-      if (ctx.slotStart && file.modified >= ctx.slotStart) return false;   // already exported this slot
+      if (file && !file.canEdit) { ctx.log('no edit permission on ' + filePath + ' — skipping'); return false; }
+      if (!file || (ctx.slotStart && file.modified >= ctx.slotStart)) return needsExport(file, null, ctx.slotStart);
       return a.listState(c.list.site, c.list.title).then(function (l) {
-        return l.lastItemModified > file.modified;         // only when the list changed since
+        return needsExport(file, l, ctx.slotStart);
       });
     });
   }
 
-  var MAX_EXPORT_ATTEMPTS = 3;
+  /* LastItemModifiedDate has one-second resolution. If the list changed within
+     the last moment, wait until that second is safely over before reading the
+     items: then any edit the read misses carries a LATER second than the
+     watermark and is caught next time. 2 s also absorbs modest clock skew
+     between this browser and SharePoint. */
+  var SETTLE_MS = 2000;
+  function settleDelay(lastItemModified, nowMs) {
+    return Math.max(0, Math.min(SETTLE_MS, lastItemModified.getTime() + SETTLE_MS - nowMs));
+  }
 
   function run(ctx) {
     var c = configOrThrow(ctx);
     var a = adapterFor(ctx);
-
-    function attempt(n, list) {
-      var metaByName = Object.create(null);
-      var itemCount = 0;
-      var saved = '';
-      var chars = 0;
-      ctx.setProgress(0.2);
-      return a.fields(c.list.site, c.list.title).then(function (fields) {
-        fields.forEach(function (f) { metaByName[f.InternalName] = f; });
-        var q = buildQuery(c, metaByName);
-        if (q.errors.length) throw new Error(q.errors.join(' '));
-        ctx.throwIfCancelled();
-        ctx.setStatus('Reading up to ' + c.maxItems + ' items…');
-        ctx.setProgress(0.35);
-        return a.items(c.list.site, c.list.title, { select: q.select, expand: q.expand, filter: c.filter, orderBy: c.orderBy, top: c.maxItems });
-      }).then(function (items) {
-        ctx.throwIfCancelled();
-        itemCount = items.length;
-        ctx.setStatus('Writing Markdown for ' + items.length + ' items…');
-        ctx.setProgress(0.6);
-        var origin = window.location.origin && window.location.origin !== 'null' ? window.location.origin : 'https://tenant.example';
-        var listUrl = origin + encodePath(list.rootPath);
-        var form = list.baseTemplate === 101 ? '/Forms/DispForm.aspx' : '/DispForm.aspx';
-        var markdown = buildMarkdown({
-          config: c,
-          metaByName: metaByName,
-          items: items,
-          list: { title: list.title, url: listUrl, itemUrl: function (id) { return listUrl + form + '?ID=' + id; } },
-          exportedAt: new Date()
-        });
-        chars = markdown.length;
-        ctx.throwIfCancelled();
-        ctx.setStatus('Saving ' + c.output.file + '…');
-        ctx.setProgress(0.75);
-        return a.upload(c.output.site, c.output.folder, c.output.file, markdown);
-      }).then(function (path) {
-        saved = path;
-        ctx.setStatus('Checking the list did not change while saving…');
-        ctx.setProgress(0.9);
-        return a.listState(c.list.site, c.list.title);
-      }).then(function (after) {
-        var changed = after.lastItemModified > list.lastItemModified;
-        if (changed && n < MAX_EXPORT_ATTEMPTS) {
-          ctx.throwIfCancelled();
-          ctx.setStatus('The list changed during the export — exporting again…');
-          return attempt(n + 1, after);
-        }
-        ctx.setStatus('Saved ' + c.output.file + ' (' + itemCount + ' items).');
-        ctx.setProgress(1);
-        return { items: itemCount, file: saved, chars: chars, attempts: n, changedAfterLastAttempt: changed };
-      });
-    }
+    var metaByName = Object.create(null);
+    var list;
+    var itemCount = 0;
+    var saved = '';
+    var chars = 0;
 
     ctx.setStatus('Reading the list…');
     ctx.setProgress(0.05);
-    return a.listState(c.list.site, c.list.title).then(function (list) {
+    return a.listState(c.list.site, c.list.title).then(function (l) {
+      list = l;   // list.lastItemModified becomes the watermark
       ctx.throwIfCancelled();
-      return attempt(1, list);
+      var wait = settleDelay(list.lastItemModified, Date.now());
+      return wait ? new Promise(function (r) { window.setTimeout(r, wait); }) : null;
+    }).then(function () {
+      ctx.setProgress(0.2);
+      return a.fields(c.list.site, c.list.title);
+    }).then(function (fields) {
+      fields.forEach(function (f) { metaByName[f.InternalName] = f; });
+      var q = buildQuery(c, metaByName);
+      if (q.errors.length) throw new Error(q.errors.join(' '));
+      ctx.throwIfCancelled();
+      ctx.setStatus('Reading up to ' + c.maxItems + ' items…');
+      ctx.setProgress(0.35);
+      return a.items(c.list.site, c.list.title, { select: q.select, expand: q.expand, filter: c.filter, orderBy: c.orderBy, top: c.maxItems });
+    }).then(function (items) {
+      ctx.throwIfCancelled();
+      itemCount = items.length;
+      ctx.setStatus('Writing Markdown for ' + items.length + ' items…');
+      ctx.setProgress(0.6);
+      var origin = window.location.origin && window.location.origin !== 'null' ? window.location.origin : 'https://tenant.example';
+      var listUrl = origin + encodePath(list.rootPath);
+      var form = list.baseTemplate === 101 ? '/Forms/DispForm.aspx' : '/DispForm.aspx';
+      var markdown = buildMarkdown({
+        config: c,
+        metaByName: metaByName,
+        items: items,
+        list: { title: list.title, url: listUrl, itemUrl: function (id) { return listUrl + form + '?ID=' + id; } },
+        exportedAt: new Date()
+      });
+      chars = markdown.length;
+      ctx.throwIfCancelled();
+      ctx.setStatus('Saving ' + c.output.file + '…');
+      ctx.setProgress(0.75);
+      return a.upload(c.output.site, c.output.folder, c.output.file, markdown);
+    }).then(function (path) {
+      saved = path;
+      ctx.setStatus('Recording the source time…');
+      ctx.setProgress(0.9);
+      return a.stampSource(c.output.site, c.output.folder + '/' + c.output.file, watermarkText(list.lastItemModified));
+    }).then(function () {
+      ctx.setStatus('Saved ' + c.output.file + ' (' + itemCount + ' items).');
+      ctx.setProgress(1);
+      return { items: itemCount, file: saved, chars: chars, sourceAsOf: list.lastItemModified.toISOString() };
     });
   }
 
@@ -612,7 +661,8 @@
   window.spListToMarkdown = {
     version: '0.1.0',
     _pure: {
-      normalizeConfig: normalizeConfig, siteOf: siteOf, buildQuery: buildQuery, buildMarkdown: buildMarkdown,
+      normalizeConfig: normalizeConfig, siteOf: siteOf, buildQuery: buildQuery,
+      watermarkText: watermarkText, parseWatermark: parseWatermark, needsExport: needsExport, settleDelay: settleDelay, buildMarkdown: buildMarkdown,
       valueText: valueText, stripHtml: stripHtml, formatDateOnly: formatDateOnly,
       formatDateTime: formatDateTime, groupBy: groupBy, canEdit: canEdit
     },

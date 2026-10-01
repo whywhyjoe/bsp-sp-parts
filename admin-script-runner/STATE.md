@@ -9,8 +9,8 @@ the `project-state` skill.
 
 | | |
 | --- | --- |
-| **Version** | 0.1.3 (`VERSION`: dev-build 4, prod-build 0) — Codex review fixes on top of the redesigned panel |
-| **Deployed** | **dev only** — `code` root `apps/admin-script-runner/`, verified live 2026-09-30 on 0.1.3 (test-smoke 9/9; demo page: forced run → All done → closed, plain reload `not-due`, third visit `checked-this-slot` with zero requests, no console errors) |
+| **Version** | 0.1.4 (`VERSION`: dev-build 5, prod-build 0) — Codex round-1 and round-2 review fixes |
+| **Deployed** | **dev only** — `code` root `apps/admin-script-runner/`, verified live 2026-10-01 on 0.1.4 (test-smoke 10/10 incl. the source watermark on the file's Title; one export = one file version) |
 | **Prod** | not deployed |
 | **Last shipped** | nothing shipped to prod yet |
 | **Branch** | `admin-script-runner` (not merged) |

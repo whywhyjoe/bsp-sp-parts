@@ -33,21 +33,28 @@ visit, per task instance:
 
 1. **Outside the day's hours, or this browser already checked in the current
    slot?** Stop — decided from this browser's memory, no network. (A browser's
-   very first visit fetches the instance's config once to learn its schedule.)
+   very first visit fetches the instance's config once to learn its schedule;
+   until a config has loaded successfully, the default schedule applies.)
 2. **Output file written since the slot started?** Stop.
-3. **List unchanged since the file was written?** Stop.
-4. Otherwise the panel appears and the export runs. If the list changes while
-   it runs, it exports again (up to three attempts).
+3. **List unchanged since the export read it?** Stop. Each export records the
+   list's timestamp from just before it read the items (the *source watermark*,
+   in the output file's Title), so an edit made while an export runs is caught
+   at the next check.
+4. Otherwise the panel appears and the export runs. The day's hours are
+   re-checked when the config arrives and again before each task starts; a task
+   already running finishes even if the closing hour passes.
 
-So: at most one export per slot, only when the list changed, never overnight.
+So: per browser, at most one export per slot, only when the list changed, never
+overnight. (Two tabs opened in the same instant can each export once — see
+`docs/00-overview.md`, accepted.)
 A browser that cannot store anything (storage blocked or full) never runs
 tasks automatically; `?adminTasks=force` still works.
 
 ## Running it locally
 
 ```
-node --test admin-script-runner/tests/pure.test.mjs      # fast tier, ~0.3s
-node admin-script-runner/tests/smoke.mjs                 # full tier, ~41s, headless Chromium
+node --test admin-script-runner/tests/pure.test.mjs      # fast tier, ~0.6s
+node admin-script-runner/tests/smoke.mjs                 # full tier, ~49s, headless Chromium
 python -m http.server 8646                               # then open /dev/admin-script-runner.dev.html
 ```
 

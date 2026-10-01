@@ -25,16 +25,14 @@ Copilot cannot reliably read list content.
   guard, late task registration, `/` root site, Close after Cancel, end hour
   (`schedule.until`), docs. Accepted-not-fixed items are in docs/00-overview.md.
   Dev-deployed and verified live. Committed as 203b99a.
+- Codex round 2 (xo turn 3) fixed in 0.1.4: source watermark on the output
+  file's Title replaces the re-export loop (plus a ≤2 s settle for one-second
+  timestamps); fresh clock after the config fetch and before each task starts;
+  second storage write checked; docs. Dev-deployed and verified live.
 
 ## Next
 
-- [ ] Act on Codex round-2 review (xo turn 3, on 04c143d..203b99a), user to pick:
-      (1) final re-export attempt can still publish stale and report success —
-      proposed fix: stamp the pre-read list watermark on the file's item (Title)
-      and compare against it in due(), dropping the retry loop; (2) re-gate with
-      a fresh clock after the config fetch; (3) unreadable first config retries
-      on the DEFAULT schedule — document; (4) second remember() failure ignored;
-      plus doc wording ("identical content", "nothing starts after until").
+- [ ] Read Codex round-3 review (xo turn 4) of the round-2 fixes and report.
 - [ ] With the user: the intake list's real config (fields, group/subgroup,
       filter, output library whose readers match the list's). Write it as a
       JSON in the prod site's SiteAssets, not in the repo.

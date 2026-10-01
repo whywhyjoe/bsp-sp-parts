@@ -15,8 +15,17 @@ const pwPath = process.env.PLAYWRIGHT_PATH || path.join(homedir(), '.claude', 's
 const { chromium } = require(pwPath);
 
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' };
+const SLOW_CONFIG = JSON.stringify({
+  label: 'Slow-config export', list: { title: 'Slow' }, fields: ['Status'],
+  output: { folder: '/sites/mock/Shared Documents/copilot', file: 'slow.md' }
+});
 const server = createServer(async (req, res) => {
   const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  if (rel === '/__slow-config.json') {
+    await new Promise((r) => setTimeout(r, 4000));
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(SLOW_CONFIG);
+    return;
+  }
   const file = path.join(root, rel);
   if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
   try {
@@ -104,12 +113,12 @@ try {
   check('failure shows the error state', (await label(page)) === 'Finished with errors', await label(page));
   check('error state offers Close', (await page.$eval('.asr-panel .btn', (b) => b.textContent)) === 'Close', 'no Close');
 
-  // 6. The list changes during an export: that instance exports again.
+  // 6. Every export records its source watermark on the file (the race logic
+  //    itself is covered headless in pure.test.mjs).
   await page.goto(base + '?adminTasks=force', { waitUntil: 'domcontentloaded' });
-  await page.evaluate(() => { window.__ASR_MOCK_EDIT_DURING_EXPORT__ = true; });
   await page.waitForSelector('.asr-panel.is-done', { timeout: 20000 });
-  const first = await page.evaluate(() => window.adminScriptRunner.status()['sp-list-to-markdown|inline']);
-  check('a mid-export change triggers one re-export', first && first.detail && first.detail.attempts === 2, JSON.stringify(first));
+  const titles = await page.evaluate(() => Object.values(window.__ASR_MOCK_FILES__ || {}).map((f) => f.title));
+  check('each export records its source watermark', titles.length === 2 && titles.every((t) => /^Source list as of /.test(t)), JSON.stringify(titles));
 
   // 7. A task script that loads after the runner: its hosts wait for it and run.
   await page.goto(base + '?adminTasks=force&lateTask=1', { waitUntil: 'domcontentloaded' });
@@ -124,6 +133,45 @@ try {
   await blocked.waitForFunction(() => Object.keys(window.adminScriptRunner?.status?.() || {}).length === 2, null, { timeout: 10000 });
   const nb = await blocked.evaluate(() => Object.values(window.adminScriptRunner.status()).map((r) => r.detail));
   check('no storage → no automatic run', nb.every((d) => d === 'no-storage') && !(await blocked.$('.asr-panel')), JSON.stringify(nb));
+
+  // 9. Only the second write (caching the schedule) fails: still treated as no storage.
+  const halfFull = await browser.newPage();
+  halfFull.on('pageerror', (e) => errors.push(e.message));
+  await halfFull.addInitScript(() => {
+    const set = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      if (String(v).indexOf('"slots"') >= 0) throw new Error('QuotaExceededError');
+      return set.call(this, k, v);
+    };
+  });
+  await halfFull.goto(base, { waitUntil: 'domcontentloaded' });
+  await halfFull.waitForFunction(() => Object.keys(window.adminScriptRunner?.status?.() || {}).length === 2, null, { timeout: 10000 });
+  const hf = await halfFull.evaluate(() => Object.values(window.adminScriptRunner.status()).map((r) => r.detail));
+  check('a failed schedule write → no automatic run', hf.every((d) => d === 'no-storage') && !(await halfFull.$('.asr-panel')), JSON.stringify(hf));
+
+  // 10. A config download that finishes after the closing hour is judged at the
+  //     time it finished: started ~19:59:57, done ~20:00:01 → outside hours, no panel.
+  const late = await browser.newPage();
+  late.on('pageerror', (e) => errors.push(e.message));
+  const d = new Date();
+  await late.clock.setSystemTime(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 19, 59, 54));
+  await late.goto(base + '?nohosts=1', { waitUntil: 'domcontentloaded' });
+  await late.waitForFunction(() => window.adminScriptRunner && window.dcsParts && window.dcsParts['admin-script-runner'], null, { timeout: 10000 });
+  await late.waitForFunction(() => new Date().getSeconds() >= 57, null, { timeout: 10000 });   // ~3 s before the close; the config takes 4 s
+  const startedAt = await late.evaluate(() => {
+    const h = document.createElement('div');
+    h.setAttribute('data-admin-task', 'sp-list-to-markdown');
+    h.setAttribute('data-mock', '');
+    h.setAttribute('data-id', 'slow');
+    h.setAttribute('data-config', '/__slow-config.json');
+    document.body.appendChild(h);
+    return new Date().toTimeString().slice(0, 8);
+  });
+  await late.waitForFunction(() => window.adminScriptRunner.status().hasOwnProperty('sp-list-to-markdown|slow')
+    && window.adminScriptRunner.status()['sp-list-to-markdown|slow'].outcome !== 'waiting', null, { timeout: 15000 });
+  const slow = await late.evaluate(() => window.adminScriptRunner.status()['sp-list-to-markdown|slow']);
+  check('a fetch that crosses the closing hour does not run', startedAt < '20:00:00' && slow.detail === 'outside-hours' && !(await late.$('.asr-panel')),
+    'started ' + startedAt + ' → ' + JSON.stringify(slow));
 
   check('no page errors', errors.length === 0, errors.join(' | '));
 } finally {

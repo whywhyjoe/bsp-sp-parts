@@ -22,8 +22,14 @@ Copilot to read. Host: `<div data-admin-task="sp-list-to-markdown" data-config="
 | `output.folder` | ✓ | | Server-relative folder, e.g. `/sites/Intake/Shared Documents/copilot` |
 | `output.file` | ✓ | | File name, e.g. `intake.md` |
 | `schedule.slots` | | `[8,10,12,14,16,18]` | Local hours (runner setting) |
-| `schedule.until` | | last slot + 2 | Hour the day closes, 1–24; nothing starts at or after it (runner setting) |
+| `schedule.until` | | last slot + 2 | Hour the day closes, 1–24; no task starts at or after it — one already running finishes (runner setting) |
 | `label` | | `Export list to Markdown` | Name shown in the panel (runner setting) |
+
+**The output library needs its standard Title column.** Each export writes
+`Source list as of <ISO time>` there — the list's timestamp from just before
+the items were read — and the next check compares the list against it. Don't
+edit it; if it is missing or changed, the check falls back to the file's save
+time, which can miss an edit made during an export.
 
 The runner keys this browser's memory of an instance by the host's `data-id`
 attribute, else its `data-config` URL — set `data-id` only when the config URL

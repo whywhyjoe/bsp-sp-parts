@@ -64,7 +64,8 @@ In order, from `adminScriptRunner.status()`: `skipped` with `outside-hours`
 `waiting` (the task's script has not registered yet — an `error` after 10 s)?
 Did `due()` say `not-due` (file fresh, list unchanged, or no edit permission)?
 Is there an `error` entry (bad config URL, missing `pnp2`, unknown task type)?
-An error is retried at the next slot, not the next visit. `?adminTasks=force`
+An error is retried at the next slot, not the next visit (on the default
+schedule if the instance's config has never loaded). `?adminTasks=force`
 bypasses the slot gate and `due()` entirely; `adminScriptRunner.clearSchedule()`
 forgets this browser's stamps.
 

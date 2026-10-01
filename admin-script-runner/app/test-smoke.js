@@ -75,6 +75,11 @@
         checks.peopleHaveEmail = /- Assigned To: [^\n]+\([^\n@]+@[^\n]+\)/.test(text);
         checks.noObjectLeaks = text.indexOf('[object Object]') < 0 && text.indexOf('undefined') < 0;
         checks.dateOnlyIsDay = !/- Start Date: \d{4}-\d\d-\d\d \d/.test(text);
+        return sp.web.getFileByServerRelativePath(detail.output).listItemAllFields.select('Title')();
+      }).then(function (item) {
+        // The source watermark: the list's timestamp when it was read, on the file's Title.
+        detail.watermark = item.Title;
+        checks.watermarkMatchesRun = item.Title === 'Source list as of ' + detail.run.sourceAsOf;
         // Just exported → not due, for BOTH reasons, checked separately:
         // (a) the file was written after the slot started;
         return task.due(taskCtx(config, new Date(Date.now() - 60000)));

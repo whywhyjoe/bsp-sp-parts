@@ -194,3 +194,64 @@ test('markdown: no group → items at level 2; limit reached is disclosed', () =
   assert.match(md, /\n## New vendor intake form\n/);
   assert.match(md, /limit of 3 reached/);
 });
+
+// ─── task: source watermark (the mid-export edit race) ───────────────────────
+
+test('watermark text round-trips; anything else is not a watermark', () => {
+  const d = new Date('2026-10-01T16:17:45Z');
+  assert.equal(T.parseWatermark(T.watermarkText(d)).getTime(), d.getTime());
+  assert.equal(T.parseWatermark(''), null);
+  assert.equal(T.parseWatermark('My notes'), null);
+  assert.equal(T.parseWatermark('Source list as of yesterday'), null);
+});
+
+test('due decision compares the list with the watermark, not the save time', () => {
+  const t = (m) => new Date(Date.UTC(2026, 9, 1, 10, m));
+  const slot = t(0);
+  // The race: items read at 10:01 (watermark), list edited 10:02, file saved 10:03.
+  const raced = { modified: t(3), canEdit: true, source: t(1) };
+  assert.equal(T.needsExport(raced, { lastItemModified: t(2) }, null), true, 'the mid-export edit is caught');
+  assert.equal(T.needsExport(raced, { lastItemModified: t(1) }, null), false, 'unchanged since the read');
+  assert.equal(T.needsExport(raced, { lastItemModified: t(2) }, slot), false, 'but not twice in one slot');
+  assert.equal(T.needsExport(null, null, slot), true, 'never exported');
+  assert.equal(T.needsExport({ modified: t(3), canEdit: false, source: t(1) }, { lastItemModified: t(9) }, null), false, 'cannot write it');
+  // No watermark (older file, or the Title write failed): fall back to the save time.
+  assert.equal(T.needsExport({ modified: t(3), canEdit: true, source: null }, { lastItemModified: t(2) }, null), false);
+  assert.equal(T.needsExport({ modified: t(3), canEdit: true, source: null }, { lastItemModified: t(4) }, null), true);
+});
+
+test('settle delay waits out the second of a very recent list change, capped at 2 s', () => {
+  const now = Date.UTC(2026, 9, 1, 10, 0, 10);
+  assert.equal(T.settleDelay(new Date(now - 500), now), 1500);
+  assert.equal(T.settleDelay(new Date(now - 5000), now), 0);
+  assert.equal(T.settleDelay(new Date(now + 60000), now), 2000, 'a server clock ahead of ours is capped');
+});
+
+// The task end to end against its own mock adapter, no DOM: an edit landing
+// mid-export must make the very next check want to export again.
+function loadTaskAlone() {
+  const window = { location: { origin: 'https://tenant.example' }, __ASR_MOCK_DELAY_MS__: 0 };
+  window.setTimeout = setTimeout;
+  const ctx = vm.createContext({ window, Intl, Date, Math, JSON, Object, Array, String, Number, Promise, console, isFinite, parseInt, encodeURIComponent, setTimeout });
+  vm.runInContext(read('../tasks/sp-list-to-markdown/sp-list-to-markdown.js'), ctx);
+  return { window, task: window.adminScriptTasks.find((t) => t.type === 'sp-list-to-markdown') };
+}
+function taskCtx(config, slotStart) {
+  return { config, mock: true, slotStart, log() {}, setStatus() {}, setProgress() {}, isCancelled: () => false, throwIfCancelled() {} };
+}
+
+test('an edit landing mid-export is exported at the next check', async () => {
+  const { window, task } = loadTaskAlone();
+  const config = window.spListToMarkdown._mock.config;
+  assert.equal(await task.due(taskCtx(config, null)), true, 'never exported');
+
+  await task.run(taskCtx(config, null));
+  const file = Object.values(window.__ASR_MOCK_FILES__)[0];
+  assert.match(file.title, /^Source list as of \d{4}-/, 'the watermark is written');
+  assert.equal(await task.due(taskCtx(config, null)), false, 'list unchanged since the read');
+
+  window.__ASR_MOCK_EDIT_DURING_EXPORT__ = true;   // the mock bumps the list during the upload
+  await task.run(taskCtx(config, null));
+  assert.equal(await task.due(taskCtx(config, null)), true, 'the mid-export edit is not lost');
+});
+

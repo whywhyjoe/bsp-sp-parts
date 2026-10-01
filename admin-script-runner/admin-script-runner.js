@@ -1,4 +1,4 @@
-/*! admin-script-runner v0.1.3 — bsp-sp-parts
+/*! admin-script-runner v0.1.4 — bsp-sp-parts
  *
  *  Runs small admin tasks when a page is visited, at most once per schedule slot,
  *  and shows their progress in a status panel pinned to the bottom of the screen.
@@ -35,7 +35,7 @@
 (function (window) {
   'use strict';
 
-  var VERSION = '0.1.3';
+  var VERSION = '0.1.4';
   var LOG = '[admin-script-runner]';
   var DEFAULT_SLOTS = [8, 10, 12, 14, 16, 18];
   var STORE_KEY = 'adminScriptRunner.v2';
@@ -460,12 +460,19 @@
       var schedule = normalizeSchedule(config && config.schedule);
       var gate = { check: true, reason: 'forced', slotStart: null };
       if (!force) {
-        remember(key, { checked: now.getTime(), schedule: schedule });   // cache it for the no-network gate
-        gate = slotGate(now, schedule, memory ? memory.checked : undefined);
+        // The fetch may have crossed a slot boundary or the closing hour:
+        // judge — and stamp — with the time it finished, not when it began.
+        var fetched = new Date();
+        if (!remember(key, { checked: fetched.getTime(), schedule: schedule })) {   // cache it for the no-network gate
+          console.warn(LOG + ' browser storage is unavailable, so attempts cannot be remembered — not running automatically (?adminTasks=force still works).');
+          record(key, 'skipped', 'no-storage');
+          return null;
+        }
+        gate = slotGate(fetched, schedule, memory ? memory.checked : undefined);
         if (!gate.check) { record(key, 'skipped', gate.reason); return null; }
       }
 
-      var job = { key: key, type: type, config: config, host: host, mock: mock, force: force, slotStart: gate.slotStart };
+      var job = { key: key, type: type, config: config, schedule: schedule, host: host, mock: mock, force: force, slotStart: gate.slotStart };
       if (force) return job;
       return Promise.resolve(type.due(makeContext(job, null))).then(function (isDue) {
         record(key, isDue ? 'due' : 'not-due', gate.reason);
@@ -514,7 +521,15 @@
     });
   }
 
+  function insideHours(job) {
+    if (job.force || currentSlotStart(new Date(), job.schedule)) return true;
+    record(job.key, 'skipped', 'outside-hours');
+    return false;
+  }
+
   function runJobs(jobs) {
+    jobs = jobs.filter(insideHours);   // the checks themselves take time
+    if (!jobs.length) return Promise.resolve();
     var batch = { cancelled: false };
     var failures = [];
     var names = jobs.map(function (job) { return (job.config && job.config.label) || job.type.label || job.type.type; });
@@ -529,6 +544,7 @@
       chain = chain.then(function () {
         if (batch.cancelled) { setRow(i, 'cancelled'); return; }
         var name = names[i];
+        if (!insideHours(job)) { setRow(i, 'cancelled'); return; }   // earlier tasks ran past the closing hour
         var run = {
           get cancelled() { return batch.cancelled; },
           progress: function (f) {
