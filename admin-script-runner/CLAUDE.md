@@ -30,17 +30,20 @@ is not `xo-handoff` and `.xo-handoffs/`; don't cross-file them.
    don't "upgrade" it.
 2. **`due()` is cheap and silent.** At most two small GETs, never UI, never a
    write. Anything heavier belongs in `run()`.
-3. **The slot stamp is written BEFORE `due()`.** A failing task waits for the
-   next slot; it must never retry on every page load.
-4. **Mock is opt-in only** (`file:` or `data-mock`). A live page never falls
+3. **The slot stamp is written before the config fetch and `due()`.** A failing
+   task — bad config included — waits for the next slot; it must never retry on
+   every page load. No working storage → no automatic run.
+4. **A visit in an already-checked slot makes no request.** The gate decides
+   from the stamp plus the schedule cached from the last config load.
+5. **Mock is opt-in only** (`file:` or `data-mock`). A live page never falls
    back to mock data or a sample config.
-5. **No tenant URL in the repo.** The web part stub is generated per environment
+6. **No tenant URL in the repo.** The web part stub is generated per environment
    by `tools/sp/deploy.ps1` from `__TOKENS__`; the demo config is built at
    runtime from `resolved-env.json`.
-6. **Dates from SharePoint:** compare only UTC values (`TimeLastModified`,
+7. **Dates from SharePoint:** compare only UTC values (`TimeLastModified`,
    `LastItemModifiedDate`). A list item's `Modified` is site-local with no zone.
    See `docs/00-overview.md` → Paid-for gotchas.
-7. **Tasks are types, configs are instances.** Nothing list- or site-specific
+8. **Tasks are types, configs are instances.** Nothing list- or site-specific
    in a task script; it all comes from the instance's JSON.
 
 ## Layout
@@ -70,7 +73,7 @@ is not `xo-handoff` and `.xo-handoffs/`; don't cross-file them.
 
 ```
 node --test admin-script-runner/tests/pure.test.mjs   # fast tier, ~0.3s
-node admin-script-runner/tests/smoke.mjs              # full tier, ~12s
+node admin-script-runner/tests/smoke.mjs              # full tier, ~41s
 node admin-script-runner/tools/sp/run-harness.js test-smoke   # live dev tenant
 ```
 

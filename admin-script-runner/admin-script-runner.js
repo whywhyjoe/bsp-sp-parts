@@ -1,22 +1,28 @@
-/*! admin-script-runner v0.1.2 — bsp-sp-parts
+/*! admin-script-runner v0.1.3 — bsp-sp-parts
  *
  *  Runs small admin tasks when a page is visited, at most once per schedule slot,
  *  and shows their progress in a status panel pinned to the bottom of the screen.
  *
  *  THE PIECES
  *   - A TASK TYPE is a script that registers { type, label, due(ctx), run(ctx) }
- *     by pushing onto window.adminScriptTasks (load order does not matter).
+ *     by pushing onto window.adminScriptTasks. Either load order works; a type
+ *     that registers late picks up hosts already waiting for it.
  *   - A TASK INSTANCE is a web part stub on a page:
  *       <div data-admin-task="<type>" data-config="<url of its JSON config>"></div>
  *     One type, many instances: the same export on many lists and sites.
+ *     Its key (for this browser's memory) is data-id, else the data-config URL.
  *   - THE RUNNER (this file) finds every instance, decides which are due, and
  *     runs those one after another behind the panel.
  *
  *  WHEN A TASK RUNS — three gates, cheapest first (see README "Scheduling"):
- *   1. Slot gate (no network): config.schedule.slots are local hours, default
- *      8,10,12,14,16,18. Each browser checks an instance at most once per slot;
- *      the attempt is stamped BEFORE checking, so a failure waits for the next
- *      slot instead of retrying on every page load.
+ *   1. Slot gate: config.schedule.slots are local hours (default 8,10,12,14,16,
+ *      18) and schedule.until closes the day (default last slot + 2 = 20:00).
+ *      Each browser checks an instance at most once per slot, deciding from its
+ *      own memory (the stamp plus the schedule cached from the last config
+ *      load) BEFORE any network. The attempt is stamped before the config is
+ *      even fetched, so a failure — bad config, 403, 500 — waits for the next
+ *      slot instead of retrying on every page load. Without working browser
+ *      storage nothing can be remembered, so nothing runs automatically.
  *   2. task.due(ctx): the task's own, cheap "is there work?" (it never shows UI).
  *   3. Only if something is due does the panel appear and task.run(ctx) execute.
  *   ?adminTasks=force on the page URL skips gates 1 and 2 (testing, manual re-run).
@@ -29,10 +35,11 @@
 (function (window) {
   'use strict';
 
-  var VERSION = '0.1.2';
+  var VERSION = '0.1.3';
   var LOG = '[admin-script-runner]';
   var DEFAULT_SLOTS = [8, 10, 12, 14, 16, 18];
-  var STORE_KEY = 'adminScriptRunner.v1';
+  var STORE_KEY = 'adminScriptRunner.v2';
+  var TYPE_WAIT_MS = 10000;    // how long a host waits for a late task script before it is an error
   var BATCH_MS = 400;          // hosts that mount together run as one batch
   var DONE_CLOSE_MS = 3000;
 
@@ -50,11 +57,23 @@
     return out.sort(function (a, b) { return a - b; });
   }
 
-  /** Start of the slot `now` falls in (local time), or null before today's first slot. */
-  function currentSlotStart(now, slots) {
-    var hours = normalizeSlots(slots);
+  /** { slots, until } — until is the hour the day closes (exclusive, 1–24);
+      default: two hours after the last slot. Accepts a bare slots array too. */
+  function normalizeSchedule(raw) {
+    var sch = Array.isArray(raw) ? { slots: raw } : (raw && typeof raw === 'object' ? raw : {});
+    var slots = normalizeSlots(sch.slots);
+    var last = slots.length ? slots[slots.length - 1] : 0;
+    var until = Number(sch.until);
+    if (!Number.isInteger(until) || until < 1 || until > 24) until = Math.min(24, last + 2);
+    return { slots: slots, until: until };
+  }
+
+  /** Start of the slot `now` falls in (local time), or null outside the day's window. */
+  function currentSlotStart(now, schedule) {
+    var sch = normalizeSchedule(schedule);
+    if (now.getHours() >= sch.until) return null;
     var current = -1;
-    for (var i = 0; i < hours.length; i++) { if (hours[i] <= now.getHours()) current = hours[i]; }
+    for (var i = 0; i < sch.slots.length; i++) { if (sch.slots[i] <= now.getHours()) current = sch.slots[i]; }
     if (current < 0) return null;
     var start = new Date(now.getTime());
     start.setHours(current, 0, 0, 0);
@@ -62,20 +81,22 @@
   }
 
   /** Gate 1. lastCheckedMs is this browser's stamp for the instance (or undefined). */
-  function slotGate(now, slots, lastCheckedMs) {
-    var slot = currentSlotStart(now, slots);
-    if (!slot) return { check: false, reason: 'before-first-slot', slotStart: null };
+  function slotGate(now, schedule, lastCheckedMs) {
+    var slot = currentSlotStart(now, schedule);
+    if (!slot) return { check: false, reason: 'outside-hours', slotStart: null };
     if (typeof lastCheckedMs === 'number' && lastCheckedMs >= slot.getTime()) {
       return { check: false, reason: 'checked-this-slot', slotStart: slot };
     }
     return { check: true, reason: 'due-check', slotStart: slot };
   }
 
-  var pure = { normalizeSlots: normalizeSlots, currentSlotStart: currentSlotStart, slotGate: slotGate, DEFAULT_SLOTS: DEFAULT_SLOTS };
+  var pure = { normalizeSlots: normalizeSlots, normalizeSchedule: normalizeSchedule, currentSlotStart: currentSlotStart, slotGate: slotGate, DEFAULT_SLOTS: DEFAULT_SLOTS };
 
   /* ════════ Task type registry — window.adminScriptTasks is a push-queue ════════ */
 
   var types = Object.create(null);
+  var parked = Object.create(null);   // type → hosts that mounted before their type registered
+  var onLateType = null;              // set once the DOM side is up
 
   function defineType(def) {
     if (!def || !def.type || typeof def.due !== 'function' || typeof def.run !== 'function') {
@@ -83,6 +104,11 @@
       return;
     }
     types[def.type] = def;
+    if (parked[def.type] && onLateType) {
+      var hosts = parked[def.type];
+      delete parked[def.type];
+      onLateType(hosts);
+    }
   }
 
   var queued = window.adminScriptTasks;
@@ -105,19 +131,28 @@
 
   /* ════════ Per-browser memory — the ONLY localStorage toucher ════════ */
 
+  /* { instances: { <key>: { checked: <ms>, schedule: { slots, until } } } }.
+     Tabs share it without locking: two tabs racing on one instance can both
+     run it once (identical output) — accepted, see docs/00-overview.md. */
   function readStore() {
     try { var doc = JSON.parse(window.localStorage.getItem(STORE_KEY) || '{}'); return doc && typeof doc === 'object' ? doc : {}; }
     catch (e) { return {}; }
   }
-  function stampChecked(key, ms) {
+  function recall(key) {
     var doc = readStore();
-    doc.checked = doc.checked && typeof doc.checked === 'object' ? doc.checked : {};
-    doc.checked[key] = ms;
-    try { window.localStorage.setItem(STORE_KEY, JSON.stringify(doc)); } catch (e) { /* remembering is optional */ }
+    var entry = doc.instances && doc.instances[key];
+    return entry && typeof entry.checked === 'number' ? entry : null;
   }
-  function lastChecked(key) {
-    var doc = readStore();
-    return doc.checked && typeof doc.checked[key] === 'number' ? doc.checked[key] : undefined;
+  /** Stamp an attempt. Returns false when it could not be stored (blocked, full). */
+  function remember(key, entry) {
+    try {
+      var doc = readStore();
+      doc.instances = doc.instances && typeof doc.instances === 'object' ? doc.instances : {};
+      doc.instances[key] = entry;
+      window.localStorage.setItem(STORE_KEY, JSON.stringify(doc));
+      var back = recall(key);
+      return !!back && back.checked === entry.checked;
+    } catch (e) { return false; }
   }
 
   function forced() {
@@ -307,6 +342,7 @@
     setStatus(statusText);
     if (state === 'error') {
       panel.button.textContent = 'Close';   // errors stay until dismissed
+      panel.button.disabled = false;        // Cancel may have disabled it before the failure landed
     } else {
       panel.button.hidden = true;
       closeTimer = window.setTimeout(function () { closePanel(false); }, DONE_CLOSE_MS);
@@ -363,6 +399,10 @@
     batchTimer = window.setTimeout(function () { batchTimer = null; drain(); }, BATCH_MS);
   }
 
+  onLateType = function (hosts) {
+    hosts.forEach(function (h) { if (document.contains(h)) onHostMounted(h); });
+  };
+
   function drain() {
     if (running || !pendingHosts.length) return;
     var hosts = pendingHosts.splice(0);
@@ -375,23 +415,55 @@
     });
   }
 
+  function hostKey(host, typeName) {
+    return typeName + '|' + (host.getAttribute('data-id') || host.getAttribute('data-config') || 'inline');
+  }
+
+  /* A host whose type has not registered yet waits for it (see defineType);
+     only if it is still missing after TYPE_WAIT_MS is that an error. */
+  function park(host, typeName, key) {
+    var list = parked[typeName] || (parked[typeName] = []);
+    if (list.indexOf(host) < 0) list.push(host);
+    record(key, 'waiting', 'task type not loaded yet');
+    window.setTimeout(function () {
+      if (types[typeName] || !parked[typeName]) return;
+      console.error(LOG + ' no task type "' + typeName + '" is loaded — add its script tag to the web part.');
+      record(key, 'error', 'task type not loaded');
+    }, TYPE_WAIT_MS);
+  }
+
   /* Gates 1 + 2 for one host → a runnable job, or null. Never shows UI. */
   function checkHost(host, force) {
     var typeName = host.getAttribute('data-admin-task') || '';
     var type = types[typeName];
-    var key = typeName + '|' + (host.getAttribute('data-config') || 'inline');
-    if (!type) {
-      console.error(LOG + ' no task type "' + typeName + '" is loaded — add its script tag to the web part.');
-      record(key, 'error', 'task type not loaded');
-      return Promise.resolve(null);
-    }
+    var key = hostKey(host, typeName);
+    if (!type) { park(host, typeName, key); return Promise.resolve(null); }
     var mock = isMockHost(host);
+    var now = new Date();
+    var memory = force ? null : recall(key);
+
+    if (!force) {
+      // Checked before in this browser: decide from memory alone — no network.
+      if (memory) {
+        var early = slotGate(now, memory.schedule, memory.checked);
+        if (!early.check) { record(key, 'skipped', early.reason); return Promise.resolve(null); }
+      }
+      // Stamp the ATTEMPT before anything can fail, config fetch included.
+      if (!remember(key, { checked: now.getTime(), schedule: memory ? memory.schedule : null })) {
+        console.warn(LOG + ' browser storage is unavailable, so attempts cannot be remembered — not running automatically (?adminTasks=force still works).');
+        record(key, 'skipped', 'no-storage');
+        return Promise.resolve(null);
+      }
+    }
+
     return loadConfig(host, type, mock).then(function (config) {
-      if (config && config.id) key = typeName + '|' + config.id;
-      var slots = config && config.schedule && config.schedule.slots;
-      var gate = force ? { check: true, reason: 'forced', slotStart: null } : slotGate(new Date(), slots, lastChecked(key));
-      if (!gate.check) { record(key, 'skipped', gate.reason); return null; }
-      if (!force) stampChecked(key, Date.now());   // stamp the ATTEMPT: failures wait for the next slot
+      var schedule = normalizeSchedule(config && config.schedule);
+      var gate = { check: true, reason: 'forced', slotStart: null };
+      if (!force) {
+        remember(key, { checked: now.getTime(), schedule: schedule });   // cache it for the no-network gate
+        gate = slotGate(now, schedule, memory ? memory.checked : undefined);
+        if (!gate.check) { record(key, 'skipped', gate.reason); return null; }
+      }
 
       var job = { key: key, type: type, config: config, host: host, mock: mock, force: force, slotStart: gate.slotStart };
       if (force) return job;

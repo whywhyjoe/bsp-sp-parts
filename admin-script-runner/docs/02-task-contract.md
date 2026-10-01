@@ -15,8 +15,10 @@ part host plus a JSON config. One type serves any number of lists and sites.
 });
 ```
 
-Load order does not matter: the runner drains whatever was pushed before it
-loaded and registers later pushes immediately.
+Either load order works: the runner drains whatever was pushed before it
+loaded and registers later pushes immediately. A host whose type has not
+registered yet waits for it; if it still has not registered 10 s later, that is
+logged as an error. (The stub loads tasks before the runner anyway.)
 
 ## What `ctx` gives a task
 
@@ -37,7 +39,8 @@ loaded and registers later pushes immediately.
 
 - **Cheap:** at most a couple of small GETs. It runs on real page loads.
 - **Silent:** no UI, no writes. Throwing is fine — the runner logs it, records
-  `error` in `status()`, and the slot stamp stops a retry until the next slot.
+  `error` in `status()`, and the slot stamp (written before the config fetch)
+  stops a retry until the next slot.
 - **Permission-aware:** return `false` for a visitor who could not complete
   `run()`. Otherwise read-only visitors get an error panel.
 - **Compare UTC only** (see Paid-for gotchas in `00-overview.md`).

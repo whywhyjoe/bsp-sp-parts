@@ -59,7 +59,7 @@
       catch (e) { errors.push('timeZone "' + timeZone + '" is not an IANA zone name (e.g. America/New_York).'); timeZone = ''; }
     }
 
-    var listSite = trimSlash(list.site || '');
+    var listSite = siteOf(list.site);
     return {
       errors: errors,
       config: {
@@ -74,7 +74,7 @@
         maxItems: maxItems,
         timeZone: timeZone,
         output: {
-          site: trimSlash(output.site || listSite),
+          site: output.site ? siteOf(output.site) : listSite,
           folder: trimSlash(String(output.folder || '')),
           file: String(output.file || '')
         }
@@ -83,6 +83,15 @@
   }
 
   function trimSlash(s) { return String(s || '').trim().replace(/\/+$/, ''); }
+
+  /* Site setting → '' (omitted: the page's own web), '/' (the tenant root site)
+     or '/sites/x'. Trimming alone would turn "/" into "" and silently mean
+     "this page's web" instead. */
+  function siteOf(value) {
+    var raw = String(value || '').trim();
+    if (!raw) return '';
+    return trimSlash(raw) || '/';
+  }
 
   /* ════════ Query (pure) ════════ */
 
@@ -215,7 +224,8 @@
       }
       case 'Note': {
         var s = String(value);
-        return meta.RichText || /^\s*<(div|p|span|br)\b/i.test(s) ? stripHtml(s) : s.replace(/\r\n?/g, '\n').trim();
+        if (meta.RichText || /^\s*<(div|p|span|br)\b/i.test(s)) return stripHtml(s);
+        return s.replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').replace(/\n{2,}/g, '\n').trim();
       }
       case 'TaxonomyFieldType': return typeof value === 'object' ? String(value.Label || '') : String(value);
       case 'TaxonomyFieldTypeMulti': return asArray(value).map(function (t) { return String((t && t.Label) || ''); }).filter(Boolean).join('; ');
@@ -372,7 +382,7 @@
   function makeLiveAdapter() {
     var webs = Object.create(null);
     function web(sitePath) {
-      var path = sitePath || currentWebPath();
+      var path = sitePath === '/' ? '' : (sitePath || currentWebPath());
       var url = window.location.origin + path;
       if (!webs[url]) {
         webs[url] = waitForPnp2(15000).then(function (p) {
@@ -458,6 +468,8 @@
       TaskType: [], DueDate: '2026-12-15T14:00:00Z', StartDate: null, Description: null, RefLink: null }
   ];
 
+  var MOCK_LIST_MODIFIED = new Date(Date.now() - 3600000);
+
   function makeMockAdapter() {
     var files = window.__ASR_MOCK_FILES__ = window.__ASR_MOCK_FILES__ || {};
     function later(value) { return new Promise(function (r) { window.setTimeout(function () { r(value); }, 350); }); }
@@ -467,7 +479,7 @@
         return later(f ? { modified: f.modified, canEdit: true } : null);
       },
       listState: function (sitePath, title) {
-        return later({ title: title, baseTemplate: 100, lastItemModified: new Date(Date.now() - 3600000), rootPath: (sitePath || '/sites/mock') + '/Lists/' + title });
+        return later({ title: title, baseTemplate: 100, lastItemModified: MOCK_LIST_MODIFIED, rootPath: (sitePath || '/sites/mock') + '/Lists/' + title });
       },
       fields: function () { return later(JSON.parse(JSON.stringify(MOCK_FIELDS))); },
       items: function (sitePath, title, q) { return later(JSON.parse(JSON.stringify(MOCK_ITEMS)).slice(0, q.top)); },
@@ -476,6 +488,12 @@
         // The dev harness sets this to show the panel's error state.
         if (window.__ASR_MOCK_FAIL__) return later(null).then(function () { throw new Error('saving ' + file + ': [403] Access denied (mock)'); });
         files[path] = { modified: new Date(), text: text };
+        window.__ASR_MOCK_UPLOADS__ = (window.__ASR_MOCK_UPLOADS__ || 0) + 1;
+        // The dev harness sets this to simulate someone editing the list mid-export.
+        if (window.__ASR_MOCK_EDIT_DURING_EXPORT__) {
+          window.__ASR_MOCK_EDIT_DURING_EXPORT__ = false;
+          MOCK_LIST_MODIFIED = new Date();
+        }
         return later(path);
       }
     };
@@ -505,49 +523,69 @@
     });
   }
 
+  var MAX_EXPORT_ATTEMPTS = 3;
+
   function run(ctx) {
     var c = configOrThrow(ctx);
     var a = adapterFor(ctx);
-    var metaByName = Object.create(null);
-    var list;
+
+    function attempt(n, list) {
+      var metaByName = Object.create(null);
+      var itemCount = 0;
+      var saved = '';
+      var chars = 0;
+      ctx.setProgress(0.2);
+      return a.fields(c.list.site, c.list.title).then(function (fields) {
+        fields.forEach(function (f) { metaByName[f.InternalName] = f; });
+        var q = buildQuery(c, metaByName);
+        if (q.errors.length) throw new Error(q.errors.join(' '));
+        ctx.throwIfCancelled();
+        ctx.setStatus('Reading up to ' + c.maxItems + ' items…');
+        ctx.setProgress(0.35);
+        return a.items(c.list.site, c.list.title, { select: q.select, expand: q.expand, filter: c.filter, orderBy: c.orderBy, top: c.maxItems });
+      }).then(function (items) {
+        ctx.throwIfCancelled();
+        itemCount = items.length;
+        ctx.setStatus('Writing Markdown for ' + items.length + ' items…');
+        ctx.setProgress(0.6);
+        var origin = window.location.origin && window.location.origin !== 'null' ? window.location.origin : 'https://tenant.example';
+        var listUrl = origin + encodePath(list.rootPath);
+        var form = list.baseTemplate === 101 ? '/Forms/DispForm.aspx' : '/DispForm.aspx';
+        var markdown = buildMarkdown({
+          config: c,
+          metaByName: metaByName,
+          items: items,
+          list: { title: list.title, url: listUrl, itemUrl: function (id) { return listUrl + form + '?ID=' + id; } },
+          exportedAt: new Date()
+        });
+        chars = markdown.length;
+        ctx.throwIfCancelled();
+        ctx.setStatus('Saving ' + c.output.file + '…');
+        ctx.setProgress(0.75);
+        return a.upload(c.output.site, c.output.folder, c.output.file, markdown);
+      }).then(function (path) {
+        saved = path;
+        ctx.setStatus('Checking the list did not change while saving…');
+        ctx.setProgress(0.9);
+        return a.listState(c.list.site, c.list.title);
+      }).then(function (after) {
+        var changed = after.lastItemModified > list.lastItemModified;
+        if (changed && n < MAX_EXPORT_ATTEMPTS) {
+          ctx.throwIfCancelled();
+          ctx.setStatus('The list changed during the export — exporting again…');
+          return attempt(n + 1, after);
+        }
+        ctx.setStatus('Saved ' + c.output.file + ' (' + itemCount + ' items).');
+        ctx.setProgress(1);
+        return { items: itemCount, file: saved, chars: chars, attempts: n, changedAfterLastAttempt: changed };
+      });
+    }
 
     ctx.setStatus('Reading the list…');
     ctx.setProgress(0.05);
-    return a.listState(c.list.site, c.list.title).then(function (l) {
-      list = l;
+    return a.listState(c.list.site, c.list.title).then(function (list) {
       ctx.throwIfCancelled();
-      ctx.setProgress(0.2);
-      return a.fields(c.list.site, c.list.title);
-    }).then(function (fields) {
-      fields.forEach(function (f) { metaByName[f.InternalName] = f; });
-      var q = buildQuery(c, metaByName);
-      if (q.errors.length) throw new Error(q.errors.join(' '));
-      ctx.throwIfCancelled();
-      ctx.setStatus('Reading up to ' + c.maxItems + ' items…');
-      ctx.setProgress(0.35);
-      return a.items(c.list.site, c.list.title, { select: q.select, expand: q.expand, filter: c.filter, orderBy: c.orderBy, top: c.maxItems });
-    }).then(function (items) {
-      ctx.throwIfCancelled();
-      ctx.setStatus('Writing Markdown for ' + items.length + ' items…');
-      ctx.setProgress(0.7);
-      var origin = window.location.origin && window.location.origin !== 'null' ? window.location.origin : 'https://tenant.example';
-      var listUrl = origin + encodePath(list.rootPath);
-      var form = list.baseTemplate === 101 ? '/Forms/DispForm.aspx' : '/DispForm.aspx';
-      var markdown = buildMarkdown({
-        config: c,
-        metaByName: metaByName,
-        items: items,
-        list: { title: list.title, url: listUrl, itemUrl: function (id) { return listUrl + form + '?ID=' + id; } },
-        exportedAt: new Date()
-      });
-      ctx.throwIfCancelled();
-      ctx.setStatus('Saving ' + c.output.file + '…');
-      ctx.setProgress(0.85);
-      return a.upload(c.output.site, c.output.folder, c.output.file, markdown).then(function (path) {
-        ctx.setStatus('Saved ' + c.output.file + ' (' + items.length + ' items).');
-        ctx.setProgress(1);
-        return { items: items.length, file: path, chars: markdown.length };
-      });
+      return attempt(1, list);
     });
   }
 
@@ -574,7 +612,7 @@
   window.spListToMarkdown = {
     version: '0.1.0',
     _pure: {
-      normalizeConfig: normalizeConfig, buildQuery: buildQuery, buildMarkdown: buildMarkdown,
+      normalizeConfig: normalizeConfig, siteOf: siteOf, buildQuery: buildQuery, buildMarkdown: buildMarkdown,
       valueText: valueText, stripHtml: stripHtml, formatDateOnly: formatDateOnly,
       formatDateTime: formatDateTime, groupBy: groupBy, canEdit: canEdit
     },

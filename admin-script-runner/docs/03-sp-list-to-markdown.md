@@ -8,7 +8,7 @@ Copilot to read. Host: `<div data-admin-task="sp-list-to-markdown" data-config="
 | Key | Required | Default | Notes |
 | --- | --- | --- | --- |
 | `title` | | the list title | H1 of the file |
-| `list.site` | | the page's own web | Server-relative, e.g. `/sites/Intake` |
+| `list.site` | | the page's own web | Server-relative, e.g. `/sites/Intake`; `/` is the tenant root site |
 | `list.title` | ✓ | | List display title |
 | `fields` | ✓ | | Internal names of the columns to write, in order |
 | `heading` | | `Title` | Column used as each item's heading |
@@ -22,8 +22,12 @@ Copilot to read. Host: `<div data-admin-task="sp-list-to-markdown" data-config="
 | `output.folder` | ✓ | | Server-relative folder, e.g. `/sites/Intake/Shared Documents/copilot` |
 | `output.file` | ✓ | | File name, e.g. `intake.md` |
 | `schedule.slots` | | `[8,10,12,14,16,18]` | Local hours (runner setting) |
-| `id` | | the config URL | Stable key for this browser's slot memory (runner setting) |
+| `schedule.until` | | last slot + 2 | Hour the day closes, 1–24; nothing starts at or after it (runner setting) |
 | `label` | | `Export list to Markdown` | Name shown in the panel (runner setting) |
+
+The runner keys this browser's memory of an instance by the host's `data-id`
+attribute, else its `data-config` URL — set `data-id` only when the config URL
+is not stable.
 
 Filter and order columns should be **indexed** once a list passes 5,000 items,
 or SharePoint refuses the query. Changing only the config does not trigger an
@@ -62,11 +66,13 @@ chunks:
 - **Group values repeat on every item** as bullets, so a chunk that lost its
   `##` heading still knows whose item it is.
 - **ISO dates** (`YYYY-MM-DD`, 24-hour times). Date-only columns show the date
-  only and never shift a day.
+  only, and keep their calendar day for any site zone within ±11 h of UTC (all
+  of the Americas and Europe; a UTC+12/+13 site would see the previous day).
 - **An item link** on every item, so answers can cite the list item.
 - **Empty values are left out**; blank group values land in a `(none)` group,
   sorted last. Headings are single lines; multi-line text stays inside its
-  bullet (continuation lines indented, no blank lines).
+  bullet (continuation lines indented; blank lines removed from both plain and
+  rich text, because a blank line would end the bullet).
 - **No Markdown escaping** of values: `Fix #123 [urgent]` stays readable in the
   raw file, which is read as often as the rendered one.
 

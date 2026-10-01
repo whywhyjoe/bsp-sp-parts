@@ -2,7 +2,7 @@
 // Loads the deployed task script, then drives its due()/run() the way the runner
 // does (live adapter, not mock): exports the manifest's source list to
 // <output library>/asr-smoke.md, reads the file back, and checks that due()
-// now says "nothing to do". Passed === all checks true. Read-only on the source
+// now says "nothing to do" — once via file freshness, once via the unchanged list. Passed === all checks true. Read-only on the source
 // list; the only write is the smoke file in the test output library.
 (function () {
   'use strict';
@@ -75,10 +75,15 @@
         checks.peopleHaveEmail = /- Assigned To: [^\n]+\([^\n@]+@[^\n]+\)/.test(text);
         checks.noObjectLeaks = text.indexOf('[object Object]') < 0 && text.indexOf('undefined') < 0;
         checks.dateOnlyIsDay = !/- Start Date: \d{4}-\d\d-\d\d \d/.test(text);
-        // Just exported, list unchanged since → the gate must now say "not due".
+        // Just exported → not due, for BOTH reasons, checked separately:
+        // (a) the file was written after the slot started;
         return task.due(taskCtx(config, new Date(Date.now() - 60000)));
       }).then(function (isDue) {
-        checks.notDueAfterExport = isDue === false;
+        checks.notDueFileFresh = isDue === false;
+        // (b) with no slot boundary, only the list-unchanged comparison can say no.
+        return task.due(taskCtx(config, null));
+      }).then(function (isDue) {
+        checks.notDueListUnchanged = isDue === false;
         var passed = Object.keys(checks).every(function (k) { return checks[k] === true; });
         return { passed: passed, results: { checks: checks, detail: detail } };
       }).catch(function (e) {

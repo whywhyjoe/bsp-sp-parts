@@ -13,12 +13,14 @@ library, which Copilot can read.
 
 ## The non-negotiables
 
-- **A visit must cost nothing when there is nothing to do.** The slot gate is a
-  `localStorage` read; `due()` is at most two small GETs. Anything heavier on
-  every load defeats the point of running on page visits at all.
-- **The attempt is stamped before `due()` runs.** Without that, a broken task
-  (bad config, missing permission, a 500) retries — and shows its error panel —
-  on every single page load.
+- **A visit must cost nothing when there is nothing to do.** In an
+  already-checked slot the gate decides from `localStorage` alone (stamp +
+  cached schedule) — no request, not even the config. `due()` is at most two
+  small GETs. Anything heavier on every load defeats the point.
+- **The attempt is stamped before anything can fail** — before the config
+  fetch and `due()`. Without that, a broken task (bad config, missing
+  permission, a 500) retries — and shows its error panel — on every page load.
+  If the stamp cannot be stored, the runner does not run automatically at all.
 - **Mock data is opt-in.** A live page that silently exported demo rows over a
   real file is the worst failure available here.
 - **Visitors without edit rights on the output file never see the panel.**
@@ -41,13 +43,16 @@ admin-script-runner.js
   registry     window.adminScriptTasks — a push-queue; tasks register in any order
   discovery    dcsMountPart('[data-admin-task]'): every host, edit-mode placeholder,
                SPA re-mount; hosts that mount together are checked as one batch
-  per host     load config → slot gate (localStorage) → stamp → type.due(ctx)
+  per host     memory gate (stamp + cached schedule, no network) → stamp →
+               load config → slot gate with its schedule → type.due(ctx)
+               (a type not registered yet: the host waits up to 10 s for it)
   if any due   open panel (task list) → type.run(ctx) one after another → All done
                (closes in 3 s) | Cancelled (closes in 3 s) | Needs attention (stays, Close)
 
 tasks/sp-list-to-markdown
   due          GET file (TimeLastModified + edit permission) → GET list LastItemModifiedDate
   run          list → fields → items (one request, ≤ maxItems) → Markdown → upload (overwrite)
+               → re-read the list's timestamp; changed meanwhile → export again (≤ 3 attempts)
   adapters     makeLiveAdapter (pnp2, the only SharePoint code) / makeMockAdapter (twin)
 ```
 
@@ -77,8 +82,19 @@ runner-wide daily guard — it cannot express "every two hours, only if changed"
 
 ### Fixed local-hour slots, not a rolling interval — 2026-09-28
 
-Same cost as rolling, and "no overnight runs" falls out for free. Default
-8–18 every two hours; per-instance `schedule.slots` overrides.
+Same cost as rolling. Default 8–18 every two hours; the day closes at
+`schedule.until` (default two hours after the last slot, so 20:00) — without an
+end the last slot would stretch to midnight. Per-instance `schedule` overrides.
+
+### Accepted, not fixed (Codex review, 2026-09-30)
+
+- **Two tabs in one browser can both run an instance in the same slot** —
+  `localStorage` has no atomic read-and-stamp. Worst case: one duplicate export
+  with identical content. Locking was judged not worth it.
+- **Date-only values assume a site zone within ±11 h of UTC** (see Paid-for
+  gotchas). The portal's sites are North American.
+- **The panel's status glyphs contain `#fff` strokes** — copied verbatim from
+  the design-system sprite, per the "copy, never invent" icon rule.
 
 ### Runner and tasks in one part — 2026-09-28
 
@@ -119,8 +135,13 @@ write — show in the panel.
 - **`_api` without an `Accept` header answers in XML.** Every raw `fetch` sends
   `application/json;odata=nometadata`.
 - **`LastItemModifiedDate` moves for more than item edits** — on dev it moved
-  at the moment the provision op ensured the (unchanged) source list. The cost is an occasional extra export,
-  which is harmless; don't try to make it exact.
+  at the moment the provision op ensured the (unchanged) source list. The cost
+  is an occasional extra export, which is harmless; don't try to make it exact.
+- **An edit landing mid-export would otherwise be lost for good**: the upload
+  finishes after the edit, so the file looks newer than the list and `due()`
+  says no until the next edit. `run()` re-reads `LastItemModifiedDate` after
+  saving and exports again if it moved (Codex review finding).
 - **Date-only columns are stored as site-local midnight in UTC** (Eastern:
   `T04:00:00Z`). Rendering them rounds to the nearest UTC midnight, which is
-  correct for any site zone within ±11 h. Never format them in a time zone.
+  correct for any site zone within ±11 h (a UTC+12/+13 site would show the
+  previous day). Never format them in a time zone.

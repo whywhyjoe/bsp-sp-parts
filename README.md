@@ -119,7 +119,8 @@ Already live on the portal, **not** deployed from this repo: the design system
 | `admin-script-runner` | `tools/sp/deploy.ps1` → `code` root `apps/admin-script-runner/` (runner, CSS, boot helper and every task, flat) — once per **tenant** | A config JSON, plus the **deployed** (generated) `admin-script-runner.webpart.html` with `data-config` set | [Hosting and deploy](admin-script-runner/docs/01-hosting-and-deploy.md) |
 | `bsp-notify` | The `Notifications` list, the **BSP Notify** flow (solution import) and `bsp-notify.js` | Nothing. Callers load `bsp-notify.js` after `pnp2` | [Prod deploy checklist](bsp-notify/docs/prod-deploy-checklist.md) |
 
-Only `sp-list-ordering` needs `_shared/`. Web part stubs and snippets are
+`sp-list-ordering` and `admin-script-runner` need `_shared/` (the runner's
+deploy copies it alongside its own files). Web part stubs and snippets are
 **copied per page**: each page keeps its own copy, pointed at its own config.
 
 ## Development

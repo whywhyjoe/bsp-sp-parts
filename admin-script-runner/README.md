@@ -27,21 +27,27 @@ output file actually export (others are skipped silently). See
 
 ## Scheduling (the whole rule)
 
-Slots are local hours, default `8, 10, 12, 14, 16, 18`. On each page visit, per
-task instance:
+Slots are local hours, default `8, 10, 12, 14, 16, 18`; the day closes at
+`schedule.until`, default two hours after the last slot (20:00). On each page
+visit, per task instance:
 
-1. **This browser already checked in the current slot?** Stop — no network.
+1. **Outside the day's hours, or this browser already checked in the current
+   slot?** Stop — decided from this browser's memory, no network. (A browser's
+   very first visit fetches the instance's config once to learn its schedule.)
 2. **Output file written since the slot started?** Stop.
 3. **List unchanged since the file was written?** Stop.
-4. Otherwise the panel appears and the export runs.
+4. Otherwise the panel appears and the export runs. If the list changes while
+   it runs, it exports again (up to three attempts).
 
 So: at most one export per slot, only when the list changed, never overnight.
+A browser that cannot store anything (storage blocked or full) never runs
+tasks automatically; `?adminTasks=force` still works.
 
 ## Running it locally
 
 ```
 node --test admin-script-runner/tests/pure.test.mjs      # fast tier, ~0.3s
-node admin-script-runner/tests/smoke.mjs                 # full tier, ~12s, headless Chromium
+node admin-script-runner/tests/smoke.mjs                 # full tier, ~41s, headless Chromium
 python -m http.server 8646                               # then open /dev/admin-script-runner.dev.html
 ```
 

@@ -53,17 +53,17 @@
   // What lands in the zone mirrors admin-script-runner.webpart.html's host div.
   // data-config is left off: from disk the task's sample (mock) config is used.
   // A second instance of the same task type, so the panel shows a task list.
-  // Its config is a blob URL (no fixture file); from disk (file:) the fetch
-  // fails and the sample config is used instead.
+  // Its config is a blob URL (no fixture file), which changes every load — so
+  // data-id gives it a stable key for the runner's memory.
   var SECOND_CONFIG = URL.createObjectURL(new Blob([JSON.stringify({
-    id: 'harness-second', label: 'Export Requests list to Markdown',
+    label: 'Export Requests list to Markdown',
     list: { title: 'Requests' }, fields: ['Status', 'DueDate'], group: 'Status',
     output: { folder: '/sites/mock/Shared Documents/copilot', file: 'requests.md' }
   })], { type: 'application/json' }));
   function renderWebPartStub() {
     document.getElementById('webpart-zone').innerHTML =
       '<div data-admin-task="sp-list-to-markdown" data-mock></div>' +
-      '<div data-admin-task="sp-list-to-markdown" data-mock data-config="' + SECOND_CONFIG + '"></div>';
+      '<div data-admin-task="sp-list-to-markdown" data-mock data-id="harness-second" data-config="' + SECOND_CONFIG + '"></div>';
   }
   setTimeout(renderWebPartStub, 1200);
 
@@ -139,8 +139,20 @@
 </script>
 <!-- Same order as the web part stub: boot helper, task(s), runner. -->
 <script src="../_shared/dcs-part-boot.js"></script>
-<script src="../admin-script-runner/tasks/sp-list-to-markdown/sp-list-to-markdown.js"></script>
+<script>
+  // ?lateTask=1 loads the task script 2.5 s AFTER the runner, to exercise late
+  // registration (hosts wait for their type instead of being dropped).
+  window.__HARNESS_LATE_TASK = new URLSearchParams(location.search).has('lateTask');
+  if (!window.__HARNESS_LATE_TASK) document.write('<script src="../admin-script-runner/tasks/sp-list-to-markdown/sp-list-to-markdown.js"><\/script>');
+</script>
 <script src="../admin-script-runner/admin-script-runner.js"></script>
+<script>
+  if (window.__HARNESS_LATE_TASK) setTimeout(function () {
+    var s = document.createElement('script');
+    s.src = '../admin-script-runner/tasks/sp-list-to-markdown/sp-list-to-markdown.js';
+    document.head.appendChild(s);
+  }, 2500);
+</script>
 
 </body>
 </html>

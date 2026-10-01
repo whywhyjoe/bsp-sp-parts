@@ -64,7 +64,9 @@
           s.parentNode.removeChild(s);
           return s.getAttribute('src');
         });
-        holder.querySelector('[data-admin-task]').setAttribute('data-config', configUrl);
+        var host = holder.querySelector('[data-admin-task]');
+        host.setAttribute('data-config', configUrl);
+        host.setAttribute('data-id', config.id);   // blob URLs change per load; the key must not
         while (holder.firstChild) root.appendChild(holder.firstChild);
         return scripts.reduce(function (p, src) {
           return p.then(function () { return loadScript(src); });

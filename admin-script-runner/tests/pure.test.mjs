@@ -38,7 +38,7 @@ test('current slot is the latest slot hour at or before now', () => {
   assert.equal(R.currentSlotStart(at(7, 59), [8, 10]), null);
   assert.equal(R.currentSlotStart(at(8, 0), [8, 10]).getHours(), 8);
   assert.equal(R.currentSlotStart(at(9, 59), [8, 10]).getHours(), 8);
-  assert.equal(R.currentSlotStart(at(23, 30), [8, 10, 18]).getHours(), 18);
+  assert.equal(R.currentSlotStart(at(19, 30), [8, 10, 18]).getHours(), 18);
 });
 
 test('slot gate: checks once per slot per browser', () => {
@@ -47,7 +47,20 @@ test('slot gate: checks once per slot per browser', () => {
   assert.equal(R.slotGate(now, [8, 10], undefined).check, true);
   assert.equal(R.slotGate(now, [8, 10], slot10 - 1).check, true, 'stamped in the previous slot');
   assert.equal(R.slotGate(now, [8, 10], slot10 + 60000).reason, 'checked-this-slot');
-  assert.equal(R.slotGate(new Date(2026, 8, 28, 6, 0), [8, 10], undefined).reason, 'before-first-slot');
+  assert.equal(R.slotGate(new Date(2026, 8, 28, 6, 0), [8, 10], undefined).reason, 'outside-hours');
+});
+
+test('end hour: defaults to two hours after the last slot; nothing runs after it', () => {
+  assert.equal(R.normalizeSchedule(undefined).until, 20);
+  assert.equal(R.normalizeSchedule({ slots: [8, 21] }).until, 23, 'a custom late slot keeps its two hours');
+  assert.equal(R.normalizeSchedule({ slots: [8, 23] }).until, 24, 'capped at midnight');
+  assert.equal(R.normalizeSchedule({ until: 17 }).until, 17, 'explicit until wins');
+  assert.equal(R.normalizeSchedule({ until: 99 }).until, 20, 'invalid until falls back');
+  const at = (h, m) => new Date(2026, 8, 28, h, m);
+  assert.equal(R.slotGate(at(19, 59), undefined, undefined).check, true, 'the last slot runs until 20:00');
+  assert.equal(R.slotGate(at(20, 0), undefined, undefined).reason, 'outside-hours');
+  assert.equal(R.slotGate(at(23, 30), undefined, undefined).reason, 'outside-hours', 'no overnight run');
+  assert.equal(R.slotGate(at(16, 30), { until: 16 }, undefined).reason, 'outside-hours', 'slots at or after until never start');
 });
 
 // ─── task: config ────────────────────────────────────────────────────────────
@@ -67,6 +80,19 @@ test('config: defaults and required keys', () => {
   for (const needle of ['list.title', 'fields', 'output.folder', 'file name', 'maxItems', 'timeZone']) {
     assert.ok(text.includes(needle), 'missing error about ' + needle + ': ' + text);
   }
+});
+
+test('config: "/" means the tenant root site; omitted means the page\'s own web', () => {
+  assert.equal(T.siteOf(''), '');
+  assert.equal(T.siteOf(undefined), '');
+  assert.equal(T.siteOf('/'), '/');
+  assert.equal(T.siteOf('//'), '/');
+  assert.equal(T.siteOf(' /sites/a/ '), '/sites/a');
+  const base = { list: { title: 'L', site: '/' }, fields: ['A'], output: { folder: '/f', file: 'x.md' } };
+  const c = T.normalizeConfig(base).config;
+  assert.equal(c.list.site, '/');
+  assert.equal(c.output.site, '/', 'the output site follows the list site');
+  assert.equal(T.normalizeConfig({ ...base, output: { ...base.output, site: '/sites/b/' } }).config.output.site, '/sites/b');
 });
 
 test('config: orderBy accepts a string, an object or a list', () => {
@@ -109,6 +135,11 @@ test('date+time values render in the configured zone', () => {
 test('rich text keeps line breaks and list items', () => {
   assert.equal(T.stripHtml('<div><p>One &amp; two</p><ul><li>a</li><li>b</li></ul></div>'), 'One & two\n- a\n- b');
   assert.equal(T.stripHtml('x<br>y&#39;s'), "x\ny's");
+});
+
+test('plain multi-line text loses blank lines too (a blank line would end its bullet)', () => {
+  const note = { TypeAsString: 'Note', RichText: false };
+  assert.equal(T.valueText('one\r\n\r\ntwo  \n\n\nthree', note), 'one\ntwo\nthree');
 });
 
 test('value text per type', () => {
