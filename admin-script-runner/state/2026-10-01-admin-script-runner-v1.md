@@ -2,8 +2,8 @@
 
 Last touched: 2026-10-01
 Mode: Joe
-Branch: admin-script-runner, not pushed
-State: 0.1.5 built, dev-deployed and dev-verified; not merged; prod untouched
+Branch: merged to main (fe0a624) and pushed; branch admin-script-runner kept on origin
+State: 0.1.5 on main, dev-deployed and dev-verified; prod untouched
 
 ## What this is
 
@@ -29,8 +29,8 @@ Copilot cannot reliably read list content.
 - [ ] With the user: the intake list's real config (fields, group/subgroup,
       filter, output library whose readers match the list's). Write it as a
       JSON in the prod site's SiteAssets, not in the repo.
-- [ ] Merge the branch (user's call), then prod: `deploy.ps1` on the prod
-      machine and the manual gates in `../STATE.md`.
+- [ ] Prod: `git pull` + `deploy.ps1` on the prod machine, then the manual
+      gates in `../STATE.md`.
 
 ## Companion documents
 

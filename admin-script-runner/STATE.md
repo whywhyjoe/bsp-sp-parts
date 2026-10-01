@@ -13,7 +13,7 @@ the `project-state` skill.
 | **Deployed** | **dev only** — `code` root `apps/admin-script-runner/`, verified live 2026-10-01 on 0.1.5 (test-smoke 10/10; demo page: forced run → Done → closed, reload `not-due`, third visit skipped with zero requests) |
 | **Prod** | not deployed |
 | **Last shipped** | nothing shipped to prod yet |
-| **Branch** | `admin-script-runner` (not merged) |
+| **Branch** | merged to `main` 2026-10-01 (`fe0a624`) |
 
 Dev fixtures this part created: list library **ASR Test Output**, pages
 `_harness-admin-script-runner.aspx` and `admin-script-runner-demo.aspx`. It
