@@ -1,4 +1,4 @@
-/*! BSP Forms · v0.1.0 · bsp-forms.css */
+/*! BSP Forms · v0.2.0 · bsp-forms.css */
 /* =====================================================================
    BSP Forms — additive component layer for the JSON-driven forms app.
    ---------------------------------------------------------------------
@@ -88,6 +88,42 @@
 .bspf-page .bspf-section + .bspf-section {
   border-top: var(--stroke-thin) solid var(--stroke-divider);
   padding-top: var(--space-240);
+}
+/* Prose links (author [text](url) markup) keep the base <a> styling. */
+.bspf__intro a, .bspf .field__hint a, .bspf-section__desc a, .bspf-page__desc a, .bspf-done__msg a { font-weight: var(--weight-semibold); }
+
+/* Section head with an icon tile (section.icon) — the .card__icon-tile--sm
+   treatment, re-scoped: tint-blue ground, accent glyph. */
+.bspf-section__head { display: flex; align-items: flex-start; gap: var(--space-120); }
+.bspf-section__tile {
+  width: 32px; height: 32px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-large);
+  background: var(--surface-tint-blue); color: var(--accent-rest);
+}
+.bspf-section__copy { display: flex; flex-direction: column; gap: var(--space-20); min-width: 0; padding-top: var(--space-20); }
+.bspf-section__head .bspf-section__title { font: var(--type-subtitle2); }
+.bspf-section__head .bspf-section__desc { margin: 0; }
+.bspf-section__head + .bspf-fields { margin-top: var(--space-40); }
+
+/* Two-column sections (section.columns: 2). Keyed to the FORM's width, not
+   the viewport — a web part can sit in a one-third column on a wide screen.
+   Below the threshold (or without container-query support) it stays one
+   column. Hidden (x-show) fields drop out of the flow, so a conditional
+   field simply appears in the next cell. */
+.bspf { container: bspf / inline-size; }
+@container bspf (min-width: 600px) {
+  .bspf-fields--2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: var(--space-240);
+    row-gap: var(--space-200);
+    align-items: start;
+  }
+  .bspf-fields--2 > .bspf-field--full,
+  .bspf-fields--2 > .bspf-heading,
+  .bspf-fields--2 > .msgbar,
+  .bspf-fields--2 > .field__hint { grid-column: 1 / -1; }
 }
 
 /* Field extras on top of .field */
@@ -287,8 +323,15 @@
 .bspf-doctor { margin-bottom: var(--space-240); display: flex; flex-direction: column; gap: var(--space-120); }
 .bspf-doctor .grid tbody tr { cursor: default; }
 
-/* Narrow containers (one-third columns, mobile) — tighter card padding. */
-@media (max-width: 640px) {
+/* Narrow forms (one-third columns, mobile) — tighter card padding. Keyed
+   to the form's own width (the bspf container), not the viewport. */
+@container bspf (max-width: 640px) {
   .bspf--card .bspf__content, .bspf__head--band { padding: var(--space-240); }
   .bspf-nav--foot { padding: var(--space-120) var(--space-240); }
+}
+/* Very narrow: the brand icon stacks above the title instead of squeezing
+   the intro into a thin column. */
+@container bspf (max-width: 479px) {
+  .bspf__head { flex-direction: column-reverse; align-items: flex-start; gap: var(--space-160); }
+  .bspf__head-icon { width: 40px; height: 40px; }
 }

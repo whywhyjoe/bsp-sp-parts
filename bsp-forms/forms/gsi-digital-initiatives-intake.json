@@ -1,19 +1,20 @@
 {
-  "$comment": "FCU GSI Digital Initiatives Technology Intake — replaces the built-in list form on the Creative Digital Solutions intake list. Straight submit, one page. Columns are the list's INTERNAL names (Priority = 'Support type and level', field_6 = 'Requested Launch Date', field_9 = 'Description', Pillar_x002f_Partner = 'Pillar/Partner'). Choice values are copied verbatim from the list; the list's '----' divider choices are left out on purpose. If a Priority choice is renamed on the list, update both its entry here AND the requestedBy visibleWhen list. Before going live, embed with data-validate and read the doctor report against the real list.",
+  "$comment": "FCU GSI Digital Initiatives Technology Intake — replaces the built-in list form on the Creative Digital Solutions intake list. Straight submit, one page. Columns are the list's INTERNAL names (Priority = 'Support type and level', field_6 = 'Requested Launch Date', field_9 = 'Description', Pillar_x002f_Partner = 'Pillar/Partner'). Choice values are copied verbatim from the list; the list's '----' divider choices are left out on purpose. If a Priority choice is renamed on the list, update both its entry here AND the requestedBy visibleWhen list. The list lives on another site and is addressed by its URL (target.listUrl), which survives a rename — its display name is 'Creative Digital Solutions Inake'. Before going live, embed with data-validate and read the doctor report against the real list.",
 
   "form": {
     "title": "FCU GSI Digital Initiatives Technology Intake",
-    "intro": "These services are provided by the Digital & Creative Solutions team, a part of FCU Governance, Strategy and Integration. To submit intakes for other GSI services, including FCU Communications and OCM, use the GSI intake on the FCU Portal Go page (/sites/FCUPortal/Go#gsi-intake).",
+    "intro": "These services are provided by the Digital & Creative Solutions team, a part of FCU Governance, Strategy and Integration. To submit intakes for other GSI services, including FCU Communications and OCM, use the [GSI intake](/sites/FCUPortal/Go#gsi-intake).",
     "appearance": {
       "frame": "card",
       "header": "band",
-      "tint": "sky"
+      "tint": "sky",
+      "icon": "abacus-icons/technological-innovation-48.svg"
     }
   },
 
   "target": {
-    "siteUrl": null,
-    "listTitle": "Creative Digital Solutions Intake",
+    "siteUrl": "/sites/FCUCommunicationsSecurityAwareness",
+    "listUrl": "Lists/Creative Services Intake",
     "titleTemplate": "{field:department} request — {date}"
   },
 
@@ -26,6 +27,7 @@
 
   "attachments": {
     "enabled": true,
+    "section": "details",
     "label": "Attachments",
     "maxFiles": 10,
     "maxFileSizeMb": 25
@@ -41,15 +43,11 @@
       "sections": [
         {
           "id": "about",
+          "title": "About you",
+          "description": "Who the request is for, so we know who to follow up with.",
+          "icon": "person",
+          "columns": 2,
           "fields": [
-            {
-              "id": "title",
-              "type": "text",
-              "label": "Title",
-              "hint": "A short name for your request. Left blank, it's filled in from your team and today's date.",
-              "column": "Title",
-              "validation": { "maxLength": 255 }
-            },
             {
               "id": "requestor",
               "type": "person",
@@ -68,8 +66,21 @@
           ]
         },
         {
-          "id": "scope",
+          "id": "request",
+          "title": "Your request",
+          "description": "What you need and how urgent it is. Support and hard-launch requests ask for a date.",
+          "icon": "edit",
+          "columns": 2,
           "fields": [
+            {
+              "id": "title",
+              "type": "text",
+              "label": "Title",
+              "hint": "A short name for your request. Leave it blank and we'll name it from your team and today's date.",
+              "column": "Title",
+              "span": "full",
+              "validation": { "maxLength": 255 }
+            },
             {
               "id": "supportType",
               "type": "choice",
@@ -162,6 +173,9 @@
         },
         {
           "id": "details",
+          "title": "Details",
+          "description": "The more we know up front, the fewer follow-up questions.",
+          "icon": "document",
           "fields": [
             {
               "id": "description",

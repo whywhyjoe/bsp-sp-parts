@@ -32,6 +32,14 @@ two-line web part insert.
   to a flat layout; `confirmation.illustration` puts a BMO spot illustration
   on the thank-you screen.
 - **Pages & sections** with a stepper, per-page validation, back navigation.
+  Sections can carry an icon-tile head (`icon`) and lay their fields out in
+  **two columns** (`columns: 2`, `span: "full"` for wide fields), which
+  collapse to one when the form itself is narrow. Attachments can sit inside
+  a section (`attachments.section`).
+- **Links in text:** `[text](url)` in the intro, descriptions, hints, notes
+  and confirmation message; everything else stays escaped plain text.
+- **Cross-site lists:** `target.siteUrl` + `target.listUrl` write to a list on
+  another site, addressed by URL so a renamed list title doesn't break it.
 - **Field types:** text, textarea, email, phone, number, currency, choice
   (SharePoint-style colored **pill dropdown**, optional fill-in), multichoice
   (pill multi-select, optional fill-in), yes/no switch, date / date+time,

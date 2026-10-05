@@ -32,7 +32,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '0.1.3';
+  var VERSION = '0.2.0';
   var NS = window.BSPForms = window.BSPForms || {};
   if (NS.__engineLoaded) { if (NS.scan) NS.scan(); return; }
   NS.__engineLoaded = true;
@@ -351,6 +351,13 @@
     function requireCtx() {
       if (!targetWeb) throw new Error('no-context');
     }
+    // target.listUrl: server-relative ("/sites/x/Lists/My List") or relative
+    // to the target web ("Lists/My List"). Survives a list being renamed.
+    function listServerRelUrl(u) {
+      if (u.charAt(0) === '/') return u;
+      var base = targetWeb ? new URL(targetWeb, location.origin).pathname.replace(/\/$/, '') : '';
+      return base + '/' + u.replace(/^\.?\//, '');
+    }
     // pnp loaded + page web known (resolved over REST when the page has no
     // _spPageContextInfo). Every SharePoint call goes through this.
     function whenCtx() {
@@ -376,9 +383,9 @@
     }
     function list() {
       var w = web();
-      return cfg.target.listId
-        ? w.lists.getById(cfg.target.listId)
-        : w.lists.getByTitle(cfg.target.listTitle);
+      if (cfg.target.listId) return w.lists.getById(cfg.target.listId);
+      if (cfg.target.listUrl) return w.getList(listServerRelUrl(cfg.target.listUrl));
+      return w.lists.getByTitle(cfg.target.listTitle);
     }
 
     return {
@@ -475,7 +482,9 @@
       cfg.form.appearance || {});
     cfg.strings = Object.assign({}, DEFAULT_STRINGS, cfg.strings || {});
     cfg.target = cfg.target || {};
-    if (!cfg.target.listTitle && !cfg.target.listId) errors.push('target.listTitle or target.listId is required');
+    if (!cfg.target.listTitle && !cfg.target.listId && !cfg.target.listUrl) {
+      errors.push('target.listTitle, target.listUrl or target.listId is required');
+    }
     cfg.confirmation = Object.assign({ title: null, message: null, allowAnother: true }, cfg.confirmation || {});
     cfg.attachments = Object.assign({
       enabled: false, required: false, label: 'Attachments', hint: '',
@@ -495,12 +504,17 @@
       if (!pg.sections.length) errors.push('page "' + pg.id + '" has no sections');
       pg.sections.forEach(function (sec, si) {
         sec.id = sec.id || (pg.id + '_s' + (si + 1));
+        sec._page = pi;
         if (sectionsById[sec.id]) errors.push('duplicate section id "' + sec.id + '"');
         else sectionsById[sec.id] = sec;
         sec.fields = Array.isArray(sec.fields) ? sec.fields : [];
+        if (sec.columns != null && sec.columns !== 1 && sec.columns !== 2) {
+          errors.push('section "' + sec.id + '": columns must be 1 or 2');
+        }
         sec.fields.forEach(function (f, fi) {
           if (!f.id) { errors.push('field #' + (fi + 1) + ' in section "' + sec.id + '" is missing an id'); f.id = sec.id + '_f' + fi; }
           if (TYPES.indexOf(f.type) < 0) errors.push('field "' + f.id + '": unknown type "' + f.type + '"');
+          if (f.span != null && f.span !== 'full') errors.push('field "' + f.id + '": span must be "full" (or omitted)');
           var k = safeKey(f.id);
           if (byKey[k]) errors.push('duplicate field id "' + f.id + '"');
           f.k = k; f.page = pi; f.section = sec.id;
@@ -554,6 +568,13 @@
       pg.sections.forEach(function (sec) { checkRuleRefs(sec.visibleWhen, 'section "' + sec.id + '"'); });
     });
 
+    if (cfg.attachments.enabled && cfg.attachments.section != null) {
+      // render inside a section (its page wins over attachments.page)
+      var asec = sectionsById[cfg.attachments.section];
+      if (!asec) errors.push('attachments.section "' + cfg.attachments.section + '" is not a section id');
+      else if (asec.visibleWhen) errors.push('attachments.section "' + asec.id + '" must not have visibleWhen');
+      else cfg.attachments.page = asec._page;
+    }
     if (cfg.attachments.enabled) {
       var ap = cfg.attachments.page;
       if (ap == null) cfg.attachments.page = cfg.pages.length - 1;
@@ -665,10 +686,21 @@
   function icon(name, size) {
     return '<svg class="icon icon--' + (size || 16) + '" aria-hidden="true"><use href="#' + name + '"/></svg>';
   }
+  // Author prose (intro, descriptions, hints, notes, confirmation): escaped,
+  // then [text](url) becomes a link. Only http(s), mailto, server-relative
+  // and #anchor targets. Off-page links open in a new tab so a half-filled
+  // form isn't lost.
+  var LINK_RE = /\[([^\]\n]+)\]\(((?:https?:\/\/|mailto:|\/|#)[^)\s]*)\)/g;
+  function prose(s) {
+    return esc(s).replace(LINK_RE, function (m, text, href) {
+      var ext = href.charAt(0) !== '#';
+      return '<a href="' + href + '"' + (ext ? ' target="_blank" rel="noopener noreferrer"' : '') + '>' + text + '</a>';
+    });
+  }
 
   function fieldShell(f, inner, S) {
     var noLabel = f.type === 'heading' || f.type === 'note' || f.type === 'boolean';
-    var h = '<div class="field" data-bspf-field="' + esc(f.k) + '"';
+    var h = '<div class="field' + (f.span === 'full' ? ' bspf-field--full' : '') + '" data-bspf-field="' + esc(f.k) + '"';
     if (f.visibleWhen) h += ' x-show="vis(' + esc(jstr(f.k)) + ')" x-cloak';
     h += '>';
     if (!noLabel) {
@@ -677,7 +709,7 @@
       h += '</label>';
     }
     h += inner;
-    if (f.hint) h += '<p class="field__hint">' + esc(f.hint) + '</p>';
+    if (f.hint) h += '<p class="field__hint">' + prose(f.hint) + '</p>';
     if (f.type !== 'heading' && f.type !== 'note') {
       h += '<p class="field__error" role="alert" x-show="errors.' + f.k + '" x-text="errors.' + f.k + '" x-cloak></p>';
       h += '<p class="bspf-field__warning" x-show="warnings.' + f.k + '" x-text="warnings.' + f.k + '" x-cloak></p>';
@@ -887,18 +919,18 @@
     if (f.visibleWhen) h += ' x-show="vis(' + esc(jstr(f.k)) + ')" x-cloak';
     h += '>';
     h += '<div class="bspf-section__title" role="heading" aria-level="4">' + esc(f.text || f.label || '') + '</div>';
-    if (f.description) h += '<p class="bspf-section__desc">' + esc(f.description) + '</p>';
+    if (f.description) h += '<p class="bspf-section__desc">' + prose(f.description) + '</p>';
     return h + '</div>';
   }
   function renderNote(f) {
     var style = f.style || 'info';
     var vis = f.visibleWhen ? ' x-show="vis(' + esc(jstr(f.k)) + ')" x-cloak' : '';
     if (style === 'plain') {
-      return '<p class="field__hint"' + vis + '>' + esc(f.text || '') + '</p>';
+      return '<p class="field__hint"' + vis + '>' + prose(f.text || '') + '</p>';
     }
     return '<div class="msgbar msgbar--' + esc(style) + '" role="status"' + vis + '>' +
       icon(ICONS[style] || ICONS.info, 20).replace('class="icon', 'class="msgbar__icon icon') +
-      '<div class="msgbar__body">' + esc(f.text || '') + '</div></div>';
+      '<div class="msgbar__body">' + prose(f.text || '') + '</div></div>';
   }
 
   function renderAttachments(cfg, S, uid) {
@@ -907,7 +939,7 @@
     var acceptAttr = a.accept && a.accept.length ? ' accept="' + esc(a.accept.join(',')) + '"' : '';
     var hint = a.hint || fmtStr(S.attachHint, {}) ||
       (a.maxFiles + ' files max · ' + a.maxFileSizeMb + ' MB each' + (a.accept && a.accept.length ? ' · ' + a.accept.join(', ') : ''));
-    var h = '<div class="field bspf-attach" data-bspf-field="_attachments">';
+    var h = '<div class="field bspf-attach bspf-field--full" data-bspf-field="_attachments">';
     h += '<span class="field__label" id="' + esc(labelId) + '">' + esc(a.label) +
       (a.required ? ' <span class="field__req" aria-hidden="true">*</span>' : '') + '</span>';
     h += '<div class="dropzone bspf-attach__drop" tabindex="0" role="button" aria-labelledby="' + esc(labelId) + '"' +
@@ -965,7 +997,7 @@
       h += '<header class="' + headCls + '">';
       h += '<div class="bspf__head-copy">';
       if (cfg.form.title && cfg.form.showTitle !== false) h += '<h2 class="bspf__title">' + esc(cfg.form.title) + '</h2>';
-      if (cfg.form.intro) h += '<p class="bspf__intro">' + esc(cfg.form.intro) + '</p>';
+      if (cfg.form.intro) h += '<p class="bspf__intro">' + prose(cfg.form.intro) + '</p>';
       h += '</div>';
       if (ap.icon) h += '<img class="bspf__head-icon" src="' + esc(resolveAsset(ap.icon)) + '" alt="">';
       h += '</header>';
@@ -993,18 +1025,29 @@
     pages.forEach(function (pg, i) {
       h += '<div class="bspf-page" x-show="page===' + i + '"' + (i > 0 ? ' x-cloak' : '') + '>';
       if (pages.length > 1 && pg.title) h += '<h3 class="bspf-page__title">' + esc(pg.title) + '</h3>';
-      if (pg.description) h += '<p class="bspf-page__desc">' + esc(pg.description) + '</p>';
+      if (pg.description) h += '<p class="bspf-page__desc">' + prose(pg.description) + '</p>';
       pg.sections.forEach(function (sec) {
         h += '<section class="bspf-section"';
         if (sec.visibleWhen) h += ' x-show="secVis(' + esc(jstr(sec.id)) + ')" x-cloak';
         h += '>';
-        if (sec.title) h += '<h4 class="bspf-section__title">' + esc(sec.title) + '</h4>';
-        if (sec.description) h += '<p class="bspf-section__desc">' + esc(sec.description) + '</p>';
-        h += '<div class="bspf-fields">';
+        if (sec.icon && (sec.title || sec.description)) {
+          // section head with a Fluent icon tile (sprite name, e.g. "person")
+          h += '<div class="bspf-section__head">' +
+            '<span class="bspf-section__tile">' + icon('ic-fluent-' + esc(sec.icon) + '-24-regular', 20) + '</span>' +
+            '<div class="bspf-section__copy">';
+          if (sec.title) h += '<h4 class="bspf-section__title">' + esc(sec.title) + '</h4>';
+          if (sec.description) h += '<p class="bspf-section__desc">' + prose(sec.description) + '</p>';
+          h += '</div></div>';
+        } else {
+          if (sec.title) h += '<h4 class="bspf-section__title">' + esc(sec.title) + '</h4>';
+          if (sec.description) h += '<p class="bspf-section__desc">' + prose(sec.description) + '</p>';
+        }
+        h += '<div class="bspf-fields' + (sec.columns === 2 ? ' bspf-fields--2' : '') + '">';
         sec.fields.forEach(function (f) { h += renderField(f, S); });
+        if (cfg.attachments.enabled && cfg.attachments.section === sec.id) h += renderAttachments(cfg, S, uid);
         h += '</div></section>';
       });
-      if (cfg.attachments.enabled && cfg.attachments.page === i) {
+      if (cfg.attachments.enabled && cfg.attachments.section == null && cfg.attachments.page === i) {
         h += '<section class="bspf-section">' + renderAttachments(cfg, S, uid) + '</section>';
       }
       h += '</div>';
@@ -1053,7 +1096,7 @@
     }
     h += '<h2 class="bspf-done__title">' + esc(cfg.confirmation.title || S.confirmTitle) + '</h2>';
     var cMsg = cfg.confirmation.message || S.confirmMessage;
-    if (cMsg) h += '<p class="bspf-done__msg">' + esc(cMsg) + '</p>';
+    if (cMsg) h += '<p class="bspf-done__msg">' + prose(cMsg) + '</p>';
     if (cfg.confirmation.allowAnother !== false) {
       h += '<button type="button" class="btn btn--secondary" @click="resetForm()">' + esc(cfg.confirmation.anotherLabel || S.confirmAnother) + '</button>';
     }
@@ -1702,7 +1745,8 @@
   }
   function renderDoctor(def, rows, err, S) {
     var box = el('div', 'bspf-doctor');
-    box.appendChild(el('h4', 'bspf-section__title', S.doctorTitle + ' — ' + (def.cfg.target.listTitle || def.cfg.target.listId)));
+    var t = def.cfg.target;
+    box.appendChild(el('h4', 'bspf-section__title', S.doctorTitle + ' — ' + (t.listId || t.listUrl || t.listTitle)));
     if (err) {
       var bar = el('div', 'msgbar msgbar--danger');
       bar.appendChild(el('div', 'msgbar__body', 'Doctor failed: ' + trimErr(err.message)));

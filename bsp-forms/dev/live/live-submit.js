@@ -47,6 +47,8 @@ function ymd(days) { const d = new Date(); d.setDate(d.getDate() + days); return
 
 (async () => {
   const site = tenants.dev.siteUrl;
+  // the list is on ANOTHER site collection (tenant root), like prod — see live-crosssite.js
+  const listApi = tenants.dev.tenantRoot.replace(/\/$/, '') + "/_api/web/GetList('" + encodeURIComponent('/Lists/Creative Services Intake') + "')";
   const ctx = await chromium.launchPersistentContext(path.join(SPENV, 'auth', 'pw-profile'), { headless: true, viewport: { width: 1280, height: 1000 } });
   const page = ctx.pages()[0] || await ctx.newPage();
   const errs = [];
@@ -58,7 +60,30 @@ function ymd(days) { const d = new Date(); d.setDate(d.getDate() + days); return
   console.log('DOCTOR:\n' + doctor.map(r => '  ' + r.join(' | ')).join('\n'));
   check('doctor: no Problem rows', doctor.length && !doctor.some(r => r[4] === 'Problem'), doctor.filter(r => r[4] !== 'OK').map(r => r.join('|')).join('; ') || 'all OK');
 
-  const before = await page.evaluate(async (s) => (await (await fetch(s + "/_api/web/lists/getbytitle('Creative Digital Solutions Intake')/items?$select=Id&$orderby=Id desc&$top=1", { headers: { accept: 'application/json;odata=nometadata' } })).json()).value, site);
+  // ---- presentation: layout, link, icons
+  const look = await page.evaluate(() => {
+    const grids = [...document.querySelectorAll('.bspf-fields--2')].map(g => getComputedStyle(g).gridTemplateColumns.split(' ').length);
+    const a = document.querySelector('.bspf__intro a');
+    const uses = [...document.querySelectorAll('.bspf use')].map(u => u.getAttribute('href'));
+    const head = document.querySelector('.bspf__head-icon');
+    const titleField = document.querySelector('[data-bspf-field="title"]');
+    return {
+      grids, link: a && { href: a.getAttribute('href'), target: a.target, text: a.textContent },
+      unresolved: [...new Set(uses.filter(h => !document.getElementById(h.slice(1))))],
+      tiles: document.querySelectorAll('.bspf-section__tile use').length,
+      headIcon: head ? head.naturalWidth : -1,
+      titleFull: titleField ? getComputedStyle(titleField).gridColumn : null
+    };
+  });
+  check('two-column sections render as 2-col grids', look.grids.length === 2 && look.grids.every(n => n === 2), JSON.stringify(look.grids));
+  check('Title spans both columns', /1 \/ -1|span/.test(look.titleFull || ''), look.titleFull);
+  check('intro link → GSI intake, new tab', look.link && look.link.href === '/sites/FCUPortal/Go#gsi-intake' && look.link.target === '_blank', JSON.stringify(look.link));
+  check('3 section icon tiles', look.tiles === 3, look.tiles);
+  check('every sprite <use> resolves', look.unresolved.length === 0, look.unresolved.join(', '));
+  check('brand icon loaded', look.headIcon > 0, look.headIcon);
+  await page.screenshot({ path: path.join(OUT, 'live-look.png'), fullPage: true });
+
+  const before = await page.evaluate(async (s) => (await (await fetch(s + "/items?$select=Id&$orderby=Id desc&$top=1", { headers: { accept: 'application/json;odata=nometadata' } })).json()).value, listApi);
   const lastId = before.length ? before[0].Id : 0;
 
   // ---- submission 1: Support High + date + attachment, explicit title
@@ -126,10 +151,10 @@ function ymd(days) { const d = new Date(); d.setDate(d.getDate() + days); return
 
   // ---- read back
   const items = await page.evaluate(async ({ s, id }) => {
-    const u = s + "/_api/web/lists/getbytitle('Creative Digital Solutions Intake')/items?$filter=Id gt " + id +
+    const u = s + "/items?$filter=Id gt " + id +
       '&$select=Id,Title,RequestorId,Requestor/Title,Department,Priority,field_6,RequestType,Pillar_x002f_Partner,field_9,UserBase,Attachments,AttachmentFiles/FileName&$expand=Requestor,AttachmentFiles&$orderby=Id';
     return (await (await fetch(u, { headers: { accept: 'application/json;odata=nometadata' } })).json()).value;
-  }, { s: site, id: lastId });
+  }, { s: listApi, id: lastId });
   console.log('ITEMS:', JSON.stringify(items, null, 1));
   const [a, b] = items;
   check('two items created', items.length === 2, items.length);
