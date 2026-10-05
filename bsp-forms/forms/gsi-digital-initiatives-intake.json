@@ -170,7 +170,8 @@
               "hint": "For new features and builds, please include requested timing.",
               "required": true,
               "rows": 6,
-              "column": "field_9"
+              "column": "field_9",
+              "richText": true
             },
             {
               "id": "userBase",

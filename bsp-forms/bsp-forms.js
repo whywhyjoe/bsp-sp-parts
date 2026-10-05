@@ -32,7 +32,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '0.1.2';
+  var VERSION = '0.1.3';
   var NS = window.BSPForms = window.BSPForms || {};
   if (NS.__engineLoaded) { if (NS.scan) NS.scan(); return; }
   NS.__engineLoaded = true;
@@ -70,6 +70,11 @@
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+  // textarea -> rich-text Note column: escape, keep line breaks as <br>
+  // (a rich-text column renders HTML, so raw newlines would collapse)
+  function toRichText(s) {
+    return '<div>' + esc(s).replace(/\r\n|\r|\n/g, '<br>') + '</div>';
   }
   function jstr(v) { return JSON.stringify(v); }
   function fmtStr(tpl, map) {
@@ -432,7 +437,7 @@
       getListFields: function () {
         return whenCtx().then(function () {
           return list().fields
-            .select('InternalName', 'Title', 'TypeAsString', 'Required', 'ReadOnlyField', 'Hidden')
+            .select('InternalName', 'Title', 'TypeAsString', 'Required', 'ReadOnlyField', 'Hidden', 'RichText')
             .filter('Hidden eq false')
             .get();
         });
@@ -1461,8 +1466,10 @@
             var v = self.values[f.k];
             var out;
             switch (f.type) {
-              case 'text': case 'textarea': case 'email': case 'phone': case 'choice':
+              case 'text': case 'email': case 'phone': case 'choice':
                 if (v === '') return; out = v; break;
+              case 'textarea':
+                if (v === '') return; out = f.richText ? toRichText(v) : v; break;
               case 'number': case 'currency':
                 if (v === '' || v == null || (typeof v === 'number' && isNaN(v))) return; out = Number(v); break;
               case 'boolean': out = !!v; break;
@@ -1661,6 +1668,12 @@
           level = c && c.ok.indexOf(actual) > -1 ? 'ok' : (c && c.warn.indexOf(actual) > -1 ? 'warn' : 'error');
         }
         if (fd.ReadOnlyField) level = 'error';
+        // RichText is only returned for Note columns
+        if (f.type === 'textarea' && actual === 'Note' && level === 'ok' && !!fd.RichText !== !!f.richText) {
+          level = 'warn';
+          actual += fd.RichText ? ' (rich text: set "richText": true or line breaks collapse)'
+            : ' (plain text: remove "richText" or the HTML tags show)';
+        }
         rows.push({
           field: f.id,
           column: f.column + (cfg._sharedColumns.indexOf(f.column) > -1 ? ' · shared' : ''),

@@ -157,6 +157,7 @@
               "label": "Business justification",
               "required": true,
               "column": "Justification",
+              "richText": true,
               "rows": 4,
               "validation": { "minLength": 30, "maxLength": 2000 },
               "hint": "A sentence or two on why this is needed."

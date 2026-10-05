@@ -3,7 +3,7 @@
 Last touched: 2026-10-05
 Mode: Joe
 Branch: bsp-forms-gsi-intake, pushed
-State: config + engine 0.1.2 on the branch; dev-deployed and verified live (28/28); prod untouched
+State: config + engine 0.1.3 on the branch; dev-deployed and verified live (28/28); prod untouched
 
 ## What this is
 
@@ -23,8 +23,12 @@ is one of the three "Support…" choices or "Hard launch…".
   value in the config was checked against that JSON.
 - Engine 0.1.2 has two fixes found on the first live run: the AMD-hidden pnp
   load, and page-web resolution over REST when `_spPageContextInfo` is missing
-  (see CLAUDE.md, Paid-for gotchas). The regression suite `dev/smoke.spec.js`
-  passes.
+  (see CLAUDE.md, Paid-for gotchas).
+- Engine 0.1.3 adds `richText: true` for textarea fields (escape the text,
+  newlines become `<br>`; see docs/CONFIG-REFERENCE.md). The doctor warns when
+  the setting doesn't match the column. Description (`field_9`) uses it, and
+  on dev the line breaks show in SharePoint's own item view. The regression
+  suite `dev/smoke.spec.js` passes (27 checks, including both doctor cases).
 - Dev: the test list `Creative Digital Solutions Intake` (form columns only),
   the engine and config at `<code root>/bsp-forms/`, and the page
   `SitePages/bsp-forms-gsi-intake-test.aspx` (built with `data-validate`).
@@ -43,7 +47,7 @@ is one of the three "Support…" choices or "Hard launch…".
 - [ ] Prod deploy, run by a human on the prod machine: upload `bsp-forms.js`,
       `bsp-forms.css` and the config to `Code/bsp-forms/` (`forms/` subfolder
       for the JSON). Make a page from `webpart/bsp-forms.webpart.html` with
-      `data-config` pointed at the config, `?v=` bumped, and `data-validate` on
+      `data-config` pointed at the config, `?v=` bumped (engine is 0.1.3), and `data-validate` on
       for the first load. Read the doctor, then remove `data-validate`.
 - [ ] After prod is live, delete `forms/creative-digital-solutions-intake.json`
       (see Companion documents) if the user agrees.
@@ -56,10 +60,6 @@ is one of the three "Support…" choices or "Hard launch…".
 - Is the list on a **different site** from the form page? The built-in form's
   logo URL points at a security-awareness comms site, not FCUPortal. If so, set
   `target.siteUrl` to that site's server-relative URL.
-- `field_9` (Description) is a **rich-text** column. The form writes plain
-  text, so line breaks will collapse when the item is viewed in the list. If
-  that matters, add an engine option that escapes the text and turns newlines
-  into `<br>`. It has not been built.
 - The intro shows the GSI intake address as plain text, because `form.intro`
   is escaped and links are not supported. Should it become a link (an engine
   change)?

@@ -76,6 +76,36 @@ async function testConfigErrors(browser) {
   }
 }
 
+async function testDoctorRichText(browser) {
+  console.log('doctor (richText):');
+  for (const [name, mutate, want] of [
+    ['matching richText → OK', null, 'OK'],
+    ['missing richText on a rich-text column → Check', cfg => {
+      cfg.pages.forEach(p => p.sections.forEach(s => s.fields.forEach(f => {
+        if (f.id === 'priorityJustification') delete f.richText;
+      })));
+    }, 'Check']
+  ]) {
+    const page = await browser.newPage();
+    if (mutate) {
+      await page.route('**/example-it-request.json', async route => {
+        const cfg = await (await route.fetch()).json();
+        mutate(cfg);
+        await route.fulfill({ json: cfg });
+      });
+    }
+    await page.goto(BASE + '?validate');
+    await page.waitForSelector('.bspf-doctor tbody tr', { timeout: 5000 }).catch(() => {});
+    const row = await page.evaluate(() => {
+      const tr = [...document.querySelectorAll('.bspf-doctor tbody tr')]
+        .find(r => r.children[1] && r.children[1].textContent.trim() === 'Justification');
+      return tr ? [...tr.children].map(td => td.textContent.trim()) : null;
+    });
+    check(name, row && row[4] === want && (want === 'OK' || /rich text/.test(row[3])), JSON.stringify(row));
+    await page.close();
+  }
+}
+
 async function testFullFlow(browser) {
   console.log('full submit flow:');
   const page = await browser.newPage({ viewport: { width: 1100, height: 2600 } });
@@ -115,7 +145,7 @@ async function testFullFlow(browser) {
   await page.click('[data-bspf-field="hardwareType"] .bspf-combo__control');
   await page.click('[data-bspf-field="hardwareType"] .bspf-combo__option:has-text("Monitor")');
   await page.fill('[data-bspf-field="priorityJustification"] textarea',
-    'Current laptop is out of warranty and failing; needed for daily development work.');
+    'Current laptop is out of warranty & failing;\nneeded for <daily> development work.');
 
   // date rules: warn (rush) then cross-field block, then fix
   const plus = d => { const t = new Date(); t.setDate(t.getDate() + d); return t.toISOString().slice(0, 10); };
@@ -162,6 +192,9 @@ async function testFullFlow(browser) {
   check('visible variant wrote shared column', p.SubCategory === 'Monitor', JSON.stringify(p.SubCategory));
   check('hidden field excluded from payload', !('AccessSystems' in p));
   check('person resolved to id', p.RequestForId === 1000, JSON.stringify(p.RequestForId));
+  check('richText textarea → escaped HTML with <br>',
+    p.Justification === '<div>Current laptop is out of warranty &amp; failing;<br>needed for &lt;daily&gt; development work.</div>',
+    JSON.stringify(p.Justification));
   check('title template rendered', typeof p.Title === 'string' && p.Title.indexOf('Dev Tester') > -1);
   check('attachment uploaded after retry', writes.some(w => w.op === 'addAttachment' && w.name === 'quote.pdf'));
   check('no page errors', pageErrors.length === 0, pageErrors.join(' | '));
@@ -173,6 +206,7 @@ async function testFullFlow(browser) {
   try {
     await testEditMode(browser);
     await testConfigErrors(browser);
+    await testDoctorRichText(browser);
     await testFullFlow(browser);
   } finally {
     await browser.close();

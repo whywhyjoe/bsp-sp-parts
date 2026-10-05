@@ -141,7 +141,7 @@ function ymd(days) { const d = new Date(); d.setDate(d.getDate() + days); return
     check('1: field_6 set to requested date', a.field_6 && a.field_6.slice(0, 10) >= ymd(9), a.field_6);
     check('1: RequestType', a.RequestType === 'Development/Sharepoint');
     check('1: Pillar multi', JSON.stringify(a.Pillar_x002f_Partner) === JSON.stringify(['RR&C', 'GSI/OCM']), JSON.stringify(a.Pillar_x002f_Partner));
-    check('1: field_9 has text', /Line one/.test(a.field_9 || ''), JSON.stringify(a.field_9));
+    check('1: field_9 keeps the line break as <br>', /Line one of the description\.<br\s*\/?>Line two/i.test(a.field_9 || ''), JSON.stringify(a.field_9));
     check('1: UserBase', a.UserBase === 'FCU employees');
     check('1: attachment uploaded', a.Attachments && a.AttachmentFiles.length === 1, a.AttachmentFiles.map(f => f.FileName).join());
   }

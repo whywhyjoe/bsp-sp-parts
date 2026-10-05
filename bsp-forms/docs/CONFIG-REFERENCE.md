@@ -106,7 +106,7 @@ Common keys:
 | `type` | Renders | Column type | `validation` keys / extras |
 | --- | --- | --- | --- |
 | `text` | single-line input | Single line of text | `minLength`, `maxLength`, `pattern` (+`patternMessage`), `url: true` |
-| `textarea` | multi-line (`rows` opt.) | Multiple lines (plain) | `minLength`, `maxLength` |
+| `textarea` | multi-line (`rows` opt.) | Multiple lines (plain, or rich text with `richText`) | `minLength`, `maxLength`; `richText: true` for a **rich-text** column — the text is HTML-escaped and line breaks become `<br>` (raw newlines collapse in a rich-text column). The doctor flags a mismatch. |
 | `email` | input w/ email validation | Single line of text | — |
 | `phone` | input w/ phone validation | Single line of text | — |
 | `number` | numeric input | Number | `min`, `max`, `integer: true` |
