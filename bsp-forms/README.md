@@ -158,6 +158,7 @@ re-scan, re-attempts it.
 | `bsp-forms.js` | The engine — classic IIFE, idempotent per mount, deploy as-is. |
 | `bsp-forms.css` | Additive BSP layer (`.bspf-*`): pills, combos, people picker, attachments. |
 | `forms/example-it-request.json` | Reference config exercising every feature. |
+| `forms/gsi-digital-initiatives-intake.json` | FCU GSI Digital Initiatives Technology Intake (live form). |
 | `webpart/bsp-forms.webpart.html` | The web part insert snippet. |
 | `docs/CONFIG-REFERENCE.md` | Full JSON reference — every key, type, and rule. |
 | `dev/` | Local harness + mock adapter + vendored Alpine + `smoke.spec.js` regression suite (never deployed). |

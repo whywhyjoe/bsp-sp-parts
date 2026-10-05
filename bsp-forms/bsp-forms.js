@@ -32,7 +32,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '0.1.0';
+  var VERSION = '0.1.2';
   var NS = window.BSPForms = window.BSPForms || {};
   if (NS.__engineLoaded) { if (NS.scan) NS.scan(); return; }
   NS.__engineLoaded = true;
@@ -227,15 +227,25 @@
   }
 
   var scriptPromises = {};
-  function loadScript(url, key) {
+  // hideAmd: modern SharePoint pages run an AMD loader, so a UMD bundle
+  // injected late registers as an anonymous AMD module and never sets its
+  // global (window.pnp stays undefined). Hide define.amd — not define
+  // itself — for the load, and restore it on success AND failure.
+  function loadScript(url, key, hideAmd) {
     if (scriptPromises[key]) return scriptPromises[key];
     scriptPromises[key] = new Promise(function (resolve, reject) {
+      var amd = null;
+      if (hideAmd && typeof window.define === 'function' && window.define.amd) {
+        amd = window.define.amd;
+        try { delete window.define.amd; } catch (e) { window.define.amd = undefined; }
+      }
+      function restore() { if (amd) { window.define.amd = amd; amd = null; } }
       var s = document.createElement('script');
       s.src = url;
       if (hostNonce) s.nonce = hostNonce;
       s.setAttribute('data-bspf-script', key);
-      s.onload = function () { resolve(); };
-      s.onerror = function () { reject(new Error('Failed to load ' + url)); };
+      s.onload = function () { restore(); resolve(); };
+      s.onerror = function () { restore(); delete scriptPromises[key]; reject(new Error('Failed to load ' + url)); };
       document.head.appendChild(s);
     });
     return scriptPromises[key];
@@ -243,7 +253,7 @@
   function whenPnp() {
     if (settings.mockSp) return Promise.resolve();
     if (window.pnp && window.pnp.sp) return Promise.resolve();
-    return loadScript(pnpUrl, 'pnp').then(function () {
+    return loadScript(pnpUrl, 'pnp', true).then(function () {
       if (!(window.pnp && window.pnp.sp)) throw new Error('pnpjs bundle loaded but window.pnp.sp is missing');
     });
   }
@@ -267,9 +277,45 @@
     var ctxs = probeContexts();
     return ctxs.length ? ctxs[0].webAbsoluteUrl : null;
   }
+  // Modern pages don't reliably expose _spPageContextInfo (the custom-script
+  // web part only injects it when its toggle is on). Without it, find the
+  // page's web over REST: try <path>/_api/web from the page's folder upward —
+  // a folder that isn't a web answers 404, so the first hit is the deepest
+  // web holding the page. Resolved once per page and shared by every mount.
+  var restUser = null;
+  var pageWebPromise = null;
+  function resolvePageWeb() {
+    var known = getPageWebUrl();
+    if (known) return Promise.resolve(known);
+    if (pageWebPromise) return pageWebPromise;
+    var parts = location.pathname.split('/').slice(1, -1); // drop the leading '' and the page file
+    var cands = [];
+    for (var n = parts.length; n >= 0; n--) cands.push('/' + parts.slice(0, n).join('/'));
+    var opts = { credentials: 'same-origin', headers: { accept: 'application/json;odata=nometadata' } };
+    function tryAt(i) {
+      if (i >= cands.length) return Promise.resolve(null);
+      var base = location.origin + cands[i].replace(/\/$/, '');
+      return fetch(base + '/_api/web?$select=Url', opts)
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; })
+        .then(function (j) { return j && j.Url ? j.Url : tryAt(i + 1); });
+    }
+    pageWebPromise = tryAt(0).then(function (url) {
+      if (!url) { pageWebPromise = null; return null; } // retryable
+      return fetch(url + '/_api/web/currentuser?$select=Title,Email,LoginName', opts)
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; })
+        .then(function (u) {
+          if (u) restUser = { name: u.Title || '', email: u.Email || '', login: u.LoginName || '' };
+          return url;
+        });
+    });
+    return pageWebPromise;
+  }
   function getUserInfo() {
     if (settings.mockSp && settings.mockSp.userInfo) return settings.mockSp.userInfo();
     var ctxs = probeContexts();
+    if (!ctxs.length && restUser) return restUser;
     var c = ctxs[0] || {};
     return { name: c.userDisplayName || '', email: c.userEmail || '', login: c.userLoginName || '' };
   }
@@ -300,6 +346,17 @@
     function requireCtx() {
       if (!targetWeb) throw new Error('no-context');
     }
+    // pnp loaded + page web known (resolved over REST when the page has no
+    // _spPageContextInfo). Every SharePoint call goes through this.
+    function whenCtx() {
+      return whenPnp().then(resolvePageWeb).then(function (url) {
+        if (url) {
+          pageWeb = pageWeb || url;
+          targetWeb = targetWeb || url;
+        }
+        requireCtx();
+      });
+    }
     function setupFor(url) {
       // pnpjs v2 setup is global; re-assert the base before operations so
       // two forms targeting different webs on one page stay correct.
@@ -323,15 +380,13 @@
       isMock: false,
       webUrl: function () { return targetWeb; },
       ready: function () {
-        return whenPnp().then(function () {
-          requireCtx();
+        return whenCtx().then(function () {
           setupFor(targetWeb);
         });
       },
       userInfo: getUserInfo,
       searchPeople: function (q, max) {
-        return whenPnp().then(function () {
-          requireCtx();
+        return whenCtx().then(function () {
           setupFor(pageWeb || targetWeb);
           return window.pnp.sp.profiles.clientPeoplePickerSearchUser({
             AllowEmailAddresses: false,
@@ -362,12 +417,12 @@
         });
       },
       ensureUser: function (key) {
-        return whenPnp().then(function () {
+        return whenCtx().then(function () {
           return web().ensureUser(key);
         }).then(function (r) { return r.data.Id; });
       },
       addItem: function (payload) {
-        return whenPnp().then(function () {
+        return whenCtx().then(function () {
           return list().items.add(payload);
         }).then(function (r) { return { id: r.data.Id, item: r.item }; });
       },
@@ -375,7 +430,7 @@
         return itemRef.attachmentFiles.add(name, file);
       },
       getListFields: function () {
-        return whenPnp().then(function () {
+        return whenCtx().then(function () {
           return list().fields
             .select('InternalName', 'Title', 'TypeAsString', 'Required', 'ReadOnlyField', 'Hidden')
             .filter('Hidden eq false')
@@ -384,7 +439,7 @@
       },
       getLookupItems: function (lk) {
         var display = lk.displayField || 'Title';
-        return whenPnp().then(function () {
+        return whenCtx().then(function () {
           var w = lk.siteUrl ? web(absUrl(lk.siteUrl)) : web();
           return w.lists.getByTitle(lk.listTitle).items
             .select('Id', display)
@@ -1050,8 +1105,9 @@
 
       init: function () {
         store.state = this;
-        // begin loading pnp in the background so submit/search are warm
-        if (!adapter.isMock) whenPnp().catch(function () { /* surfaced on use */ });
+        // begin loading pnp + resolving the page web in the background so
+        // submit/search are warm
+        if (!adapter.isMock) adapter.ready().catch(function () { /* surfaced on use */ });
       },
 
       /* ---- visibility ---- */

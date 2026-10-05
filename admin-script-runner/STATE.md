@@ -65,9 +65,11 @@ is runtime, no code change needed — then deploy to prod.
   user paused before choosing): the list the old `various/intake-list-to-markdown`
   exporter targeted (Title, Status, TaskType, DueDate, Submitter, Description,
   RefLink, AssignedTo — the sample config uses these), or the
-  `Creative Digital Solutions Intake` list that `bsp-forms`'s intake form writes
-  to (Title, RequestType, Description, Requestor, Department, Partners, Pillar,
-  Priority, LaunchDate — names unconfirmed). Settled by the user.
+  `Creative Digital Solutions Intake` list that `bsp-forms`'s GSI intake form
+  writes to (internal names confirmed 2026-10-05 from the prod field export:
+  Title, Requestor, Department, Priority, RequestType, Pillar_x002f_Partner,
+  field_6 = Requested Launch Date, field_9 = Description, UserBase — see
+  `bsp-forms/forms/gsi-digital-initiatives-intake.json`). Settled by the user.
 
 - Should the first export (file not yet there) also check folder permission, so
   a read-only first visitor is skipped instead of seeing a 403 panel? Settle it
