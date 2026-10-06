@@ -3,7 +3,7 @@
 
   "form": {
     "title": "IT Equipment & Access Request",
-    "intro": "Use this form to request hardware, software, or system access. Requests are reviewed by the DCS team within two business days.",
+    "intro": "Use this form to request hardware, software, or system access. Requests are reviewed by the DCS team within two business days. Not sure what to ask for? See the [service catalogue](/sites/FCUPortal/Go#it).",
     "appearance": {
       "frame": "card",
       "header": "band",
@@ -29,6 +29,7 @@
 
   "attachments": {
     "enabled": true,
+    "section": "confirm",
     "required": false,
     "label": "Supporting documents",
     "hint": "Quotes, approvals, screenshots — up to 5 files, 10 MB each.",
@@ -51,6 +52,9 @@
         {
           "id": "who",
           "title": "Contact details",
+          "description": "Who the request is for and how to reach them.",
+          "icon": "person",
+          "columns": 2,
           "fields": [
             {
               "id": "requestFor",
@@ -157,6 +161,7 @@
               "label": "Business justification",
               "required": true,
               "column": "Justification",
+              "richText": true,
               "rows": 4,
               "validation": { "minLength": 30, "maxLength": 2000 },
               "hint": "A sentence or two on why this is needed."

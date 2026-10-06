@@ -1,0 +1,203 @@
+{
+  "$comment": "FCU GSI Digital Initiatives Technology Intake — replaces the built-in list form on the Creative Digital Solutions intake list. Straight submit, one page. Columns are the list's INTERNAL names (Priority = 'Support type and level', field_6 = 'Requested Launch Date', field_9 = 'Description', Pillar_x002f_Partner = 'Pillar/Partner'). Choice values are copied verbatim from the list; the list's '----' divider choices are left out on purpose. If a Priority choice is renamed on the list, update both its entry here AND the requestedBy visibleWhen list. The list lives on another site and is addressed by its URL (target.listUrl), which survives a rename — its display name is 'Creative Digital Solutions Inake'. Before going live, embed with data-validate and read the doctor report against the real list.",
+
+  "form": {
+    "title": "FCU GSI Digital Initiatives Technology Intake",
+    "intro": "These services are provided by the Digital & Creative Solutions team, a part of FCU Governance, Strategy and Integration. To submit intakes for other GSI services, including FCU Communications and OCM, use the [GSI intake](/sites/FCUPortal/Go#gsi-intake).",
+    "appearance": {
+      "frame": "card",
+      "header": "band",
+      "tint": "sky",
+      "icon": "abacus-icons/technological-innovation-48.svg"
+    }
+  },
+
+  "target": {
+    "siteUrl": "/sites/FCUCommunicationsSecurityAwareness",
+    "listUrl": "Lists/Creative Services Intake",
+    "titleTemplate": "{field:department} request — {date}"
+  },
+
+  "confirmation": {
+    "title": "Request submitted",
+    "message": "Your request has been logged with the Digital & Creative Solutions team. You'll hear from us with any follow-up questions.",
+    "allowAnother": true,
+    "illustration": "spot-illustrations/checkmark-l.svg"
+  },
+
+  "attachments": {
+    "enabled": true,
+    "section": "details",
+    "label": "Attachments",
+    "maxFiles": 10,
+    "maxFileSizeMb": 25
+  },
+
+  "strings": {
+    "submit": "Submit request"
+  },
+
+  "pages": [
+    {
+      "id": "request",
+      "sections": [
+        {
+          "id": "about",
+          "title": "About you",
+          "description": "Who the request is for, so we know who to follow up with.",
+          "icon": "person",
+          "columns": 2,
+          "fields": [
+            {
+              "id": "requestor",
+              "type": "person",
+              "label": "Requestor",
+              "required": true,
+              "column": "Requestor"
+            },
+            {
+              "id": "department",
+              "type": "text",
+              "label": "Your team or department",
+              "required": true,
+              "column": "Department",
+              "validation": { "maxLength": 255 }
+            }
+          ]
+        },
+        {
+          "id": "request",
+          "title": "Your request",
+          "description": "What you need and how urgent it is. Support and hard-launch requests ask for a date.",
+          "icon": "edit",
+          "columns": 2,
+          "fields": [
+            {
+              "id": "title",
+              "type": "text",
+              "label": "Title",
+              "hint": "A short name for your request. Leave it blank and we'll name it from your team and today's date.",
+              "column": "Title",
+              "span": "full",
+              "validation": { "maxLength": 255 }
+            },
+            {
+              "id": "supportType",
+              "type": "choice",
+              "label": "Support type and level",
+              "hint": "Choose support or hard launch to specify a due date. For other requests, please include desired timing in the description.",
+              "required": true,
+              "column": "Priority",
+              "choices": [
+                { "value": "Support Urgent: Item is down/nonfuctional", "color": "red" },
+                { "value": "Support High: Item is degraded", "color": "orange" },
+                { "value": "Support: Correction/minor change requested", "color": "yellow" },
+                { "value": "Feature request: New feature or functionality", "color": "blue" },
+                { "value": "Consultation: Meet to determine needs", "color": "teal" },
+                { "value": "New build: Includes apps, flows, reports and sites", "color": "lavender" },
+                { "value": "Hard launch: New item/feature required by date", "color": "berry" }
+              ]
+            },
+            {
+              "id": "requestedBy",
+              "type": "date",
+              "label": "Requested by",
+              "required": true,
+              "column": "field_6",
+              "visibleWhen": {
+                "field": "supportType",
+                "op": "in",
+                "value": [
+                  "Support Urgent: Item is down/nonfuctional",
+                  "Support High: Item is degraded",
+                  "Support: Correction/minor change requested",
+                  "Hard launch: New item/feature required by date"
+                ]
+              },
+              "rules": [
+                {
+                  "op": "onOrAfter",
+                  "compareTo": "@today",
+                  "mode": "block",
+                  "message": "The requested date can't be in the past."
+                }
+              ]
+            },
+            {
+              "id": "requestType",
+              "type": "choice",
+              "label": "Request type",
+              "column": "RequestType",
+              "choices": [
+                { "value": "Development/App", "color": "blue" },
+                { "value": "Development/Flow", "color": "blue" },
+                { "value": "Development/Sharepoint", "color": "blue" },
+                { "value": "Development/Reporting", "color": "blue" },
+                { "value": "Graphics/Decks", "color": "berry" },
+                { "value": "Graphics/2D", "color": "berry" },
+                { "value": "Graphics/Video", "color": "berry" },
+                { "value": "Newsletter/Social", "color": "orange" },
+                { "value": "Website/New", "color": "teal" },
+                { "value": "Website/Update", "color": "teal" },
+                { "value": "Creative/Consult", "color": "lavender" },
+                { "value": "Development/Consult", "color": "lavender" },
+                { "value": "Website/Consult", "color": "lavender" },
+                { "value": "Other", "color": "gray" }
+              ]
+            },
+            {
+              "id": "pillar",
+              "type": "multichoice",
+              "label": "Pillar/Partner",
+              "required": true,
+              "column": "Pillar_x002f_Partner",
+              "choices": [
+                { "value": "BM I&I", "color": "blue" },
+                { "value": "Cyber Security", "color": "blue" },
+                { "value": "EFM", "color": "blue" },
+                { "value": "Physical Security", "color": "blue" },
+                { "value": "RR&C", "color": "blue" },
+                { "value": "GSI/Initiative Management", "color": "teal" },
+                { "value": "GSI/Comms", "color": "teal" },
+                { "value": "GSI/OCM", "color": "teal" },
+                { "value": "GSI/Strategy", "color": "teal" },
+                { "value": "GSI/Documentation", "color": "teal" },
+                { "value": "T&O", "color": "lavender" },
+                { "value": "BMO.com", "color": "lavender" },
+                { "value": "Branch", "color": "lavender" },
+                { "value": "Enterprise", "color": "lavender" },
+                { "value": "Other", "color": "gray" }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "details",
+          "title": "Details",
+          "description": "The more we know up front, the fewer follow-up questions.",
+          "icon": "document",
+          "fields": [
+            {
+              "id": "description",
+              "type": "textarea",
+              "label": "Description",
+              "hint": "For new features and builds, please include requested timing.",
+              "required": true,
+              "rows": 6,
+              "column": "field_9",
+              "richText": true
+            },
+            {
+              "id": "userBase",
+              "type": "text",
+              "label": "User base",
+              "hint": "Describe the group of users for the feature or affected by the issue (e.g. FCU employees, BMO clients, a department or team).",
+              "column": "UserBase",
+              "validation": { "maxLength": 255 }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

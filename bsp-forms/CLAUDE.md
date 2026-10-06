@@ -38,7 +38,9 @@ contract. Read both before changing behavior.
 | `bsp-forms.css` | The `.bspf-*` layer: pills, combo, people picker, attachments, nav, done screen, edit note, doctor. Also owns the `[x-cloak]` rule (kept out of inline `<style>` for CSP). |
 | `forms/example-it-request.json` | Reference config — exercises every field type and rule. Keep it exercising anything you add. |
 | `webpart/bsp-forms.webpart.html` | The insert snippet users paste/point the web part at. |
+| `forms/gsi-digital-initiatives-intake.json` | Live form: FCU GSI Digital Initiatives Technology Intake → the Creative Digital Solutions intake list (internal column names; see its `$comment`). |
 | `dev/` | Harness (`index.html`), mock adapter (`mock-sp.js`, same method names as the real adapter), vendored Alpine. Never deployed. |
+| `dev/live/` | Dev-tenant live smoke for the GSI intake form: `live-crosssite.js` (the list's twin on the tenant root site), `live-setup.ps1` (upload, with `siteUrl` swapped to the dev root), `live-page.ps1` (test page), `live-submit.js` (end-to-end + layout checks + REST read-back). Needs the sp-env skill; never deployed, never run on prod. |
 
 ## Paid-for gotchas (don't relearn these)
 
@@ -88,6 +90,32 @@ contract. Read both before changing behavior.
   retry uploads only what's still `pending`/`failed`.
 - **`pnp.sp.setup` is global** — the adapter re-asserts `baseUrl` before its
   operations; prefer `pnp.Web(url)` when the bundle exposes it.
+- **The pnp bundle loads with `define.amd` hidden** (`loadScript(…, true)`).
+  Modern pages run an AMD loader; a UMD bundle injected late registers as an
+  anonymous AMD module and `window.pnp` never appears ("pnpjs bundle loaded
+  but window.pnp.sp is missing"). Restore on success *and* failure. Found on
+  the first live run (dev, 0.1.1).
+- **No `_spPageContextInfo` on modern pages** (the Modern Script Editor only
+  injects it when its toggle is on). `resolvePageWeb()` then probes
+  `<path>/_api/web` from the page's folder upward and also fetches the
+  current user for `{user:*}` tokens; every adapter call goes through
+  `whenCtx()`. Without it the doctor, people search and submit all fail with
+  `no-context`. Found on the first live run (dev, 0.1.2).
+- **Layout is keyed to the form's width, not the viewport.** `.bspf` is the
+  `bspf` size container; two columns and the narrow-padding/stacked-header
+  rules are `@container bspf` queries, because a web part can sit in a
+  one-third column on a wide screen. Rules inside those queries can only
+  style `.bspf`'s *descendants* (an element can't query itself). Don't
+  "simplify" them back to `@media`.
+- **Author prose goes through `prose()`, never raw `innerHTML`.** It escapes
+  first, then turns only `[text](url)` with an http(s)/mailto/`/`/`#` target
+  into a link (`target="_blank"` off-page, so a half-filled form survives).
+  Labels and titles stay `esc()` only. The smoke suite pins the
+  `javascript:` case.
+- **Cross-site targets:** `ensureUser` runs on the *target* web (user ids
+  are per site collection) while people search runs on the page web. The
+  dev twin of the intake list lives on the tenant root site precisely to
+  exercise this (`dev/live/live-crosssite.js`).
 - The people API can't reliably filter disabled/room accounts; the adapter
   drops non-`User` principals and entries without an email. Best-effort by
   design — don't promise more in UI copy.

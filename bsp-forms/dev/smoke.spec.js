@@ -60,7 +60,9 @@ async function testConfigErrors(browser) {
     ['invalid validation.pattern → error card', cfg => {
       cfg.pages[0].sections[0].fields.find(f => f.id === 'costCentre').validation.pattern = '(';
     }],
-    ['duplicate section id → error card', cfg => { cfg.pages[1].sections[1].id = cfg.pages[1].sections[0].id; }]
+    ['duplicate section id → error card', cfg => { cfg.pages[1].sections[1].id = cfg.pages[1].sections[0].id; }],
+    ['columns: 3 → error card', cfg => { cfg.pages[0].sections[0].columns = 3; }],
+    ['unknown attachments.section → error card', cfg => { cfg.attachments.section = 'nope'; }]
   ]) {
     const page = await browser.newPage();
     await page.route('**/example-it-request.json', async route => {
@@ -72,6 +74,76 @@ async function testConfigErrors(browser) {
     await page.waitForTimeout(900);
     const state = await page.getAttribute('[data-bsp-form]', 'data-bspf-state');
     check(name, state === 'error' && await page.locator('[data-bspf-fatal]').isVisible(), 'state=' + state);
+    await page.close();
+  }
+}
+
+async function testPresentation(browser) {
+  console.log('presentation:');
+  let page = await browser.newPage({ viewport: { width: 1100, height: 1400 } });
+  await page.goto(BASE);
+  await page.waitForTimeout(1000);
+  const look = await page.evaluate(() => {
+    const a = document.querySelector('.bspf__intro a');
+    const g = document.querySelector('.bspf-fields--2');
+    const att = document.querySelector('[data-bspf-field="_attachments"]');
+    return {
+      link: a && { href: a.getAttribute('href'), target: a.target, rel: a.rel, text: a.textContent },
+      cols: g ? getComputedStyle(g).gridTemplateColumns.split(' ').length : 0,
+      tiles: document.querySelectorAll('.bspf-section__tile use').length,
+      attInConfirm: !!(att && att.closest('section') && att.closest('section').querySelector('[data-bspf-field="managerAware"]'))
+    };
+  });
+  check('intro [text](url) → link in a new tab', look.link && look.link.href === '/sites/FCUPortal/Go#it' &&
+    look.link.target === '_blank' && /noopener/.test(look.link.rel) && look.link.text === 'service catalogue', JSON.stringify(look.link));
+  check('columns: 2 → two-column grid at this width', look.cols === 2, look.cols);
+  check('section icon tile rendered', look.tiles === 1, look.tiles);
+  check('attachments.section → dropzone inside that section', look.attInConfirm);
+  await page.close();
+
+  // unsafe link targets and markup stay literal text
+  page = await browser.newPage();
+  await page.route('**/example-it-request.json', async route => {
+    const cfg = await (await route.fetch()).json();
+    cfg.form.intro = 'A [bad](javascript:alert(1)) link and <b>tags</b>.';
+    await route.fulfill({ json: cfg });
+  });
+  await page.goto(BASE);
+  await page.waitForTimeout(900);
+  const intro = await page.evaluate(() => {
+    const p = document.querySelector('.bspf__intro');
+    return { links: p.querySelectorAll('a').length, bold: p.querySelectorAll('b').length, text: p.textContent };
+  });
+  check('javascript: link and raw tags are not rendered', intro.links === 0 && intro.bold === 0 && /\[bad\]\(javascript:/.test(intro.text), JSON.stringify(intro));
+  await page.close();
+}
+
+async function testDoctorRichText(browser) {
+  console.log('doctor (richText):');
+  for (const [name, mutate, want] of [
+    ['matching richText → OK', null, 'OK'],
+    ['missing richText on a rich-text column → Check', cfg => {
+      cfg.pages.forEach(p => p.sections.forEach(s => s.fields.forEach(f => {
+        if (f.id === 'priorityJustification') delete f.richText;
+      })));
+    }, 'Check']
+  ]) {
+    const page = await browser.newPage();
+    if (mutate) {
+      await page.route('**/example-it-request.json', async route => {
+        const cfg = await (await route.fetch()).json();
+        mutate(cfg);
+        await route.fulfill({ json: cfg });
+      });
+    }
+    await page.goto(BASE + '?validate');
+    await page.waitForSelector('.bspf-doctor tbody tr', { timeout: 5000 }).catch(() => {});
+    const row = await page.evaluate(() => {
+      const tr = [...document.querySelectorAll('.bspf-doctor tbody tr')]
+        .find(r => r.children[1] && r.children[1].textContent.trim() === 'Justification');
+      return tr ? [...tr.children].map(td => td.textContent.trim()) : null;
+    });
+    check(name, row && row[4] === want && (want === 'OK' || /rich text/.test(row[3])), JSON.stringify(row));
     await page.close();
   }
 }
@@ -115,7 +187,7 @@ async function testFullFlow(browser) {
   await page.click('[data-bspf-field="hardwareType"] .bspf-combo__control');
   await page.click('[data-bspf-field="hardwareType"] .bspf-combo__option:has-text("Monitor")');
   await page.fill('[data-bspf-field="priorityJustification"] textarea',
-    'Current laptop is out of warranty and failing; needed for daily development work.');
+    'Current laptop is out of warranty & failing;\nneeded for <daily> development work.');
 
   // date rules: warn (rush) then cross-field block, then fix
   const plus = d => { const t = new Date(); t.setDate(t.getDate() + d); return t.toISOString().slice(0, 10); };
@@ -162,6 +234,9 @@ async function testFullFlow(browser) {
   check('visible variant wrote shared column', p.SubCategory === 'Monitor', JSON.stringify(p.SubCategory));
   check('hidden field excluded from payload', !('AccessSystems' in p));
   check('person resolved to id', p.RequestForId === 1000, JSON.stringify(p.RequestForId));
+  check('richText textarea → escaped HTML with <br>',
+    p.Justification === '<div>Current laptop is out of warranty &amp; failing;<br>needed for &lt;daily&gt; development work.</div>',
+    JSON.stringify(p.Justification));
   check('title template rendered', typeof p.Title === 'string' && p.Title.indexOf('Dev Tester') > -1);
   check('attachment uploaded after retry', writes.some(w => w.op === 'addAttachment' && w.name === 'quote.pdf'));
   check('no page errors', pageErrors.length === 0, pageErrors.join(' | '));
@@ -173,6 +248,8 @@ async function testFullFlow(browser) {
   try {
     await testEditMode(browser);
     await testConfigErrors(browser);
+    await testPresentation(browser);
+    await testDoctorRichText(browser);
     await testFullFlow(browser);
   } finally {
     await browser.close();

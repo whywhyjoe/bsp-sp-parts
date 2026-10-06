@@ -19,7 +19,7 @@ below in use.
 | Key | Default | Notes |
 | --- | --- | --- |
 | `title` | — | Shown as the form heading and available as `{form:title}`. |
-| `intro` | — | Boilerplate paragraph under the title. |
+| `intro` | — | Boilerplate paragraph under the title. Supports links — see *Links in text*. |
 | `showTitle` | `true` | Set `false` to suppress the heading (e.g. the page already has one). |
 | `appearance` | see below | How the form sits on the page. |
 
@@ -37,7 +37,8 @@ below in use.
 | Key | Default | Notes |
 | --- | --- | --- |
 | `listTitle` | — | Display name of the destination list. One of `listTitle`/`listId` is **required**. |
-| `listId` | — | List GUID; wins over `listTitle`. |
+| `listUrl` | — | The list's URL, server-relative (`/sites/x/Lists/My List`) or relative to `siteUrl` (`Lists/My List`). Survives a rename of the list's display name, so prefer it when the title is unstable. Wins over `listTitle`. |
+| `listId` | — | List GUID; wins over `listUrl` and `listTitle`. |
 | `siteUrl` | current site | Absolute or server-relative URL of the target web, e.g. `/sites/FCUPortal`. |
 | `titleTemplate` | — | Fills the list's `Title` column when no field maps to `Title`. Tokens: `{form:title}` `{user:name}` `{user:email}` `{date}` `{time}` `{field:<id>}`. |
 
@@ -64,7 +65,8 @@ a dropzone at the bottom of the last page unless `page` says otherwise.
 | `maxFiles` | `10` | Count ceiling. |
 | `maxFileSizeMb` | `10` | Per-file ceiling (keep well under SharePoint's 50 MB request limit). |
 | `accept` | `null` (any) | Allowed extensions, e.g. `[".pdf", ".docx"]`. |
-| `page` | last page | 0-based page index to render the dropzone on. |
+| `page` | last page | 0-based page index to render the dropzone on (in its own section at the end of the page). |
+| `section` | — | A section `id`: render the dropzone at the end of that section instead (full width in a two-column section). The section must not have `visibleWhen`. Wins over `page`. |
 
 ## `strings`
 
@@ -83,7 +85,9 @@ optional title/description and can carry their own `visibleWhen`.
 | Key (page / section) | Notes |
 | --- | --- |
 | `id` | Optional but recommended; auto-generated if missing. |
-| `title`, `description` | Optional headings. |
+| `title`, `description` | Optional headings. `description` supports links. |
+| `icon` (sections only) | A Fluent sprite name (`person`, `edit`, `document`, `calendar-ltr`, … — the `fluent-basic-icons.svg` set, without the `ic-fluent-`/`-24-regular` wrapper). Shows the section head with an icon tile. A name the sprite doesn't have renders blank. |
+| `columns` (sections only) | `1` (default) or `2`. Two columns once the **form** is at least 600px wide, one below — keyed to the form's own width, so a narrow web-part column stays single. Headings, notes and `span: "full"` fields take the whole row; a hidden field gives its cell to the next one. |
 | `visibleWhen` (sections only) | Rule — a hidden section's fields are neither validated nor submitted. |
 
 ## Fields
@@ -94,7 +98,8 @@ Common keys:
 | --- | --- |
 | `id` | **Required, unique.** Referenced by rules and `{field:…}` tokens. |
 | `type` | One of the table below. |
-| `label`, `hint`, `placeholder` | Display text. |
+| `label`, `hint`, `placeholder` | Display text. `hint` supports links. |
+| `span` | `"full"` makes the field take the whole row in a `columns: 2` section. |
 | `required` | Enforced only while the field is visible. For `boolean`, required means "must be switched on". |
 | `column` | SharePoint **internal** column name. Omit for display-only fields. Several fields may share one column — see *Conditional variants*. |
 | `default` | Initial value (type-appropriate). |
@@ -106,7 +111,7 @@ Common keys:
 | `type` | Renders | Column type | `validation` keys / extras |
 | --- | --- | --- | --- |
 | `text` | single-line input | Single line of text | `minLength`, `maxLength`, `pattern` (+`patternMessage`), `url: true` |
-| `textarea` | multi-line (`rows` opt.) | Multiple lines (plain) | `minLength`, `maxLength` |
+| `textarea` | multi-line (`rows` opt.) | Multiple lines (plain, or rich text with `richText`) | `minLength`, `maxLength`; `richText: true` for a **rich-text** column — the text is HTML-escaped and line breaks become `<br>` (raw newlines collapse in a rich-text column). The doctor flags a mismatch. |
 | `email` | input w/ email validation | Single line of text | — |
 | `phone` | input w/ phone validation | Single line of text | — |
 | `number` | numeric input | Number | `min`, `max`, `integer: true` |
@@ -141,6 +146,20 @@ is also an error (catches typos). The form creator is responsible for showing
 at most one variant at a time; if several are visible, the **field that
 appears later in the JSON wins** at submit time (and the engine logs a
 console warning). The doctor report tags these rows `· shared`.
+
+## Links in text
+
+`form.intro`, page and section `description`, field `hint`, `note` text,
+`heading` description and `confirmation.message` accept Markdown-style links:
+
+```json
+"intro": "For other services, use the [GSI intake](/sites/FCUPortal/Go#gsi-intake)."
+```
+
+Everything else stays plain, escaped text. Only `https://`, `http://`,
+`mailto:`, server-relative (`/…`) and `#anchor` targets become links; anything
+else is left as literal text. Links leave the page in a new tab, so a
+half-filled form isn't lost.
 
 ## Rules (`visibleWhen`)
 

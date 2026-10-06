@@ -32,7 +32,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '0.1.0';
+  var VERSION = '0.2.0';
   var NS = window.BSPForms = window.BSPForms || {};
   if (NS.__engineLoaded) { if (NS.scan) NS.scan(); return; }
   NS.__engineLoaded = true;
@@ -70,6 +70,11 @@
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+  // textarea -> rich-text Note column: escape, keep line breaks as <br>
+  // (a rich-text column renders HTML, so raw newlines would collapse)
+  function toRichText(s) {
+    return '<div>' + esc(s).replace(/\r\n|\r|\n/g, '<br>') + '</div>';
   }
   function jstr(v) { return JSON.stringify(v); }
   function fmtStr(tpl, map) {
@@ -227,15 +232,25 @@
   }
 
   var scriptPromises = {};
-  function loadScript(url, key) {
+  // hideAmd: modern SharePoint pages run an AMD loader, so a UMD bundle
+  // injected late registers as an anonymous AMD module and never sets its
+  // global (window.pnp stays undefined). Hide define.amd — not define
+  // itself — for the load, and restore it on success AND failure.
+  function loadScript(url, key, hideAmd) {
     if (scriptPromises[key]) return scriptPromises[key];
     scriptPromises[key] = new Promise(function (resolve, reject) {
+      var amd = null;
+      if (hideAmd && typeof window.define === 'function' && window.define.amd) {
+        amd = window.define.amd;
+        try { delete window.define.amd; } catch (e) { window.define.amd = undefined; }
+      }
+      function restore() { if (amd) { window.define.amd = amd; amd = null; } }
       var s = document.createElement('script');
       s.src = url;
       if (hostNonce) s.nonce = hostNonce;
       s.setAttribute('data-bspf-script', key);
-      s.onload = function () { resolve(); };
-      s.onerror = function () { reject(new Error('Failed to load ' + url)); };
+      s.onload = function () { restore(); resolve(); };
+      s.onerror = function () { restore(); delete scriptPromises[key]; reject(new Error('Failed to load ' + url)); };
       document.head.appendChild(s);
     });
     return scriptPromises[key];
@@ -243,7 +258,7 @@
   function whenPnp() {
     if (settings.mockSp) return Promise.resolve();
     if (window.pnp && window.pnp.sp) return Promise.resolve();
-    return loadScript(pnpUrl, 'pnp').then(function () {
+    return loadScript(pnpUrl, 'pnp', true).then(function () {
       if (!(window.pnp && window.pnp.sp)) throw new Error('pnpjs bundle loaded but window.pnp.sp is missing');
     });
   }
@@ -267,9 +282,45 @@
     var ctxs = probeContexts();
     return ctxs.length ? ctxs[0].webAbsoluteUrl : null;
   }
+  // Modern pages don't reliably expose _spPageContextInfo (the custom-script
+  // web part only injects it when its toggle is on). Without it, find the
+  // page's web over REST: try <path>/_api/web from the page's folder upward —
+  // a folder that isn't a web answers 404, so the first hit is the deepest
+  // web holding the page. Resolved once per page and shared by every mount.
+  var restUser = null;
+  var pageWebPromise = null;
+  function resolvePageWeb() {
+    var known = getPageWebUrl();
+    if (known) return Promise.resolve(known);
+    if (pageWebPromise) return pageWebPromise;
+    var parts = location.pathname.split('/').slice(1, -1); // drop the leading '' and the page file
+    var cands = [];
+    for (var n = parts.length; n >= 0; n--) cands.push('/' + parts.slice(0, n).join('/'));
+    var opts = { credentials: 'same-origin', headers: { accept: 'application/json;odata=nometadata' } };
+    function tryAt(i) {
+      if (i >= cands.length) return Promise.resolve(null);
+      var base = location.origin + cands[i].replace(/\/$/, '');
+      return fetch(base + '/_api/web?$select=Url', opts)
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; })
+        .then(function (j) { return j && j.Url ? j.Url : tryAt(i + 1); });
+    }
+    pageWebPromise = tryAt(0).then(function (url) {
+      if (!url) { pageWebPromise = null; return null; } // retryable
+      return fetch(url + '/_api/web/currentuser?$select=Title,Email,LoginName', opts)
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; })
+        .then(function (u) {
+          if (u) restUser = { name: u.Title || '', email: u.Email || '', login: u.LoginName || '' };
+          return url;
+        });
+    });
+    return pageWebPromise;
+  }
   function getUserInfo() {
     if (settings.mockSp && settings.mockSp.userInfo) return settings.mockSp.userInfo();
     var ctxs = probeContexts();
+    if (!ctxs.length && restUser) return restUser;
     var c = ctxs[0] || {};
     return { name: c.userDisplayName || '', email: c.userEmail || '', login: c.userLoginName || '' };
   }
@@ -300,6 +351,24 @@
     function requireCtx() {
       if (!targetWeb) throw new Error('no-context');
     }
+    // target.listUrl: server-relative ("/sites/x/Lists/My List") or relative
+    // to the target web ("Lists/My List"). Survives a list being renamed.
+    function listServerRelUrl(u) {
+      if (u.charAt(0) === '/') return u;
+      var base = targetWeb ? new URL(targetWeb, location.origin).pathname.replace(/\/$/, '') : '';
+      return base + '/' + u.replace(/^\.?\//, '');
+    }
+    // pnp loaded + page web known (resolved over REST when the page has no
+    // _spPageContextInfo). Every SharePoint call goes through this.
+    function whenCtx() {
+      return whenPnp().then(resolvePageWeb).then(function (url) {
+        if (url) {
+          pageWeb = pageWeb || url;
+          targetWeb = targetWeb || url;
+        }
+        requireCtx();
+      });
+    }
     function setupFor(url) {
       // pnpjs v2 setup is global; re-assert the base before operations so
       // two forms targeting different webs on one page stay correct.
@@ -314,24 +383,22 @@
     }
     function list() {
       var w = web();
-      return cfg.target.listId
-        ? w.lists.getById(cfg.target.listId)
-        : w.lists.getByTitle(cfg.target.listTitle);
+      if (cfg.target.listId) return w.lists.getById(cfg.target.listId);
+      if (cfg.target.listUrl) return w.getList(listServerRelUrl(cfg.target.listUrl));
+      return w.lists.getByTitle(cfg.target.listTitle);
     }
 
     return {
       isMock: false,
       webUrl: function () { return targetWeb; },
       ready: function () {
-        return whenPnp().then(function () {
-          requireCtx();
+        return whenCtx().then(function () {
           setupFor(targetWeb);
         });
       },
       userInfo: getUserInfo,
       searchPeople: function (q, max) {
-        return whenPnp().then(function () {
-          requireCtx();
+        return whenCtx().then(function () {
           setupFor(pageWeb || targetWeb);
           return window.pnp.sp.profiles.clientPeoplePickerSearchUser({
             AllowEmailAddresses: false,
@@ -362,12 +429,12 @@
         });
       },
       ensureUser: function (key) {
-        return whenPnp().then(function () {
+        return whenCtx().then(function () {
           return web().ensureUser(key);
         }).then(function (r) { return r.data.Id; });
       },
       addItem: function (payload) {
-        return whenPnp().then(function () {
+        return whenCtx().then(function () {
           return list().items.add(payload);
         }).then(function (r) { return { id: r.data.Id, item: r.item }; });
       },
@@ -375,16 +442,16 @@
         return itemRef.attachmentFiles.add(name, file);
       },
       getListFields: function () {
-        return whenPnp().then(function () {
+        return whenCtx().then(function () {
           return list().fields
-            .select('InternalName', 'Title', 'TypeAsString', 'Required', 'ReadOnlyField', 'Hidden')
+            .select('InternalName', 'Title', 'TypeAsString', 'Required', 'ReadOnlyField', 'Hidden', 'RichText')
             .filter('Hidden eq false')
             .get();
         });
       },
       getLookupItems: function (lk) {
         var display = lk.displayField || 'Title';
-        return whenPnp().then(function () {
+        return whenCtx().then(function () {
           var w = lk.siteUrl ? web(absUrl(lk.siteUrl)) : web();
           return w.lists.getByTitle(lk.listTitle).items
             .select('Id', display)
@@ -415,7 +482,9 @@
       cfg.form.appearance || {});
     cfg.strings = Object.assign({}, DEFAULT_STRINGS, cfg.strings || {});
     cfg.target = cfg.target || {};
-    if (!cfg.target.listTitle && !cfg.target.listId) errors.push('target.listTitle or target.listId is required');
+    if (!cfg.target.listTitle && !cfg.target.listId && !cfg.target.listUrl) {
+      errors.push('target.listTitle, target.listUrl or target.listId is required');
+    }
     cfg.confirmation = Object.assign({ title: null, message: null, allowAnother: true }, cfg.confirmation || {});
     cfg.attachments = Object.assign({
       enabled: false, required: false, label: 'Attachments', hint: '',
@@ -435,12 +504,17 @@
       if (!pg.sections.length) errors.push('page "' + pg.id + '" has no sections');
       pg.sections.forEach(function (sec, si) {
         sec.id = sec.id || (pg.id + '_s' + (si + 1));
+        sec._page = pi;
         if (sectionsById[sec.id]) errors.push('duplicate section id "' + sec.id + '"');
         else sectionsById[sec.id] = sec;
         sec.fields = Array.isArray(sec.fields) ? sec.fields : [];
+        if (sec.columns != null && sec.columns !== 1 && sec.columns !== 2) {
+          errors.push('section "' + sec.id + '": columns must be 1 or 2');
+        }
         sec.fields.forEach(function (f, fi) {
           if (!f.id) { errors.push('field #' + (fi + 1) + ' in section "' + sec.id + '" is missing an id'); f.id = sec.id + '_f' + fi; }
           if (TYPES.indexOf(f.type) < 0) errors.push('field "' + f.id + '": unknown type "' + f.type + '"');
+          if (f.span != null && f.span !== 'full') errors.push('field "' + f.id + '": span must be "full" (or omitted)');
           var k = safeKey(f.id);
           if (byKey[k]) errors.push('duplicate field id "' + f.id + '"');
           f.k = k; f.page = pi; f.section = sec.id;
@@ -494,6 +568,13 @@
       pg.sections.forEach(function (sec) { checkRuleRefs(sec.visibleWhen, 'section "' + sec.id + '"'); });
     });
 
+    if (cfg.attachments.enabled && cfg.attachments.section != null) {
+      // render inside a section (its page wins over attachments.page)
+      var asec = sectionsById[cfg.attachments.section];
+      if (!asec) errors.push('attachments.section "' + cfg.attachments.section + '" is not a section id');
+      else if (asec.visibleWhen) errors.push('attachments.section "' + asec.id + '" must not have visibleWhen');
+      else cfg.attachments.page = asec._page;
+    }
     if (cfg.attachments.enabled) {
       var ap = cfg.attachments.page;
       if (ap == null) cfg.attachments.page = cfg.pages.length - 1;
@@ -605,10 +686,21 @@
   function icon(name, size) {
     return '<svg class="icon icon--' + (size || 16) + '" aria-hidden="true"><use href="#' + name + '"/></svg>';
   }
+  // Author prose (intro, descriptions, hints, notes, confirmation): escaped,
+  // then [text](url) becomes a link. Only http(s), mailto, server-relative
+  // and #anchor targets. Off-page links open in a new tab so a half-filled
+  // form isn't lost.
+  var LINK_RE = /\[([^\]\n]+)\]\(((?:https?:\/\/|mailto:|\/|#)[^)\s]*)\)/g;
+  function prose(s) {
+    return esc(s).replace(LINK_RE, function (m, text, href) {
+      var ext = href.charAt(0) !== '#';
+      return '<a href="' + href + '"' + (ext ? ' target="_blank" rel="noopener noreferrer"' : '') + '>' + text + '</a>';
+    });
+  }
 
   function fieldShell(f, inner, S) {
     var noLabel = f.type === 'heading' || f.type === 'note' || f.type === 'boolean';
-    var h = '<div class="field" data-bspf-field="' + esc(f.k) + '"';
+    var h = '<div class="field' + (f.span === 'full' ? ' bspf-field--full' : '') + '" data-bspf-field="' + esc(f.k) + '"';
     if (f.visibleWhen) h += ' x-show="vis(' + esc(jstr(f.k)) + ')" x-cloak';
     h += '>';
     if (!noLabel) {
@@ -617,7 +709,7 @@
       h += '</label>';
     }
     h += inner;
-    if (f.hint) h += '<p class="field__hint">' + esc(f.hint) + '</p>';
+    if (f.hint) h += '<p class="field__hint">' + prose(f.hint) + '</p>';
     if (f.type !== 'heading' && f.type !== 'note') {
       h += '<p class="field__error" role="alert" x-show="errors.' + f.k + '" x-text="errors.' + f.k + '" x-cloak></p>';
       h += '<p class="bspf-field__warning" x-show="warnings.' + f.k + '" x-text="warnings.' + f.k + '" x-cloak></p>';
@@ -827,18 +919,18 @@
     if (f.visibleWhen) h += ' x-show="vis(' + esc(jstr(f.k)) + ')" x-cloak';
     h += '>';
     h += '<div class="bspf-section__title" role="heading" aria-level="4">' + esc(f.text || f.label || '') + '</div>';
-    if (f.description) h += '<p class="bspf-section__desc">' + esc(f.description) + '</p>';
+    if (f.description) h += '<p class="bspf-section__desc">' + prose(f.description) + '</p>';
     return h + '</div>';
   }
   function renderNote(f) {
     var style = f.style || 'info';
     var vis = f.visibleWhen ? ' x-show="vis(' + esc(jstr(f.k)) + ')" x-cloak' : '';
     if (style === 'plain') {
-      return '<p class="field__hint"' + vis + '>' + esc(f.text || '') + '</p>';
+      return '<p class="field__hint"' + vis + '>' + prose(f.text || '') + '</p>';
     }
     return '<div class="msgbar msgbar--' + esc(style) + '" role="status"' + vis + '>' +
       icon(ICONS[style] || ICONS.info, 20).replace('class="icon', 'class="msgbar__icon icon') +
-      '<div class="msgbar__body">' + esc(f.text || '') + '</div></div>';
+      '<div class="msgbar__body">' + prose(f.text || '') + '</div></div>';
   }
 
   function renderAttachments(cfg, S, uid) {
@@ -847,7 +939,7 @@
     var acceptAttr = a.accept && a.accept.length ? ' accept="' + esc(a.accept.join(',')) + '"' : '';
     var hint = a.hint || fmtStr(S.attachHint, {}) ||
       (a.maxFiles + ' files max · ' + a.maxFileSizeMb + ' MB each' + (a.accept && a.accept.length ? ' · ' + a.accept.join(', ') : ''));
-    var h = '<div class="field bspf-attach" data-bspf-field="_attachments">';
+    var h = '<div class="field bspf-attach bspf-field--full" data-bspf-field="_attachments">';
     h += '<span class="field__label" id="' + esc(labelId) + '">' + esc(a.label) +
       (a.required ? ' <span class="field__req" aria-hidden="true">*</span>' : '') + '</span>';
     h += '<div class="dropzone bspf-attach__drop" tabindex="0" role="button" aria-labelledby="' + esc(labelId) + '"' +
@@ -905,7 +997,7 @@
       h += '<header class="' + headCls + '">';
       h += '<div class="bspf__head-copy">';
       if (cfg.form.title && cfg.form.showTitle !== false) h += '<h2 class="bspf__title">' + esc(cfg.form.title) + '</h2>';
-      if (cfg.form.intro) h += '<p class="bspf__intro">' + esc(cfg.form.intro) + '</p>';
+      if (cfg.form.intro) h += '<p class="bspf__intro">' + prose(cfg.form.intro) + '</p>';
       h += '</div>';
       if (ap.icon) h += '<img class="bspf__head-icon" src="' + esc(resolveAsset(ap.icon)) + '" alt="">';
       h += '</header>';
@@ -933,18 +1025,29 @@
     pages.forEach(function (pg, i) {
       h += '<div class="bspf-page" x-show="page===' + i + '"' + (i > 0 ? ' x-cloak' : '') + '>';
       if (pages.length > 1 && pg.title) h += '<h3 class="bspf-page__title">' + esc(pg.title) + '</h3>';
-      if (pg.description) h += '<p class="bspf-page__desc">' + esc(pg.description) + '</p>';
+      if (pg.description) h += '<p class="bspf-page__desc">' + prose(pg.description) + '</p>';
       pg.sections.forEach(function (sec) {
         h += '<section class="bspf-section"';
         if (sec.visibleWhen) h += ' x-show="secVis(' + esc(jstr(sec.id)) + ')" x-cloak';
         h += '>';
-        if (sec.title) h += '<h4 class="bspf-section__title">' + esc(sec.title) + '</h4>';
-        if (sec.description) h += '<p class="bspf-section__desc">' + esc(sec.description) + '</p>';
-        h += '<div class="bspf-fields">';
+        if (sec.icon && (sec.title || sec.description)) {
+          // section head with a Fluent icon tile (sprite name, e.g. "person")
+          h += '<div class="bspf-section__head">' +
+            '<span class="bspf-section__tile">' + icon('ic-fluent-' + esc(sec.icon) + '-24-regular', 20) + '</span>' +
+            '<div class="bspf-section__copy">';
+          if (sec.title) h += '<h4 class="bspf-section__title">' + esc(sec.title) + '</h4>';
+          if (sec.description) h += '<p class="bspf-section__desc">' + prose(sec.description) + '</p>';
+          h += '</div></div>';
+        } else {
+          if (sec.title) h += '<h4 class="bspf-section__title">' + esc(sec.title) + '</h4>';
+          if (sec.description) h += '<p class="bspf-section__desc">' + prose(sec.description) + '</p>';
+        }
+        h += '<div class="bspf-fields' + (sec.columns === 2 ? ' bspf-fields--2' : '') + '">';
         sec.fields.forEach(function (f) { h += renderField(f, S); });
+        if (cfg.attachments.enabled && cfg.attachments.section === sec.id) h += renderAttachments(cfg, S, uid);
         h += '</div></section>';
       });
-      if (cfg.attachments.enabled && cfg.attachments.page === i) {
+      if (cfg.attachments.enabled && cfg.attachments.section == null && cfg.attachments.page === i) {
         h += '<section class="bspf-section">' + renderAttachments(cfg, S, uid) + '</section>';
       }
       h += '</div>';
@@ -993,7 +1096,7 @@
     }
     h += '<h2 class="bspf-done__title">' + esc(cfg.confirmation.title || S.confirmTitle) + '</h2>';
     var cMsg = cfg.confirmation.message || S.confirmMessage;
-    if (cMsg) h += '<p class="bspf-done__msg">' + esc(cMsg) + '</p>';
+    if (cMsg) h += '<p class="bspf-done__msg">' + prose(cMsg) + '</p>';
     if (cfg.confirmation.allowAnother !== false) {
       h += '<button type="button" class="btn btn--secondary" @click="resetForm()">' + esc(cfg.confirmation.anotherLabel || S.confirmAnother) + '</button>';
     }
@@ -1050,8 +1153,9 @@
 
       init: function () {
         store.state = this;
-        // begin loading pnp in the background so submit/search are warm
-        if (!adapter.isMock) whenPnp().catch(function () { /* surfaced on use */ });
+        // begin loading pnp + resolving the page web in the background so
+        // submit/search are warm
+        if (!adapter.isMock) adapter.ready().catch(function () { /* surfaced on use */ });
       },
 
       /* ---- visibility ---- */
@@ -1405,8 +1509,10 @@
             var v = self.values[f.k];
             var out;
             switch (f.type) {
-              case 'text': case 'textarea': case 'email': case 'phone': case 'choice':
+              case 'text': case 'email': case 'phone': case 'choice':
                 if (v === '') return; out = v; break;
+              case 'textarea':
+                if (v === '') return; out = f.richText ? toRichText(v) : v; break;
               case 'number': case 'currency':
                 if (v === '' || v == null || (typeof v === 'number' && isNaN(v))) return; out = Number(v); break;
               case 'boolean': out = !!v; break;
@@ -1605,6 +1711,12 @@
           level = c && c.ok.indexOf(actual) > -1 ? 'ok' : (c && c.warn.indexOf(actual) > -1 ? 'warn' : 'error');
         }
         if (fd.ReadOnlyField) level = 'error';
+        // RichText is only returned for Note columns
+        if (f.type === 'textarea' && actual === 'Note' && level === 'ok' && !!fd.RichText !== !!f.richText) {
+          level = 'warn';
+          actual += fd.RichText ? ' (rich text: set "richText": true or line breaks collapse)'
+            : ' (plain text: remove "richText" or the HTML tags show)';
+        }
         rows.push({
           field: f.id,
           column: f.column + (cfg._sharedColumns.indexOf(f.column) > -1 ? ' · shared' : ''),
@@ -1633,7 +1745,8 @@
   }
   function renderDoctor(def, rows, err, S) {
     var box = el('div', 'bspf-doctor');
-    box.appendChild(el('h4', 'bspf-section__title', S.doctorTitle + ' — ' + (def.cfg.target.listTitle || def.cfg.target.listId)));
+    var t = def.cfg.target;
+    box.appendChild(el('h4', 'bspf-section__title', S.doctorTitle + ' — ' + (t.listId || t.listUrl || t.listTitle)));
     if (err) {
       var bar = el('div', 'msgbar msgbar--danger');
       bar.appendChild(el('div', 'msgbar__body', 'Doctor failed: ' + trimErr(err.message)));

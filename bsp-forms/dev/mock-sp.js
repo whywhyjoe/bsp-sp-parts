@@ -38,7 +38,7 @@
     { InternalName: 'Category', Title: 'Category', TypeAsString: 'Choice', Required: false, ReadOnlyField: false },
     { InternalName: 'SubCategory', Title: 'Sub-category', TypeAsString: 'Choice', Required: false, ReadOnlyField: false },
     { InternalName: 'AccessSystems', Title: 'Access systems', TypeAsString: 'MultiChoice', Required: false, ReadOnlyField: false },
-    { InternalName: 'Justification', Title: 'Justification', TypeAsString: 'Note', Required: false, ReadOnlyField: false },
+    { InternalName: 'Justification', Title: 'Justification', TypeAsString: 'Note', RichText: true, Required: false, ReadOnlyField: false },
     { InternalName: 'EstimatedCost', Title: 'Estimated cost', TypeAsString: 'Currency', Required: false, ReadOnlyField: false },
     { InternalName: 'VendorLink', Title: 'Vendor link', TypeAsString: 'URL', Required: false, ReadOnlyField: false },
     { InternalName: 'AssetTeam', Title: 'Asset team', TypeAsString: 'Lookup', Required: false, ReadOnlyField: false },
