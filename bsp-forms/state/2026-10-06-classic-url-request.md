@@ -2,8 +2,8 @@
 
 Last touched: 2026-10-06
 Mode: Joe
-Branch: bsp-forms-team-classic, pushed (not merged)
-State: config + engine 0.4.0 on the branch; dev-deployed and verified live (15/15); prod untouched; converter URL still empty
+Branch: merged to main 2026-10-06 and pushed
+State: config + engine 0.4.0 on main; dev-deployed and verified live (15/15); prod untouched; converter URL still empty
 
 ## What this is
 
@@ -68,7 +68,6 @@ name, optional>`.
 - [ ] Defaults the user may want changed: the field label "Source
       description", the result titles "Here's your new link" and "Let's get
       your new link", the 5-second countdown, and the brand icon.
-- [ ] Merge `bsp-forms-team-classic` when the user says so.
 - [ ] Prod: upload the engine and config, and make the page from the web part
       stub with `?v=` bumped and `data-validate` for the first load. The doctor
       checks both lists. Everyone needs **read** access to

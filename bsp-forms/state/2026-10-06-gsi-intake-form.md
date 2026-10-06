@@ -2,7 +2,7 @@
 
 Last touched: 2026-10-06
 Mode: Joe
-Branch: bsp-forms-team-classic, pushed (not merged); earlier work merged to main 2026-10-06 (31eecdc)
+Branch: all work merged to main 2026-10-06 and pushed
 State: two configs, engine 0.4.0; both dev-deployed and verified live cross-site; prod untouched
 
 ## What this is
