@@ -32,7 +32,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '0.4.0';
+  var VERSION = '0.4.1';
   var NS = window.BSPForms = window.BSPForms || {};
   if (NS.__engineLoaded) { if (NS.scan) NS.scan(); return; }
   NS.__engineLoaded = true;
@@ -137,8 +137,14 @@
     // date-only value -> the moment it stands for (bh.dateAt: 'end' | 'start')
     var m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/.exec(v || '');
     if (!m) return null;
-    var min = m[4] != null ? (+m[4]) * 60 + (+m[5]) : (bh.dateAt === 'start' ? bh._start : bh._end);
-    return { day: civilDay(+m[1], +m[2], +m[3]), min: min };
+    if (m[4] != null) {
+      // includeTime: the picker shows the VIEWER's wall clock, so convert to
+      // an instant, then to the business zone's wall clock (a 2pm pick in
+      // Vancouver is 5pm Eastern)
+      var ms = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime();
+      return isNaN(ms) ? null : bizNow(bh, ms);
+    }
+    return { day: civilDay(+m[1], +m[2], +m[3]), min: bh.dateAt === 'start' ? bh._start : bh._end };
   }
   function bizMinutes(bh, a, b) {
     if (b.day < a.day || (b.day === a.day && b.min <= a.min)) return 0;
@@ -700,6 +706,9 @@
     ordered.forEach(function (f) {
       checkRuleRefs(f.visibleWhen, 'field "' + f.id + '"');
       var where = 'field "' + f.id + '"';
+      if (f.control != null && (f.type !== 'boolean' || (f.control !== 'switch' && f.control !== 'checkbox'))) {
+        errors.push(where + ': control is "switch" or "checkbox", on boolean fields only');
+      }
       if (f.values != null) {
         if (f.type !== 'boolean') errors.push(where + ': values is only for boolean fields');
         else if (typeof f.values.on !== 'string' || typeof f.values.off !== 'string') {
@@ -952,6 +961,21 @@
       ' x-model.number="values.' + f.k + '"' + inputCommon(f) + '>', S);
   }
   function renderBoolean(f, S) {
+    if (f.control === 'checkbox') {
+      // design-system .check: the box's own text is toggleText, or the label
+      // when there's no toggleText (then no separate label row)
+      var cb = f.toggleText
+        ? '<span class="field__label" id="' + esc(f.domId) + '_lbl">' + esc(f.label || f.id) +
+          (f.required ? ' <span class="field__req" aria-hidden="true">*</span>' : '') + '</span>'
+        : '';
+      cb += '<label class="check">' +
+        '<input type="checkbox" id="' + esc(f.domId) + '"' + (f.toggleText ? ' aria-describedby="' + esc(f.domId) + '_lbl"' : '') +
+        ' x-model="values.' + f.k + '" @change="check(' + esc(jstr(f.k)) + ')"' +
+        (f.lockWhen ? ' :disabled="locked(' + esc(jstr(f.k)) + ')"' : '') + '>' +
+        ' <span>' + esc(f.toggleText || f.label || f.id) +
+        (!f.toggleText && f.required ? ' <span class="field__req" aria-hidden="true">*</span>' : '') + '</span></label>';
+      return fieldShell(f, cb, S);
+    }
     var inner =
       '<span class="field__label" id="' + esc(f.domId) + '_lbl">' + esc(f.label || f.id) +
       (f.required ? ' <span class="field__req" aria-hidden="true">*</span>' : '') + '</span>' +

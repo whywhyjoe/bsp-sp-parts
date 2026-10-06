@@ -127,7 +127,7 @@ Common keys:
 | `currency` | numeric input (0.01 step) | Currency (or Number) | `min`, `max` |
 | `choice` | **pill dropdown** | Choice | `choices` (see below), `fillIn: true` for an "enter your own" row |
 | `multichoice` | pill multi-select | Choice, multi | `choices`, `fillIn`, `validation.minChoices` / `maxChoices` |
-| `boolean` | toggle switch | Yes/No — or Choice/Text with `values` | `toggleText` — label beside the switch. `values: { "on": "Urgent", "off": "Standard" }` saves those words instead of yes/no, and the switch reads out the current word. SharePoint's REST API accepts a word that isn't one of a Choice column's choices. |
+| `boolean` | toggle switch, or checkbox with `control: "checkbox"` | Yes/No — or Choice/Text with `values` | `toggleText` — label beside the switch (for a checkbox: the box's text; without it the field label becomes the box's text). `values` works with both controls. `values: { "on": "Urgent", "off": "Standard" }` saves those words instead of yes/no, and the switch reads out the current word. SharePoint's REST API accepts a word that isn't one of a Choice column's choices. |
 | `date` | date picker | Date and Time | `includeTime: true` for date+time; `rules` (see *Date rules*); `prompt` (see *Business time*) |
 | `person` | people picker | Person or Group | `multiple: true` → allow multiple (**UserMulti** column); `validation.maxPeople` |
 | `link` | URL input | Hyperlink | `withDescription: true` adds a display-text input |
@@ -231,7 +231,7 @@ For "how much working time is left" rules. Declare the calendar once:
 | `timeZone` | — (required) | IANA zone. All counting happens on **this** zone's wall clock, so the viewer's own zone and daylight-saving changes don't matter. |
 | `days` | `[1,2,3,4,5]` | Business weekdays, 0 = Sunday. **Holidays aren't modeled.** |
 | `start`, `end` | `"09:00"`, `"17:00"` | Business hours. One **business day** = `end − start` working hours (8). |
-| `dateAt` | `"end"` | Which moment a date-only value stands for: `"end"` (close of business that day) or `"start"` (opening). `includeTime` dates use their own time. |
+| `dateAt` | `"end"` | Which moment a date-only value stands for: `"end"` (close of business that day) or `"start"` (opening). `includeTime` dates use their own time, which the picker shows in the **viewer's** zone; it is converted to the business zone before counting (a 2pm pick in Vancouver is 5pm Eastern). |
 
 Working time between now and a target counts only business hours; any moment
 outside them counts as the last close (6pm Tuesday = 5pm Tuesday). The

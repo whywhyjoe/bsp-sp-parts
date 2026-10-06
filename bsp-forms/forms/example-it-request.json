@@ -297,10 +297,10 @@
             {
               "id": "managerAware",
               "type": "boolean",
+              "control": "checkbox",
               "label": "My manager is aware of this request",
               "required": true,
-              "column": "ManagerAware",
-              "toggleText": "Confirmed"
+              "column": "ManagerAware"
             },
             {
               "id": "finalNote",
