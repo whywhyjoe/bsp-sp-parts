@@ -9,6 +9,12 @@
       "header": "band",
       "tint": "sky",
       "icon": "abacus-icons/digital-form-48.svg"
+    },
+    "businessHours": {
+      "timeZone": "America/Toronto",
+      "start": "09:00",
+      "end": "17:00",
+      "dateAt": "end"
     }
   },
 
@@ -216,7 +222,23 @@
                   "mode": "warn",
                   "message": "Less than 2 days' notice — same-week fulfilment isn't guaranteed."
                 }
-              ]
+              ],
+              "prompt": {
+                "withinBusinessDays": 1,
+                "title": "Next business day request",
+                "message": "Requests needed by the next business day are handled as urgent.",
+                "confirm": { "label": "OK", "set": { "urgency": true } },
+                "alternative": { "label": "Change to 2 business days", "moveToBusinessDays": 2 }
+              }
+            },
+            {
+              "id": "urgency",
+              "type": "boolean",
+              "label": "Urgency",
+              "column": "Urgency",
+              "values": { "on": "Urgent", "off": "Standard" },
+              "lockWhen": { "field": "neededBy", "op": "withinBusinessDays", "value": 1 },
+              "lockNote": "Needed within one business day, so this request is urgent."
             },
             {
               "id": "rushNote",

@@ -43,6 +43,7 @@
     { InternalName: 'VendorLink', Title: 'Vendor link', TypeAsString: 'URL', Required: false, ReadOnlyField: false },
     { InternalName: 'AssetTeam', Title: 'Asset team', TypeAsString: 'Lookup', Required: false, ReadOnlyField: false },
     { InternalName: 'NeededBy', Title: 'Needed by', TypeAsString: 'DateTime', Required: false, ReadOnlyField: false },
+    { InternalName: 'Urgency', Title: 'Urgency', TypeAsString: 'Choice', Required: false, ReadOnlyField: false },
     { InternalName: 'IsRecurring', Title: 'Recurring', TypeAsString: 'Boolean', Required: false, ReadOnlyField: false },
     { InternalName: 'RecurrenceEnd', Title: 'Recurring until', TypeAsString: 'DateTime', Required: false, ReadOnlyField: false },
     { InternalName: 'ManagerAware', Title: 'Manager aware', TypeAsString: 'Boolean', Required: false, ReadOnlyField: false }

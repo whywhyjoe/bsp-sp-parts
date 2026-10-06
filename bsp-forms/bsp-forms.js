@@ -32,7 +32,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '0.2.0';
+  var VERSION = '0.3.0';
   var NS = window.BSPForms = window.BSPForms || {};
   if (NS.__engineLoaded) { if (NS.scan) NS.scan(); return; }
   NS.__engineLoaded = true;
@@ -113,6 +113,64 @@
     return new Date(+m[1], +m[2] - 1, +m[3]);
   }
   function today0() { var d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+
+  // test seam: BSPForms.clock = function () { return <ms>; } pins "now"
+  function nowMs() { return typeof NS.clock === 'function' ? NS.clock() : Date.now(); }
+
+  /* Business time (form.businessHours) — counted on the business time
+     zone's WALL CLOCK, so the viewer's own zone and DST never matter.
+     A moment is { day: civil day number, min: minute of day }. Working
+     time is the overlap with [start, end) on business weekdays; anything
+     outside hours counts as the last close (6pm Tue == 5pm Tue). One
+     "business day" = end - start working minutes. Holidays aren't modeled. */
+  function hhmm(s) { var m = /^(\d{1,2}):(\d{2})$/.exec(s || ''); return m ? (+m[1]) * 60 + (+m[2]) : null; }
+  function civilDay(y, mo, d) { return Math.round(Date.UTC(y, mo - 1, d) / 86400000); }
+  function bizNow(bh, nowMs) {
+    var parts = {};
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: bh.timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    }).formatToParts(new Date(nowMs == null ? Date.now() : nowMs)).forEach(function (p) { parts[p.type] = p.value; });
+    return { day: civilDay(+parts.year, +parts.month, +parts.day), min: (+parts.hour % 24) * 60 + (+parts.minute) };
+  }
+  function bizAtDate(bh, v) {
+    // date-only value -> the moment it stands for (bh.dateAt: 'end' | 'start')
+    var m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/.exec(v || '');
+    if (!m) return null;
+    var min = m[4] != null ? (+m[4]) * 60 + (+m[5]) : (bh.dateAt === 'start' ? bh._start : bh._end);
+    return { day: civilDay(+m[1], +m[2], +m[3]), min: min };
+  }
+  function bizMinutes(bh, a, b) {
+    if (b.day < a.day || (b.day === a.day && b.min <= a.min)) return 0;
+    if (b.day - a.day > 366) return Infinity; // far future: never "within"
+    var total = 0;
+    for (var day = a.day; day <= b.day; day++) {
+      if (bh.days.indexOf(new Date(day * 86400000).getUTCDay()) < 0) continue;
+      var lo = Math.max(bh._start, day === a.day ? a.min : 0);
+      var hi = Math.min(bh._end, day === b.day ? b.min : 1440);
+      if (hi > lo) total += hi - lo;
+    }
+    return total;
+  }
+  // inclusive: a target exactly n business days away still counts as within
+  function bizWithin(bh, v, n, nowMs) {
+    var t = bizAtDate(bh, v), now = bizNow(bh, nowMs);
+    // a day already gone is invalid input (blocked elsewhere), not "urgent" —
+    // otherwise a half-typed year (0202-…) would trip locks and prompts
+    if (!t || t.day < now.day) return false;
+    return bizMinutes(bh, now, t) <= n * (bh._end - bh._start);
+  }
+  // earliest date (YYYY-MM-DD) that is at least n business days away
+  function bizDateAfter(bh, n, nowMs) {
+    var now = bizNow(bh, nowMs), need = n * (bh._end - bh._start);
+    for (var day = now.day; day < now.day + 400; day++) {
+      if (bizMinutes(bh, now, { day: day, min: bh.dateAt === 'start' ? bh._start : bh._end }) >= need) {
+        return new Date(day * 86400000).toISOString().slice(0, 10);
+      }
+    }
+    return null;
+  }
+  function bizToday(bh, nowMs) { return new Date(bizNow(bh, nowMs).day * 86400000).toISOString().slice(0, 10); }
   function dayDiff(a, b) { return Math.round((a - b) / 86400000); }
   function fmtDate(d) { return d ? d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : ''; }
 
@@ -171,6 +229,7 @@
     attachRetry: 'Retry failed uploads',
     attachSkip: 'Continue without them',
     confirmTitle: 'Thank you — your response was submitted.',
+    promptTitle: 'Please confirm', promptOk: 'OK',
     confirmMessage: '',
     confirmAnother: 'Submit another response',
     configLoadError: 'This form couldn’t be loaded. If this keeps happening, contact the form owner.',
@@ -481,6 +540,27 @@
       { frame: 'card', header: 'band', tint: 'sky', icon: null },
       cfg.form.appearance || {});
     cfg.strings = Object.assign({}, DEFAULT_STRINGS, cfg.strings || {});
+    // business calendar for withinBusinessDays rules and date prompts
+    var bhRaw = cfg.form.businessHours;
+    cfg._bh = null;
+    if (bhRaw) {
+      var bh = {
+        timeZone: bhRaw.timeZone,
+        days: Array.isArray(bhRaw.days) ? bhRaw.days : [1, 2, 3, 4, 5],
+        dateAt: bhRaw.dateAt || 'end',
+        _start: hhmm(bhRaw.start || '09:00'), _end: hhmm(bhRaw.end || '17:00')
+      };
+      if (!bh.timeZone) errors.push('form.businessHours.timeZone is required (e.g. "America/Toronto")');
+      else {
+        try { new Intl.DateTimeFormat('en-US', { timeZone: bh.timeZone }); }
+        catch (e) { errors.push('form.businessHours.timeZone "' + bh.timeZone + '" is not a valid time zone'); }
+      }
+      if (bh._start == null || bh._end == null || bh._end <= bh._start) {
+        errors.push('form.businessHours start/end must be "HH:MM" with end after start');
+      }
+      if (bh.dateAt !== 'end' && bh.dateAt !== 'start') errors.push('form.businessHours.dateAt must be "end" or "start"');
+      cfg._bh = bh;
+    }
     cfg.target = cfg.target || {};
     if (!cfg.target.listTitle && !cfg.target.listId && !cfg.target.listUrl) {
       errors.push('target.listTitle, target.listUrl or target.listId is required');
@@ -554,12 +634,37 @@
       if (rule.any) return rule.any.forEach(function (r) { checkRuleRefs(r, where); });
       if (rule.not) return checkRuleRefs(rule.not, where);
       if (rule.field && !keyOfId[rule.field]) errors.push(where + ': rule references unknown field "' + rule.field + '"');
+      if (rule.op === 'withinBusinessDays' && !cfg._bh) errors.push(where + ': withinBusinessDays needs form.businessHours');
       if (rule.compareTo && rule.compareTo !== '@today' && !keyOfId[rule.compareTo]) {
         errors.push(where + ': rule compares to unknown field "' + rule.compareTo + '"');
       }
     }
     ordered.forEach(function (f) {
       checkRuleRefs(f.visibleWhen, 'field "' + f.id + '"');
+      var where = 'field "' + f.id + '"';
+      if (f.values != null) {
+        if (f.type !== 'boolean') errors.push(where + ': values is only for boolean fields');
+        else if (typeof f.values.on !== 'string' || typeof f.values.off !== 'string') {
+          errors.push(where + ': values needs string "on" and "off"');
+        }
+      }
+      if (f.lockWhen) {
+        checkRuleRefs(f.lockWhen, where + ' lockWhen');
+        if (f.lockValue === undefined) f.lockValue = true;
+      }
+      if (f.prompt) {
+        var pr = f.prompt;
+        if (f.type !== 'date') errors.push(where + ': prompt is only for date fields');
+        if (!cfg._bh) errors.push(where + ': prompt needs form.businessHours');
+        if (!(+pr.withinBusinessDays > 0)) errors.push(where + ': prompt.withinBusinessDays must be a positive number');
+        if (!pr.message) errors.push(where + ': prompt.message is required');
+        Object.keys((pr.confirm && pr.confirm.set) || {}).forEach(function (id) {
+          if (!keyOfId[id]) errors.push(where + ': prompt.confirm.set references unknown field "' + id + '"');
+        });
+        if (pr.alternative && !(+pr.alternative.moveToBusinessDays > 0)) {
+          errors.push(where + ': prompt.alternative.moveToBusinessDays must be a positive number');
+        }
+      }
       (f.rules || []).forEach(function (r) {
         checkRuleRefs({ field: f.id, compareTo: r.compareTo }, 'field "' + f.id + '"');
       });
@@ -627,11 +732,12 @@
     if (op === 'onOrBefore') return d <= 0;
     return null;
   }
-  function evalRule(rule, get) {
+  // bh = the form's normalized businessHours (needed only by withinBusinessDays)
+  function evalRule(rule, get, bh) {
     if (!rule) return true;
-    if (rule.all) return rule.all.every(function (r) { return evalRule(r, get); });
-    if (rule.any) return rule.any.some(function (r) { return evalRule(r, get); });
-    if (rule.not) return !evalRule(rule.not, get);
+    if (rule.all) return rule.all.every(function (r) { return evalRule(r, get, bh); });
+    if (rule.any) return rule.any.some(function (r) { return evalRule(r, get, bh); });
+    if (rule.not) return !evalRule(rule.not, get, bh);
     var v = get(rule.field);
     var op = rule.op || 'equals';
     if (DATE_OPS[op]) {
@@ -650,6 +756,7 @@
       case 'includesAll': return Array.isArray(v) && Array.isArray(rule.value) && rule.value.every(function (x) { return v.indexOf(x) > -1; });
       case 'isEmpty': return isEmptyVal(v);
       case 'notEmpty': return !isEmptyVal(v);
+      case 'withinBusinessDays': return !!bh && !isEmptyVal(v) && bizWithin(bh, v, +rule.value, nowMs());
       default: return false;
     }
   }
@@ -748,16 +855,23 @@
       (f.required ? ' <span class="field__req" aria-hidden="true">*</span>' : '') + '</span>' +
       '<label class="switch">' +
       '<input type="checkbox" id="' + esc(f.domId) + '" aria-labelledby="' + esc(f.domId) + '_lbl"' +
-      ' x-model="values.' + f.k + '" @change="check(' + esc(jstr(f.k)) + ')">' +
+      ' x-model="values.' + f.k + '" @change="check(' + esc(jstr(f.k)) + ')"' +
+      (f.lockWhen ? ' :disabled="locked(' + esc(jstr(f.k)) + ')"' : '') + '>' +
       '<span class="switch__track"></span>' +
-      (f.toggleText ? ' <span>' + esc(f.toggleText) + '</span>' : '') +
+      (f.toggleText ? ' <span>' + esc(f.toggleText) + '</span>'
+        // values: the switch reads out the word it will save
+        : f.values ? ' <span x-text="values.' + f.k + ' ? ' + esc(jstr(f.values.on)) + ' : ' + esc(jstr(f.values.off)) + '"></span>' : '') +
       '</label>';
+    if (f.lockWhen && f.lockNote) {
+      inner += '<p class="bspf-field__lock" x-show="locked(' + esc(jstr(f.k)) + ')" x-cloak>' +
+        icon('ic-fluent-info-24-regular', 16) + '<span>' + prose(f.lockNote) + '</span></p>';
+    }
     return fieldShell(f, inner, S);
   }
   function renderDate(f, S) {
     return fieldShell(f,
       '<input class="input" type="' + (f.includeTime ? 'datetime-local' : 'date') + '"' +
-      ' x-model="values.' + f.k + '" @change="check(' + esc(jstr(f.k)) + ')"' + inputCommon(f) + '>', S);
+      ' x-model="values.' + f.k + '" @change="dateChanged(' + esc(jstr(f.k)) + ')"' + inputCommon(f) + '>', S);
   }
   function renderLink(f, S) {
     var h = '<input class="input" type="url" x-model.trim="values.' + f.k + '.url"' + inputCommon(f).replace('placeholder="', 'data-x-ph="');
@@ -1087,6 +1201,20 @@
       '<span class="spinner spinner--16 spinner--on-accent" x-show="busy" x-cloak aria-hidden="true"></span> ' + esc(S.attachRetry) + '</button>' +
       '</div></div></div>';
 
+    // Prompt dialog (date-field prompts) — the design system's .scrim + .dialog
+    if (cfg._ordered.some(function (f) { return f.prompt; })) {
+      var dlgId = uid + '-dlg';
+      h += '<div class="scrim bspf-dialog" x-show="dlg.open" x-cloak @keydown="dlgKey($event)">' +
+        '<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="' + esc(dlgId) + '-t"' +
+        ' aria-describedby="' + esc(dlgId) + '-m" @click.stop>' +
+        '<div class="dialog__head"><h2 class="dialog__title" id="' + esc(dlgId) + '-t" x-text="dlg.title"></h2></div>' +
+        '<div class="dialog__body"><p class="bspf-dialog__msg" id="' + esc(dlgId) + '-m" x-html="dlg.html"></p></div>' +
+        '<div class="dialog__foot">' +
+        '<button type="button" class="btn bspf-dialog__alt" x-show="dlg.alt" @click="dlgAlt()" x-text="dlg.alt"></button>' +
+        '<button type="button" class="btn btn--primary bspf-dialog__ok" @click="dlgConfirm()" x-text="dlg.ok"></button>' +
+        '</div></div></div>';
+    }
+
     // Confirmation view
     h += '<div class="bspf-done" x-show="view===\'done\'" x-cloak>';
     if (cfg.confirmation.illustration) {
@@ -1150,6 +1278,9 @@
       photoFail: {},
       filesMeta: [], dragging: false,
       pageError: '',
+      // date prompt dialog; promptAck[k] = the value the user already answered for
+      dlg: { open: false, k: null, title: '', html: '', ok: '', alt: '' },
+      promptAck: {},
 
       init: function () {
         store.state = this;
@@ -1167,18 +1298,121 @@
         var f = cfg._byKey[k];
         if (!f || !f.visibleWhen) return true;
         var self = this;
-        return evalRule(f.visibleWhen, function (id) { return self._get(id); });
+        return evalRule(f.visibleWhen, function (id) { return self._get(id); }, cfg._bh);
       },
       secVis: function (secId) {
         var sec = cfg._sectionsById[secId];
         if (!sec || !sec.visibleWhen) return true;
         var self = this;
-        return evalRule(sec.visibleWhen, function (id) { return self._get(id); });
+        return evalRule(sec.visibleWhen, function (id) { return self._get(id); }, cfg._bh);
       },
       fieldActive: function (f) {
         // a field counts (validation + submit) only when it and its section are visible
         if (!this.vis(f.k)) return false;
         return this.secVis(f.section);
+      },
+
+      /* ---- locks (lockWhen) + date prompts ---- */
+      locked: function (k) {
+        var f = cfg._byKey[k];
+        if (!f || !f.lockWhen) return false;
+        var self = this;
+        return evalRule(f.lockWhen, function (id) { return self._get(id); }, cfg._bh);
+      },
+      applyLocks: function () {
+        var self = this;
+        cfg._ordered.forEach(function (f) {
+          if (f.lockWhen && self.locked(f.k) && self.values[f.k] !== f.lockValue) self.values[f.k] = f.lockValue;
+        });
+      },
+      dateChanged: function (k) {
+        this.touched[k] = true;
+        this.check(k);
+        // an open prompt decides first (OK applies the locks, Change moves
+        // the date out of the window); only otherwise enforce locks now
+        if (!this.maybePrompt(k)) this.applyLocks();
+      },
+      promptDue: function (k) {
+        var f = cfg._byKey[k];
+        if (!f || !f.prompt || !cfg._bh || !this.fieldActive(f)) return false;
+        var v = this.values[k];
+        // only real, not-past dates: typing a year digit by digit passes
+        // through dates like 0202-10-07, which must never open the dialog
+        if (!v || String(v).slice(0, 10) < bizToday(cfg._bh, nowMs())) return false;
+        if (this.promptAck[k] === v) return false;
+        return bizWithin(cfg._bh, v, +f.prompt.withinBusinessDays, nowMs());
+      },
+      maybePrompt: function (k) {
+        if (!this.promptDue(k)) return false;
+        var pr = cfg._byKey[k].prompt;
+        this.dlg.k = k;
+        this.dlg.title = pr.title || S.promptTitle;
+        this.dlg.html = prose(pr.message);
+        this.dlg.ok = (pr.confirm && pr.confirm.label) || S.promptOk;
+        this.dlg.alt = (pr.alternative && pr.alternative.label) || '';
+        this.dlg.open = true;
+        var root = this.$root;
+        // after x-show has revealed the sheet (a hidden button can't take focus)
+        this.$nextTick(function () {
+          requestAnimationFrame(function () {
+            var ok = root.querySelector('.bspf-dialog__ok');
+            if (ok) ok.focus();
+          });
+        });
+        return true;
+      },
+      dlgClose: function () {
+        var k = this.dlg.k;
+        this.dlg.open = false; this.dlg.k = null;
+        var f = cfg._byKey[k];
+        var inp = f && document.getElementById(f.domId);
+        if (inp) this.$nextTick(function () { inp.focus(); });
+      },
+      dlgConfirm: function () {
+        // keep the date; apply confirm.set (e.g. mark the request urgent)
+        var self = this, k = this.dlg.k, pr = cfg._byKey[k].prompt;
+        this.promptAck[k] = this.values[k];
+        var set = (pr.confirm && pr.confirm.set) || {};
+        Object.keys(set).forEach(function (id) {
+          var tk = cfg._keyOfId[id];
+          if (tk) { self.values[tk] = set[id]; self.check(tk); }
+        });
+        this.applyLocks();
+        this.dlgClose();
+      },
+      dlgAlt: function () {
+        // move the date to the first one at least N business days out
+        var k = this.dlg.k, f = cfg._byKey[k];
+        var d = bizDateAfter(cfg._bh, +f.prompt.alternative.moveToBusinessDays, nowMs());
+        if (d) {
+          if (f.includeTime) {
+            var m = cfg._bh.dateAt === 'start' ? cfg._bh._start : cfg._bh._end;
+            d += 'T' + ('0' + Math.floor(m / 60)).slice(-2) + ':' + ('0' + (m % 60)).slice(-2);
+          }
+          this.values[k] = d;
+          this.promptAck[k] = d;
+          this.check(k);
+          this.applyLocks();
+        }
+        this.dlgClose();
+      },
+      dlgKey: function (e) {
+        if (e.key === 'Escape') { e.preventDefault(); this.dlgConfirm(); return; }
+        if (e.key !== 'Tab') return;
+        // keep focus inside the dialog (two buttons)
+        var btns = Array.prototype.filter.call(this.$root.querySelectorAll('.bspf-dialog .btn'),
+          function (b) { return b.offsetParent !== null; });
+        if (!btns.length) return;
+        var i = btns.indexOf(document.activeElement);
+        var n = e.shiftKey ? (i <= 0 ? btns.length - 1 : i - 1) : (i === btns.length - 1 ? 0 : i + 1);
+        e.preventDefault();
+        btns[n].focus();
+      },
+      // a prompt not yet answered on page i (or anywhere when i is null)
+      pendingPrompt: function (i) {
+        var self = this;
+        var f = cfg._ordered.filter(function (x) { return x.prompt && (i == null || x.page === i) && self.promptDue(x.k); })[0];
+        return f ? f.k : null;
       },
 
       /* ---- interaction helpers ---- */
@@ -1450,6 +1684,8 @@
 
       /* ---- navigation ---- */
       next: function () {
+        var pk = this.pendingPrompt(this.page);
+        if (pk) { this.maybePrompt(pk); return; }
         if (!this.validatePage(this.page)) { this.pageError = S.pageError; this.focusFirstError(); return; }
         this.pageError = '';
         this.page++;
@@ -1515,7 +1751,7 @@
                 if (v === '') return; out = f.richText ? toRichText(v) : v; break;
               case 'number': case 'currency':
                 if (v === '' || v == null || (typeof v === 'number' && isNaN(v))) return; out = Number(v); break;
-              case 'boolean': out = !!v; break;
+              case 'boolean': out = f.values ? (v ? f.values.on : f.values.off) : !!v; break;
               case 'multichoice':
                 if (!v.length) return; out = { results: v.slice() }; break;
               case 'date': {
@@ -1586,6 +1822,11 @@
       submitForm: function () {
         var self = this;
         if (this.busy) return;
+        // an unanswered date prompt (e.g. the form sat open overnight) is
+        // asked first; the user then submits again
+        var pk = this.pendingPrompt(null);
+        if (pk) { this.maybePrompt(pk); return; }
+        this.applyLocks();
         if (!this.validateAll()) return;
         this.busy = true; this.pageError = '';
         adapter.ready().then(function () {
@@ -1644,6 +1885,7 @@
         Object.keys(this.touched).forEach(function (k) { self.touched[k] = false; });
         this.filesMeta = [];
         store.files = {}; store.itemId = null; store.itemRef = null;
+        this.promptAck = {}; this.dlg.open = false; this.dlg.k = null;
         this.page = 0; this.pageError = ''; this.view = 'form';
         this.scrollTop();
       }
@@ -1707,7 +1949,7 @@
             ? (actual === 'UserMulti' ? 'ok' : 'error')
             : (actual === 'User' ? 'ok' : (actual === 'UserMulti' ? 'warn' : 'error'));
         } else {
-          var c = TYPE_COMPAT[f.type];
+          var c = TYPE_COMPAT[compatType(f)];
           level = c && c.ok.indexOf(actual) > -1 ? 'ok' : (c && c.warn.indexOf(actual) > -1 ? 'warn' : 'error');
         }
         if (fd.ReadOnlyField) level = 'error';
@@ -1738,9 +1980,11 @@
       renderDoctor(def, [], e, cfg.strings);
     });
   }
+  // a switch with word values writes text, so it maps like a choice
+  function compatType(f) { return f.type === 'boolean' && f.values ? 'choice' : f.type; }
   function expectedLabel(f) {
     if (f.type === 'person') return f.multiple ? 'UserMulti' : 'User';
-    var c = TYPE_COMPAT[f.type];
+    var c = TYPE_COMPAT[compatType(f)];
     return c ? c.ok.join(' / ') : f.type;
   }
   function renderDoctor(def, rows, err, S) {

@@ -22,6 +22,7 @@ below in use.
 | `intro` | — | Boilerplate paragraph under the title. Supports links — see *Links in text*. |
 | `showTitle` | `true` | Set `false` to suppress the heading (e.g. the page already has one). |
 | `appearance` | see below | How the form sits on the page. |
+| `businessHours` | — | The business calendar for `withinBusinessDays` rules and date `prompt`s — see *Business time*. Required if either is used. |
 
 ### `form.appearance`
 
@@ -104,6 +105,9 @@ Common keys:
 | `column` | SharePoint **internal** column name. Omit for display-only fields. Several fields may share one column — see *Conditional variants*. |
 | `default` | Initial value (type-appropriate). |
 | `visibleWhen` | Rule object — see *Rules*. |
+| `lockWhen` | Rule object. While it's true the field is held at `lockValue` (default `true`) and its control is disabled; when it turns false the field unlocks and **keeps** its value. Today only the `boolean` switch renders the disabled state. |
+| `lockValue` | The value a locked field is held at. |
+| `lockNote` | Shown under the field while it's locked (supports links). |
 | `validation` | Type-specific, below. |
 
 ### Field types → SharePoint columns
@@ -118,8 +122,8 @@ Common keys:
 | `currency` | numeric input (0.01 step) | Currency (or Number) | `min`, `max` |
 | `choice` | **pill dropdown** | Choice | `choices` (see below), `fillIn: true` for an "enter your own" row |
 | `multichoice` | pill multi-select | Choice, multi | `choices`, `fillIn`, `validation.minChoices` / `maxChoices` |
-| `boolean` | toggle switch | Yes/No | `toggleText` — label beside the switch |
-| `date` | date picker | Date and Time | `includeTime: true` for date+time; `rules` (see *Date rules*) |
+| `boolean` | toggle switch | Yes/No — or Choice/Text with `values` | `toggleText` — label beside the switch. `values: { "on": "Urgent", "off": "Standard" }` saves those words instead of yes/no, and the switch reads out the current word. SharePoint's REST API accepts a word that isn't one of a Choice column's choices. |
+| `date` | date picker | Date and Time | `includeTime: true` for date+time; `rules` (see *Date rules*); `prompt` (see *Business time*) |
 | `person` | people picker | Person or Group | `multiple: true` → allow multiple (**UserMulti** column); `validation.maxPeople` |
 | `link` | URL input | Hyperlink | `withDescription: true` adds a display-text input |
 | `lookup` | pill dropdown from a list | Lookup (single) | `lookup: { listTitle, displayField: "Title", siteUrl?, top? }`, `color` |
@@ -173,8 +177,9 @@ A rule is a comparison, or a combinator over rules:
 ```
 
 Ops: `equals` · `notEquals` · `in` · `notIn` · `includes` · `includesAny` ·
-`includesAll` (multichoice) · `isEmpty` · `notEmpty` — plus the date ops below,
-usable in `visibleWhen` too (that's how a "rush warning" note keys off a date).
+`includesAll` (multichoice) · `isEmpty` · `notEmpty` · `withinBusinessDays`
+(see *Business time*) — plus the date ops below, usable in `visibleWhen` too
+(that's how a "rush warning" note keys off a date).
 Show/hide is intended to be driven by **yes/no, choice, multichoice, and date**
 fields.
 
@@ -204,6 +209,59 @@ Each rule compares the field's value against another date field or `@today`
 
 Rules are skipped while either date is empty — pair with `required` or a
 `notEmpty` visibility guard as needed.
+
+## Business time
+
+For "how much working time is left" rules. Declare the calendar once:
+
+```json
+"form": { "businessHours": {
+  "timeZone": "America/Toronto", "days": [1, 2, 3, 4, 5],
+  "start": "09:00", "end": "17:00", "dateAt": "end"
+} }
+```
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `timeZone` | — (required) | IANA zone. All counting happens on **this** zone's wall clock, so the viewer's own zone and daylight-saving changes don't matter. |
+| `days` | `[1,2,3,4,5]` | Business weekdays, 0 = Sunday. **Holidays aren't modeled.** |
+| `start`, `end` | `"09:00"`, `"17:00"` | Business hours. One **business day** = `end − start` working hours (8). |
+| `dateAt` | `"end"` | Which moment a date-only value stands for: `"end"` (close of business that day) or `"start"` (opening). `includeTime` dates use their own time. |
+
+Working time between now and a target counts only business hours; any moment
+outside them counts as the last close (6pm Tuesday = 5pm Tuesday). The
+boundary is **inclusive**: a target exactly N business days away is "within N".
+Dates before today are never "within" (they're invalid input, and a
+half-typed year must not trip anything).
+
+**Rule op** — `{ "field": "launchDate", "op": "withinBusinessDays", "value": 1 }`
+is true while the date is at most 1 business day away. Use it in
+`visibleWhen` or `lockWhen`.
+
+**Date `prompt`** — a dialog when the user picks a date inside the window:
+
+```json
+"prompt": {
+  "withinBusinessDays": 1,
+  "title": "Next business day request",
+  "message": "For next business day requests, your intake will be marked urgent…",
+  "confirm":     { "label": "OK", "set": { "priority": true } },
+  "alternative": { "label": "Change to 48 hours", "moveToBusinessDays": 2 }
+}
+```
+
+- **confirm** keeps the date and applies `set` (field `id` → value). **Escape**
+  does the same.
+- **alternative** (optional) moves the date to the earliest one at least
+  `moveToBusinessDays` away.
+- It asks once per chosen value. If the user submits (or presses Next) with
+  an unanswered prompt, for example because the form sat open overnight, the
+  dialog opens instead and they submit again.
+- Pair it with a `lockWhen` on the field that `set` changes, so the user can't
+  undo the answer while the date is still in the window.
+
+Tests can pin "now" with `BSPForms.clock = function () { return <ms>; }`
+(set before the engine loads, or any time after).
 
 ## Hidden-field semantics
 

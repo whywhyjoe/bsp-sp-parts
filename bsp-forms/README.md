@@ -40,6 +40,11 @@ two-line web part insert.
   and confirmation message; everything else stays escaped plain text.
 - **Cross-site lists:** `target.siteUrl` + `target.listUrl` write to a list on
   another site, addressed by URL so a renamed list title doesn't break it.
+- **Business time:** `form.businessHours` (a time zone and working hours)
+  powers a `withinBusinessDays` rule and a date **prompt**: a dialog that
+  either keeps the date and sets other fields (e.g. marks the request urgent)
+  or moves the date N business days out. `lockWhen` holds a field at a value
+  while a rule is true. A switch can save words (`values`) instead of yes/no.
 - **Field types:** text, textarea, email, phone, number, currency, choice
   (SharePoint-style colored **pill dropdown**, optional fill-in), multichoice
   (pill multi-select, optional fill-in), yes/no switch, date / date+time,
@@ -167,6 +172,7 @@ re-scan, re-attempts it.
 | `bsp-forms.css` | Additive BSP layer (`.bspf-*`): pills, combos, people picker, attachments. |
 | `forms/example-it-request.json` | Reference config exercising every feature. |
 | `forms/gsi-digital-initiatives-intake.json` | FCU GSI Digital Initiatives Technology Intake (live form). |
+| `forms/gsi-digital-creative-intake.json` | FCU GSI Digital & Creative Solutions Intake (live form, same list). |
 | `webpart/bsp-forms.webpart.html` | The web part insert snippet. |
 | `docs/CONFIG-REFERENCE.md` | Full JSON reference — every key, type, and rule. |
 | `dev/` | Local harness + mock adapter + vendored Alpine + `smoke.spec.js` regression suite (never deployed). |
