@@ -53,7 +53,7 @@ function ymd(days) { const d = new Date(); d.setDate(d.getDate() + days); return
   const page = ctx.pages()[0] || await ctx.newPage();
   const errs = [];
   page.on('console', m => { if (/BSP Forms/.test(m.text()) || m.type() === 'error') errs.push(m.type() + ': ' + m.text()); });
-  await page.goto(site + '/SitePages/bsp-forms-gsi-intake-test.aspx', { waitUntil: 'domcontentloaded' });
+  await page.goto(site + '/SitePages/bsp-forms-gsi-intake-test.aspx?Team=' + encodeURIComponent('FCU Comms/Sec Awareness'), { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-bsp-form][data-bspf-state="ready"]', { timeout: 60000 });
   await page.waitForFunction(() => { const d = document.querySelector('.bspf-doctor'); return d && (d.querySelector('tbody tr') || d.querySelector('.msgbar--danger')); }, null, { timeout: 30000 });
   const doctor = await page.evaluate(() => Array.from(document.querySelectorAll('.bspf-doctor tbody tr')).map(tr => Array.from(tr.children).map(td => td.innerText.trim())));
@@ -152,7 +152,7 @@ function ymd(days) { const d = new Date(); d.setDate(d.getDate() + days); return
   // ---- read back
   const items = await page.evaluate(async ({ s, id }) => {
     const u = s + "/items?$filter=Id gt " + id +
-      '&$select=Id,Title,RequestorId,Requestor/Title,Department,Priority,field_6,RequestType,Pillar_x002f_Partner,field_9,UserBase,Attachments,AttachmentFiles/FileName&$expand=Requestor,AttachmentFiles&$orderby=Id';
+      '&$select=Id,Title,Team,RequestorId,Requestor/Title,Department,Priority,field_6,RequestType,Pillar_x002f_Partner,field_9,UserBase,Attachments,AttachmentFiles/FileName&$expand=Requestor,AttachmentFiles&$orderby=Id';
     return (await (await fetch(u, { headers: { accept: 'application/json;odata=nometadata' } })).json()).value;
   }, { s: listApi, id: lastId });
   console.log('ITEMS:', JSON.stringify(items, null, 1));
@@ -175,6 +175,7 @@ function ymd(days) { const d = new Date(); d.setDate(d.getDate() + days); return
     check('2: Priority Feature request', b.Priority === 'Feature request: New feature or functionality');
     check('2: hidden field_6 not submitted', b.field_6 === null, b.field_6);
     check('2: no RequestType', b.RequestType === null);
+    check('Team from ?Team=, normalized (both items)', a.Team === 'fcucommssecawareness' && b.Team === 'fcucommssecawareness', a.Team + ' / ' + b.Team);
   }
   console.log('CONSOLE:', JSON.stringify(errs.filter(e => !/registerIcons|contentSourceFilter|Failed to load resource/.test(e))));
   const failed = results.filter(r => !r.ok).length;

@@ -22,6 +22,7 @@ below in use.
 | `intro` | — | Boilerplate paragraph under the title. Supports links — see *Links in text*. |
 | `showTitle` | `true` | Set `false` to suppress the heading (e.g. the page already has one). |
 | `appearance` | see below | How the form sits on the page. |
+| `vars` | — | A bucket of named values for this form — `{ "converterUrl": "https://…", "redirectSeconds": 5 }` — used anywhere tokens work as `{var:name}`. For settings that change rarely; nothing in the page URL can override them. |
 | `businessHours` | — | The business calendar for `withinBusinessDays` rules and date `prompt`s — see *Business time*. Required if either is used. |
 
 ### `form.appearance`
@@ -41,7 +42,7 @@ below in use.
 | `listUrl` | — | The list's URL, server-relative (`/sites/x/Lists/My List`) or relative to `siteUrl` (`Lists/My List`). Survives a rename of the list's display name, so prefer it when the title is unstable. Wins over `listTitle`. |
 | `listId` | — | List GUID; wins over `listUrl` and `listTitle`. |
 | `siteUrl` | current site | Absolute or server-relative URL of the target web, e.g. `/sites/FCUPortal`. |
-| `titleTemplate` | — | Fills the list's `Title` column when no field maps to `Title`. Tokens: `{form:title}` `{user:name}` `{user:email}` `{date}` `{time}` `{field:<id>}`. |
+| `titleTemplate` | — | Fills the list's `Title` column when no field maps to `Title`. Tokens: `{form:title}` `{user:name}` `{user:email}` `{date}` `{time}` `{field:<id>}` `{var:<name>}` (and `{lookup}` on `afterSubmit` screens). |
 
 ## `confirmation`
 
@@ -104,6 +105,9 @@ Common keys:
 | `required` | Enforced only while the field is visible. For `boolean`, required means "must be switched on". |
 | `column` | SharePoint **internal** column name. Omit for display-only fields. Several fields may share one column — see *Conditional variants*. |
 | `default` | Initial value (type-appropriate). |
+| `query` | Fill the field from a page-URL parameter, e.g. `"Team"` for `?Team=…`. The name matches in any case and the value arrives decoded. Works on `text` `textarea` `email` `phone` `hidden` `choice`. It beats `default`, and "Submit another" resets back to it. |
+| `normalize` | Cleans a `query` value: `{ "keep": "alnum", "case": "lower", "maxLength": 40 }`. `keep: "alnum"` drops everything but a–z/0–9 (spaces too); `case` is `lower` or `upper`; `maxLength` cuts it. |
+| `readOnly` | `text` only: shown as plain, non-editable text (the decoded value, never parsed as HTML) and still submitted. The row is hidden while empty. |
 | `visibleWhen` | Rule object — see *Rules*. |
 | `lockWhen` | Rule object. While it's true the field is held at `lockValue` (default `true`) and its control is disabled; when it turns false the field unlocks and **keeps** its value. Today only the `boolean` switch renders the disabled state. |
 | `lockValue` | The value a locked field is held at. |
@@ -114,6 +118,7 @@ Common keys:
 
 | `type` | Renders | Column type | `validation` keys / extras |
 | --- | --- | --- | --- |
+| `hidden` | nothing (not rendered) | Text (or Choice / Note) | A value carried in state and submitted, normally from `query`. Needs `query` or `default`. `required` and `validation` (`url`, `maxLength`, `pattern`) apply; a bad value triggers `queryError`. |
 | `text` | single-line input | Single line of text | `minLength`, `maxLength`, `pattern` (+`patternMessage`), `url: true` |
 | `textarea` | multi-line (`rows` opt.) | Multiple lines (plain, or rich text with `richText`) | `minLength`, `maxLength`; `richText: true` for a **rich-text** column — the text is HTML-escaped and line breaks become `<br>` (raw newlines collapse in a rich-text column). The doctor flags a mismatch. |
 | `email` | input w/ email validation | Single line of text | — |
@@ -269,6 +274,47 @@ A field hidden by `visibleWhen` (or inside a hidden section) is **not
 validated and not submitted**; its value is kept in memory, so re-showing it
 restores what the user had entered.
 
+## After submit (`afterSubmit`)
+
+Replaces the plain confirmation with a result screen, after an optional
+lookup in another list:
+
+```json
+"afterSubmit": {
+  "continueOnSaveError": true,
+  "lookup": { "siteUrl": "/sites/FCUPortal", "listUrl": "Lists/Classic-URL-Redirects",
+              "matchField": "resourceName", "matchColumn": "ResourceName", "returnColumn": "URL" },
+  "found":    { "title": "…", "message": "…", "link": { "text": "{field:resourceName}" } },
+  "notFound": { "title": "…", "message": "…", "copy": "{field:link}",
+                "redirect": { "url": "{var:converterUrl}", "seconds": "{var:redirectSeconds}" } }
+}
+```
+
+| Key | Notes |
+| --- | --- |
+| `continueOnSaveError` | `true`: a failed save is logged to the console and the result screen still shows. Default: the usual error message. |
+| `lookup` | First row in `siteUrl` + `listUrl` (or `listTitle`) where `matchColumn` equals the value of field `matchField`. The comparison is case-insensitive, as SharePoint compares text, and quotes are escaped. `returnColumn` may be a Hyperlink column (its URL is used) or text. Only an `http(s)` or server-relative value counts as a result. An empty match value, no row, or a failed lookup means **not found**. The viewer needs read access to that list. |
+| `found` | Shown when the lookup returns a URL. `link.text` is the link's text, defaulting to the URL; `{lookup}` is the URL as a token. |
+| `notFound` | Shown otherwise, or always when there's no `lookup`. |
+
+A screen (`found`, `notFound`, `queryError`) takes:
+
+- `title` and `message` (both take tokens; `message` supports links).
+- `copy`: text to put on the clipboard. If the browser blocks it, a Copy box
+  appears and the countdown pauses until they copy.
+- `redirect`: `{ url, seconds }`, a countdown and then navigation, with a
+  "Go now" link. Only `http(s)` or server-relative URLs are followed.
+  `seconds` is 0–60, default 5. Keep the URL in `form.vars`, never in the
+  page URL, so the page can't be turned into an open redirect.
+
+## Bad URL values (`queryError`)
+
+If any field with a `query` fails validation when the page loads (e.g. a
+required `hidden` field is missing, isn't a URL, or is too long), the form is
+skipped and this screen shows instead. It's the same shape as the
+`afterSubmit` screens:
+`"queryError": { "title": "…", "message": "…", "redirect": { … } }`.
+
 ## Submit behavior
 
 1. All pages validate; on failure the user is taken to the first page with an
@@ -280,4 +326,4 @@ restores what the user had entered.
    user can retry just the failed files or continue without them — the
    response is never duplicated.
 5. The confirmation screen renders; "Submit another response" resets to a
-   fresh form.
+   fresh form. With `afterSubmit`, its lookup and result screen run instead.

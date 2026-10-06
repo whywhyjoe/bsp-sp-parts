@@ -60,12 +60,12 @@ async function afterSubmit(page) {
   const errs = [];
   // SharePoint's own chrome throws two message-less errors on every load; ignore those
   page.on('pageerror', e => { if (e.message && e.message !== 'undefined') errs.push(e.message); });
-  await page.goto(site + '/SitePages/bsp-forms-gsi-creative-test.aspx', { waitUntil: 'domcontentloaded' });
+  await page.goto(site + '/SitePages/bsp-forms-gsi-creative-test.aspx?team=' + encodeURIComponent('FCU Comms/Sec Awareness'), { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-bsp-form][data-bspf-state="ready"]', { timeout: 60000 });
   await page.waitForFunction(() => { const d = document.querySelector('.bspf-doctor'); return d && (d.querySelector('tbody tr') || d.querySelector('.msgbar--danger')); }, null, { timeout: 30000 });
   const doctor = await page.evaluate(() => Array.from(document.querySelectorAll('.bspf-doctor tbody tr')).map(tr => Array.from(tr.children).map(td => td.innerText.trim())));
   console.log('DOCTOR:\n' + doctor.map(r => '  ' + r.join(' | ')).join('\n'));
-  check('doctor: every row OK', doctor.length === 11 && doctor.every(r => r[4] === 'OK'), doctor.filter(r => r[4] !== 'OK').map(r => r.join('|')).join('; ') || doctor.length + ' rows');
+  check('doctor: every row OK', doctor.length === 12 && doctor.every(r => r[4] === 'OK'), doctor.filter(r => r[4] !== 'OK').map(r => r.join('|')).join('; ') || doctor.length + ' rows');
   const look = await page.evaluate(() => ({
     grids: [...document.querySelectorAll('.bspf-fields--2')].map(g => getComputedStyle(g).gridTemplateColumns.split(' ').length),
     unresolved: [...new Set([...document.querySelectorAll('.bspf use')].map(u => u.getAttribute('href')).filter(h => !document.getElementById(h.slice(1))))],
@@ -133,7 +133,7 @@ async function afterSubmit(page) {
   // ---- read back
   const items = await page.evaluate(async ({ s, id }) => {
     const u = s + '/items?$filter=Id gt ' + id +
-      '&$select=Id,Title,Requestor/Title,PartnersId,Department,Priority,field_6,RequestType,Pillar_x002f_Partner,field_9,field_7,TranslationRequired,Attachments,AttachmentFiles/FileName&$expand=Requestor,AttachmentFiles&$orderby=Id';
+      '&$select=Id,Title,Team,Requestor/Title,PartnersId,Department,Priority,field_6,RequestType,Pillar_x002f_Partner,field_9,field_7,TranslationRequired,Attachments,AttachmentFiles/FileName&$expand=Requestor,AttachmentFiles&$orderby=Id';
     return (await (await fetch(u, { headers: { accept: 'application/json;odata=nometadata' } })).json()).value;
   }, { s: listApi, id: lastId });
   console.log('ITEMS:', JSON.stringify(items, null, 1));
@@ -154,6 +154,7 @@ async function afterSubmit(page) {
     check('2: date moved to Tue 2030-01-15', /^2030-01-15/.test(b.field_6 || ''), b.field_6);
     check('2: Title from template', /^Team Two request — /.test(b.Title || ''), b.Title);
     check('2: Translation left blank', b.TranslationRequired === null, b.TranslationRequired);
+    check('Team from ?team= (any case), normalized', a.Team === 'fcucommssecawareness' && b.Team === 'fcucommssecawareness', a.Team + ' / ' + b.Team);
   }
   check('no page errors', !errs.length, errs.join(' | '));
   const failed = results.filter(r => !r.ok).length;

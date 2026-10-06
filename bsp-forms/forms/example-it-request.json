@@ -63,6 +63,13 @@
           "columns": 2,
           "fields": [
             {
+              "id": "sourceTeam",
+              "type": "hidden",
+              "column": "SourceTeam",
+              "query": "Team",
+              "normalize": { "keep": "alnum", "case": "lower", "maxLength": 40 }
+            },
+            {
               "id": "requestFor",
               "type": "person",
               "label": "Who is this request for?",

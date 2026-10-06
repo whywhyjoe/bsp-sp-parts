@@ -207,6 +207,122 @@ async function testBusinessPrompt(browser) {
   await page.close();
 }
 
+/* Classic-link form: the real forms/classic-url-request.json swapped in for
+   the harness config, with the converter pointed at a stubbed host and a
+   1-second countdown. */
+const CONVERTER = 'https://converter.test/convert';
+async function openClassic(browser, params, opts) {
+  opts = opts || {};
+  const ctx = await browser.newContext({ viewport: { width: 1100, height: 1400 } });
+  if (opts.clipboard) await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(BASE).origin });
+  const page = await ctx.newPage();
+  page.__errors = [];
+  page.on('pageerror', e => page.__errors.push(e.message));
+  await page.route('**/example-it-request.json', async route => {
+    const cfg = await (await route.fetch({ url: new URL('../forms/classic-url-request.json', BASE).href })).json();
+    cfg.form.vars = { converterUrl: CONVERTER, redirectSeconds: 1 };
+    await route.fulfill({ json: cfg });
+  });
+  await page.route('https://converter.test/**', r => r.fulfill({ contentType: 'text/html', body: '<title>converter</title>converter' }));
+  await page.addInitScript(o => {
+    window.BSPF_MOCK_LOOKUP = { 'Policy Library & Forms': { Url: 'https://example.com/policy-new' } };
+    if (o.failSave) window.BSPF_MOCK_FAIL = { addItem: true };
+    if (o.blockCopy) {
+      // the first copy attempt is refused (as when the click's permission has lapsed)
+      let n = 0;
+      const real = navigator.clipboard && navigator.clipboard.writeText.bind(navigator.clipboard);
+      navigator.clipboard.writeText = t => (n++ === 0 ? Promise.reject(new Error('blocked')) : real(t));
+      const exec = document.execCommand.bind(document);
+      document.execCommand = c => (c === 'copy' && n <= 1 ? false : exec(c));
+    }
+  }, opts);
+  const qs = Object.keys(params).map(k => k + '=' + encodeURIComponent(params[k])).join('&');
+  await page.goto(BASE + (qs ? '?' + qs : ''));
+  await page.waitForTimeout(900);
+  return { ctx, page };
+}
+async function classicSubmit(page) {
+  await page.fill('[data-bspf-field="sourceDescription"] textarea', 'It was on the Policy hub page, left nav.');
+  await navClick(page, 'Get new link');
+  await page.waitForSelector('.bspf-result', { state: 'visible', timeout: 5000 });
+  await page.waitForTimeout(300);
+}
+
+async function testClassic(browser) {
+  console.log('classic-link form:');
+  const OLD = 'https://old.example/sites/x/Pages/Policy Library.aspx?a=1&b=2';
+
+  // found: decoded read-only name, save payload, new link
+  let { ctx, page } = await openClassic(browser, { Link: OLD, ResourceName: 'Policy Library & Forms' });
+  check('ResourceName shown decoded, read-only', (await page.locator('.bspf-readonly__value').textContent()) === 'Policy Library & Forms' &&
+    (await page.locator('[data-bspf-field="resourceName"] input').count()) === 0);
+  check('Link not shown', (await page.locator('[data-bspf-field="link"]').count()) === 0);
+  check('submit button says "Get new link"', await page.locator('button[type="submit"]:has-text("Get new link")').isVisible());
+  await classicSubmit(page);
+  let writes = await page.evaluate(() => window.__BSPF_MOCK_WRITES__);
+  const add = writes.find(w => w.op === 'addItem');
+  check('saved Link / ResourceName / SourceDescription', add && add.payload.Link === OLD && add.payload.ResourceName === 'Policy Library & Forms' &&
+    /Policy hub/.test(add.payload.SourceDescription), add && JSON.stringify(add.payload));
+  check('lookup by ResourceName', writes.some(w => w.op === 'lookup' && w.matchColumn === 'ResourceName' && w.value === 'Policy Library & Forms'));
+  const link = page.locator('.bspf-result__link');
+  check('found → resource name linked to the new URL', (await link.getAttribute('href')) === 'https://example.com/policy-new' &&
+    (await link.textContent()).trim() === 'Policy Library & Forms');
+  check('found → message, no countdown', /Access your resource using this new link/.test(await page.locator('.bspf-result').textContent()) &&
+    !(await page.locator('.bspf-result__count').isVisible()));
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+
+  // not found: original link copied, countdown, redirect
+  ({ ctx, page } = await openClassic(browser, { Link: OLD, ResourceName: 'Something Unknown' }, { clipboard: true }));
+  await classicSubmit(page);
+  check('not found → copy + converter message', /copied to your clipboard/.test(await page.locator('.bspf-result').textContent()));
+  check('original link is on the clipboard', (await page.evaluate(() => navigator.clipboard.readText())) === OLD);
+  check('countdown shows', await page.locator('.bspf-result__count').isVisible());
+  await page.waitForURL(CONVERTER, { timeout: 4000 }).catch(() => {});
+  check('redirects to the converter', page.url() === CONVERTER, page.url());
+  await ctx.close();
+
+  // copy blocked: countdown pauses until the user copies by hand
+  ({ ctx, page } = await openClassic(browser, { Link: OLD, ResourceName: 'Something Unknown' }, { clipboard: true, blockCopy: true }));
+  await classicSubmit(page);
+  check('blocked copy → manual copy box, countdown paused', await page.locator('.bspf-result__copy').isVisible() &&
+    /Copy the link first/.test(await page.locator('.bspf-result__count').textContent()));
+  await page.waitForTimeout(1600);
+  check('…and no redirect while paused', page.url() !== CONVERTER);
+  await page.click('.bspf-result__copy button');
+  await page.waitForURL(CONVERTER, { timeout: 4000 }).catch(() => {});
+  check('Copy link → copied, then redirects', page.url() === CONVERTER, page.url());
+  await ctx.close();
+
+  // save fails silently; no ResourceName skips the lookup
+  ({ ctx, page } = await openClassic(browser, { Link: OLD, ResourceName: 'Policy Library & Forms' }, { failSave: true }));
+  await classicSubmit(page);
+  check('failed save → still shows the new link', (await page.locator('.bspf-result__link').getAttribute('href')) === 'https://example.com/policy-new');
+  await ctx.close();
+  ({ ctx, page } = await openClassic(browser, { Link: OLD }));
+  check('no ResourceName → name row hidden', !(await page.locator('[data-bspf-field="resourceName"]').isVisible()));
+  await classicSubmit(page);
+  writes = await page.evaluate(() => window.__BSPF_MOCK_WRITES__);
+  check('no ResourceName → no lookup, converter path', !writes.some(w => w.op === 'lookup') &&
+    /copied to your clipboard/.test(await page.locator('.bspf-result').textContent()));
+  await ctx.close();
+
+  // bad or missing Link → straight to the converter, no form
+  for (const [name, params] of [
+    ['missing Link', { ResourceName: 'Policy Library & Forms' }],
+    ['javascript: Link', { Link: 'javascript:alert(1)' }],
+    ['Link over 255 chars', { Link: 'https://old.example/' + 'x'.repeat(250) }]
+  ]) {
+    ({ ctx, page } = await openClassic(browser, params));
+    const shown = await page.locator('.bspf-result').isVisible() && !(await page.locator('form.bspf__body').isVisible());
+    const text = await page.locator('.bspf-result').textContent();
+    check(name + ' → converter screen, no form, no copy talk', shown && !/clipboard/.test(text) && /paste the original link/.test(text));
+    await page.waitForURL(CONVERTER, { timeout: 4000 }).catch(() => {});
+    check(name + ' → redirects', page.url() === CONVERTER, page.url());
+    await ctx.close();
+  }
+}
+
 async function testFullFlow(browser) {
   console.log('full submit flow:');
   const page = await browser.newPage({ viewport: { width: 1100, height: 2600 } });
@@ -214,7 +330,10 @@ async function testFullFlow(browser) {
   page.on('pageerror', e => pageErrors.push(e.message));
   // Tue 10:00 ET: tomorrow (Wed 5pm) is 15 working hours out — no prompt
   await page.clock.setFixedTime(new Date(TUE_10AM_ET));
-  await page.goto(BASE);
+  // ?Team= is normalized: letters/digits only, lower case, 40 chars max
+  const TEAM_RAW = 'FCU Comms/Sec Awareness #2 — Ops & Risk Management Division, Extra';
+  const TEAM_NORM = TEAM_RAW.replace(/[^A-Za-z0-9]/g, '').toLowerCase().slice(0, 40);
+  await page.goto(BASE + '?team=' + encodeURIComponent(TEAM_RAW)); // name matched case-insensitively
   await page.waitForTimeout(1200);
   check('mount ready', (await page.getAttribute('[data-bsp-form]', 'data-bspf-state')) === 'ready');
 
@@ -299,6 +418,8 @@ async function testFullFlow(browser) {
     p.Justification === '<div>Current laptop is out of warranty &amp; failing;<br>needed for &lt;daily&gt; development work.</div>',
     JSON.stringify(p.Justification));
   check('word switch writes its "off" value', p.Urgency === 'Standard', JSON.stringify(p.Urgency));
+  check('?Team → hidden field, normalized', p.SourceTeam === TEAM_NORM && p.SourceTeam.length === 40, JSON.stringify(p.SourceTeam));
+  check('hidden field not rendered', (await page.locator('[data-bspf-field="sourceTeam"]').count()) === 0);
   check('title template rendered', typeof p.Title === 'string' && p.Title.indexOf('Dev Tester') > -1);
   check('attachment uploaded after retry', writes.some(w => w.op === 'addAttachment' && w.name === 'quote.pdf'));
   check('no page errors', pageErrors.length === 0, pageErrors.join(' | '));
@@ -312,6 +433,7 @@ async function testFullFlow(browser) {
     await testConfigErrors(browser);
     await testPresentation(browser);
     await testBusinessPrompt(browser);
+    await testClassic(browser);
     await testDoctorRichText(browser);
     await testFullFlow(browser);
   } finally {

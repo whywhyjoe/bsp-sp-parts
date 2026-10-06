@@ -2,8 +2,8 @@
 
 Last touched: 2026-10-06
 Mode: Joe
-Branch: merged to main 2026-10-06 (31eecdc) and pushed; branch bsp-forms-gsi-creative still on origin
-State: two configs, engine 0.3.0; both dev-deployed and verified live cross-site; prod untouched
+Branch: bsp-forms-team-classic, pushed (not merged); earlier work merged to main 2026-10-06 (31eecdc)
+State: two configs, engine 0.4.0; both dev-deployed and verified live cross-site; prod untouched
 
 ## What this is
 
@@ -24,6 +24,13 @@ straight submits from a page on another site.
   in the window.
 
 ## Done
+
+- Both forms take `?Team=` (2026-10-06): a hidden `team` field writes the
+  `Team` column. The value is letters and digits only, lower case, at most 40
+  characters (`FCU Comms/Sec Awareness` → `fcucommssecawareness`). The
+  parameter name matches in any case. `Team` is a **Choice** column on prod
+  (the user confirmed this); a free-text value is accepted. Verified live on
+  both forms.
 
 - Both mappings came from the user's fiddles (`Jzapert1/74vj3qrk` v2, with the
   field JSON; `Jzapert1/ztu4x5s9` v0, HTML only, the same list per its logo
@@ -69,7 +76,7 @@ straight submits from a page on another site.
 - [ ] Prod deploy, run by a human on the prod machine: upload `bsp-forms.js`,
       `bsp-forms.css` and both configs to `Code/bsp-forms/` (the configs go in
       `forms/`). Make one page per form from `webpart/bsp-forms.webpart.html`,
-      bumping `?v=` (engine is 0.3.0). Turn on `data-validate` for the first
+      bumping `?v=` (engine is 0.4.0). Turn on `data-validate` for the first
       load: the doctor should show every row OK, then remove the attribute.
       Submit one test item per form and confirm the Requestor and (for the
       creative form) Priority land.

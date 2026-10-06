@@ -32,7 +32,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '0.3.0';
+  var VERSION = '0.4.0';
   var NS = window.BSPForms = window.BSPForms || {};
   if (NS.__engineLoaded) { if (NS.scan) NS.scan(); return; }
   NS.__engineLoaded = true;
@@ -230,6 +230,10 @@
     attachSkip: 'Continue without them',
     confirmTitle: 'Thank you — your response was submitted.',
     promptTitle: 'Please confirm', promptOk: 'OK',
+    redirectCountdown: 'Redirecting in {n} seconds…', redirectPaused: 'Copy the link first, then you’ll be redirected.',
+    redirectNow: 'Go now',
+    copyBlocked: 'Your browser didn’t allow copying automatically. Copy the link below to continue.',
+    copyLabel: 'Original link', copyButton: 'Copy link',
     confirmMessage: '',
     confirmAnother: 'Submit another response',
     configLoadError: 'This form couldn’t be loaded. If this keeps happening, contact the form owner.',
@@ -412,11 +416,21 @@
     }
     // target.listUrl: server-relative ("/sites/x/Lists/My List") or relative
     // to the target web ("Lists/My List"). Survives a list being renamed.
-    function listServerRelUrl(u) {
+    function listServerRelUrl(u, webUrl) {
       if (u.charAt(0) === '/') return u;
-      var base = targetWeb ? new URL(targetWeb, location.origin).pathname.replace(/\/$/, '') : '';
+      var w = webUrl || targetWeb;
+      var base = w ? new URL(w, location.origin).pathname.replace(/\/$/, '') : '';
       return base + '/' + u.replace(/^\.?\//, '');
     }
+    // any list by { siteUrl?, listUrl | listTitle } — same routing as the target list
+    function listOf(spec) {
+      var webUrl = spec.siteUrl ? absUrl(spec.siteUrl) : targetWeb;
+      var w = spec.siteUrl ? web(webUrl) : web();
+      return spec.listUrl ? w.getList(listServerRelUrl(spec.listUrl, webUrl)) : w.lists.getByTitle(spec.listTitle);
+    }
+    // OData string literal: a single quote is doubled (same rule as the
+    // dcspad SPUtils esc helper)
+    function odataStr(v) { return String(v).replace(/'/g, "''"); }
     // pnp loaded + page web known (resolved over REST when the page has no
     // _spPageContextInfo). Every SharePoint call goes through this.
     function whenCtx() {
@@ -500,9 +514,25 @@
       addAttachment: function (itemRef, name, file) {
         return itemRef.attachmentFiles.add(name, file);
       },
-      getListFields: function () {
+      // first row where matchColumn equals value (SharePoint compares text
+      // case-insensitively); returns returnColumn as a string — a Hyperlink
+      // column's { Url } or a plain text value — or null
+      lookupValue: function (lk) {
         return whenCtx().then(function () {
-          return list().fields
+          return listOf(lk).items
+            .select(lk.returnColumn)
+            .filter(lk.matchColumn + " eq '" + odataStr(lk.value) + "'")
+            .top(1)
+            .get();
+        }).then(function (rows) {
+          var v = rows && rows[0] ? rows[0][lk.returnColumn] : null;
+          if (v && typeof v === 'object') v = v.Url;
+          return v ? String(v) : null;
+        });
+      },
+      getListFields: function (spec) {
+        return whenCtx().then(function () {
+          return (spec ? listOf(spec) : list()).fields
             .select('InternalName', 'Title', 'TypeAsString', 'Required', 'ReadOnlyField', 'Hidden', 'RichText')
             .filter('Hidden eq false')
             .get();
@@ -528,7 +558,35 @@
      Config normalization + structural validation
      ------------------------------------------------------------------ */
   var TYPES = ['text', 'textarea', 'email', 'phone', 'number', 'currency', 'choice',
-    'multichoice', 'boolean', 'date', 'person', 'link', 'lookup', 'heading', 'note'];
+    'multichoice', 'boolean', 'date', 'person', 'link', 'lookup', 'heading', 'note', 'hidden'];
+
+  /* Values from the page URL (field.query). Parameter names match
+     case-insensitively; URLSearchParams decodes the value, so an encoded
+     link/name arrives as its plain text. field.normalize then trims it:
+     keep "alnum" (a-z, 0-9 only), case "lower"/"upper", maxLength. */
+  function readQuery(name) {
+    var want = String(name).toLowerCase(), found = null;
+    try {
+      new URLSearchParams(location.search).forEach(function (v, k) {
+        if (found === null && k.toLowerCase() === want) found = v;
+      });
+    } catch (e) { /* no URLSearchParams: treat as absent */ }
+    return found;
+  }
+  function normalizeVal(v, n) {
+    var s = String(v == null ? '' : v).trim();
+    if (!n) return s;
+    if (n.keep === 'alnum') s = s.replace(/[^A-Za-z0-9]/g, '');
+    if (n.case === 'lower') s = s.toLowerCase();
+    else if (n.case === 'upper') s = s.toUpperCase();
+    if (n.maxLength > 0) s = s.slice(0, n.maxLength);
+    return s;
+  }
+  // only http(s) and server-relative targets leave the form as a link/redirect
+  function safeHref(u) {
+    var s = String(u == null ? '' : u).trim();
+    return /^https?:\/\/[^\s]+$/i.test(s) || /^\/(?!\/)[^\s]*$/.test(s) ? s : '';
+  }
   var PILL_CYCLE = ['blue', 'green', 'lavender', 'orange', 'teal', 'berry', 'yellow', 'sky', 'red', 'gray'];
 
   function normalizeConfig(raw) {
@@ -652,6 +710,19 @@
         checkRuleRefs(f.lockWhen, where + ' lockWhen');
         if (f.lockValue === undefined) f.lockValue = true;
       }
+      if (f.query != null) {
+        if (typeof f.query !== 'string' || !f.query) errors.push(where + ': query must be a URL parameter name');
+        if (['text', 'textarea', 'email', 'phone', 'hidden', 'choice'].indexOf(f.type) < 0) {
+          errors.push(where + ': query works on text, textarea, email, phone, hidden and choice fields');
+        }
+      }
+      if (f.normalize != null && (typeof f.normalize !== 'object' ||
+          (f.normalize.keep != null && f.normalize.keep !== 'alnum') ||
+          (f.normalize.case != null && f.normalize.case !== 'lower' && f.normalize.case !== 'upper'))) {
+        errors.push(where + ': normalize takes { keep: "alnum", case: "lower" | "upper", maxLength }');
+      }
+      if (f.type === 'hidden' && !f.query && f.default == null) errors.push(where + ': a hidden field needs query or default');
+      if (f.readOnly && f.type !== 'text') errors.push(where + ': readOnly is only for text fields');
       if (f.prompt) {
         var pr = f.prompt;
         if (f.type !== 'date') errors.push(where + ': prompt is only for date fields');
@@ -672,6 +743,24 @@
     cfg.pages.forEach(function (pg) {
       pg.sections.forEach(function (sec) { checkRuleRefs(sec.visibleWhen, 'section "' + sec.id + '"'); });
     });
+
+    // afterSubmit (post-submit lookup + result screens) and queryError
+    function checkScreen(s, where) {
+      if (!s || typeof s !== 'object') { errors.push(where + ' must be an object'); return; }
+      if (s.redirect && !s.redirect.url) errors.push(where + '.redirect.url is required');
+    }
+    var as = cfg.afterSubmit;
+    if (as) {
+      if (as.lookup) {
+        var lk = as.lookup;
+        if (!lk.listUrl && !lk.listTitle) errors.push('afterSubmit.lookup needs listUrl or listTitle');
+        if (!lk.matchColumn || !lk.returnColumn) errors.push('afterSubmit.lookup needs matchColumn and returnColumn');
+        if (!keyOfId[lk.matchField]) errors.push('afterSubmit.lookup.matchField "' + lk.matchField + '" is not a field id');
+        checkScreen(as.found, 'afterSubmit.found');
+      }
+      checkScreen(as.notFound, 'afterSubmit.notFound');
+    }
+    if (cfg.queryError) checkScreen(cfg.queryError, 'queryError');
 
     if (cfg.attachments.enabled && cfg.attachments.section != null) {
       // render inside a section (its page wins over attachments.page)
@@ -831,7 +920,20 @@
       (f.placeholder ? ' placeholder="' + esc(f.placeholder) + '"' : '');
   }
 
+  function renderReadOnly(f) {
+    // shown, never edited (e.g. a value carried in from the URL); the row
+    // disappears when there's nothing to show. x-text = never parsed as HTML.
+    var vis = f.visibleWhen ? 'values.' + f.k + ' && vis(' + esc(jstr(f.k)) + ')' : 'values.' + f.k;
+    var h = '<div class="field bspf-readonly' + (f.span === 'full' ? ' bspf-field--full' : '') + '" data-bspf-field="' + esc(f.k) + '"' +
+      ' x-show="' + vis + '" x-cloak>';
+    h += '<span class="field__label">' + esc(f.label || f.id) + '</span>';
+    h += '<p class="bspf-readonly__value" id="' + esc(f.domId) + '" x-text="values.' + f.k + '"></p>';
+    if (f.hint) h += '<p class="field__hint">' + prose(f.hint) + '</p>';
+    return h + '</div>';
+  }
+
   function renderText(f, S) {
+    if (f.readOnly) return renderReadOnly(f);
     var type = f.type === 'email' ? 'email' : (f.type === 'phone' ? 'tel' : 'text');
     var maxAttr = f.validation.maxLength ? ' maxlength="' + (+f.validation.maxLength) + '"' : '';
     return fieldShell(f,
@@ -1092,6 +1194,7 @@
       case 'person': return renderPerson(f, S);
       case 'heading': return renderHeading(f);
       case 'note': return renderNote(f);
+      case 'hidden': return ''; // carried in state + submitted, never rendered
       default: return '';
     }
   }
@@ -1215,6 +1318,23 @@
         '</div></div></div>';
     }
 
+    // Result view (afterSubmit found/notFound, queryError). Everything dynamic
+    // is x-text / :href; result.html is prose() output (escaped first).
+    if (cfg.afterSubmit || cfg.queryError) {
+      h += '<div class="bspf-done bspf-result" x-show="view===\'result\'" x-cloak aria-live="polite">';
+      h += '<h2 class="bspf-done__title" x-show="result.title" x-text="result.title"></h2>';
+      h += '<p class="bspf-done__msg" x-show="result.html" x-html="result.html"></p>';
+      h += '<a class="bspf-result__link" x-show="result.href" :href="result.href">' +
+        '<span x-text="result.linkText"></span>' + icon('ic-fluent-arrow-right-24-regular', 20) + '</a>';
+      h += '<div class="bspf-result__copy" x-show="result.copyFailed" x-cloak>' +
+        '<p class="bspf-done__msg">' + esc(S.copyBlocked) + '</p>' +
+        '<div class="bspf-result__copyrow"><input class="input" readonly :value="result.copyText" aria-label="' + esc(S.copyLabel) + '" @focus="$event.target.select()">' +
+        '<button type="button" class="btn btn--primary" @click="copyAgain()">' + esc(S.copyButton) + '</button></div></div>';
+      h += '<p class="bspf-result__count" x-show="redir.url" x-cloak>' +
+        '<span x-text="countdownText()"></span> <a :href="redir.url">' + esc(S.redirectNow) + '</a></p>';
+      h += '</div>';
+    }
+
     // Confirmation view
     h += '<div class="bspf-done" x-show="view===\'done\'" x-cloak>';
     if (cfg.confirmation.illustration) {
@@ -1244,6 +1364,11 @@
     var cfg = def.cfg, S = cfg.strings, adapter = def.adapter, store = def.store;
 
     function defaultValue(f) {
+      if (f.query) {
+        // URL value wins; "Submit another" resets back to it (defaultsSnapshot)
+        var q = readQuery(f.query);
+        if (q !== null) return normalizeVal(q, f.normalize);
+      }
       switch (f.type) {
         case 'multichoice': return Array.isArray(f.default) ? f.default.slice() : [];
         case 'person': return [];
@@ -1281,12 +1406,98 @@
       // date prompt dialog; promptAck[k] = the value the user already answered for
       dlg: { open: false, k: null, title: '', html: '', ok: '', alt: '' },
       promptAck: {},
+      // result screen (afterSubmit / queryError) + its optional countdown redirect
+      result: { title: '', html: '', href: '', linkText: '', lookup: '', copyText: '', copyFailed: false, copied: false },
+      redir: { url: '', left: 0, paused: false },
 
       init: function () {
         store.state = this;
         // begin loading pnp + resolving the page web in the background so
         // submit/search are warm
         if (!adapter.isMock) adapter.ready().catch(function () { /* surfaced on use */ });
+        // a required/invalid URL value (field.query) can't be fixed by the
+        // user: show queryError instead of the form
+        var self = this;
+        if (cfg.queryError && cfg._ordered.some(function (f) { return f.query && !self.check(f.k); })) {
+          this.view = 'result';
+          this.showResult(cfg.queryError);
+        }
+      },
+
+      /* ---- result screens: afterSubmit found/notFound, queryError ---- */
+      showResult: function (spec, href) {
+        var self = this;
+        this.result.title = this.renderTemplate(spec.title || '');
+        this.result.html = prose(this.renderTemplate(spec.message || ''));
+        this.result.href = href || '';
+        this.result.linkText = href ? (this.renderTemplate((spec.link && spec.link.text) || '') || href) : '';
+        this.result.copyText = spec.copy ? this.renderTemplate(spec.copy) : '';
+        this.result.copyFailed = false; this.result.copied = false;
+        var go = spec.redirect ? safeHref(this.renderTemplate(spec.redirect.url)) : '';
+        if (spec.redirect && !go) console.warn('[BSP Forms] redirect skipped: not an http(s) or server-relative URL');
+        var secs = spec.redirect ? Math.max(0, Math.min(60, Math.round(+this.renderTemplate(String(spec.redirect.seconds == null ? 5 : spec.redirect.seconds))) || 0)) : 0;
+        var copied = this.result.copyText ? this.copyText(this.result.copyText) : Promise.resolve(true);
+        return copied.then(function (ok) {
+          self.result.copied = ok && !!self.result.copyText;
+          // a blocked copy pauses the countdown until the user copies by hand
+          self.result.copyFailed = !ok;
+          if (go) self.startRedirect(go, secs, !ok);
+        });
+      },
+      copyText: function (text) {
+        function legacy() {
+          try {
+            var ta = document.createElement('textarea');
+            ta.value = text; ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.select();
+            var ok = document.execCommand('copy');
+            ta.remove();
+            return ok;
+          } catch (e) { return false; }
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return legacy(); });
+        }
+        return Promise.resolve(legacy());
+      },
+      copyAgain: function () {
+        // runs inside a click, so the browser allows it
+        var self = this;
+        this.copyText(this.result.copyText).then(function (ok) {
+          self.result.copied = ok;
+          if (ok) { self.result.copyFailed = false; self.redir.paused = false; }
+        });
+      },
+      startRedirect: function (url, secs, paused) {
+        var self = this;
+        this.redir.url = url; this.redir.left = secs; this.redir.paused = !!paused;
+        if (store.redirTimer) clearInterval(store.redirTimer);
+        store.redirTimer = setInterval(function () {
+          if (self.redir.paused) return;
+          if (self.redir.left > 0) { self.redir.left--; return; }
+          clearInterval(store.redirTimer); store.redirTimer = null;
+          window.location.assign(self.redir.url);
+        }, 1000);
+      },
+      countdownText: function () {
+        return this.redir.paused ? S.redirectPaused : fmtStr(S.redirectCountdown, { n: this.redir.left });
+      },
+      runAfterSubmit: function () {
+        var self = this, as = cfg.afterSubmit, lk = as.lookup;
+        var v = lk ? String(this._get(lk.matchField) == null ? '' : this._get(lk.matchField)).trim() : '';
+        var found = (lk && v)
+          ? adapter.lookupValue({ siteUrl: lk.siteUrl, listUrl: lk.listUrl, listTitle: lk.listTitle,
+            matchColumn: lk.matchColumn, returnColumn: lk.returnColumn, value: v })
+            .catch(function (e) { console.warn('[BSP Forms] lookup failed:', e); return null; })
+          : Promise.resolve(null);
+        return found.then(function (url) {
+          var href = safeHref(url);
+          self.result.lookup = href;
+          self.view = 'result';
+          self.scrollTop();
+          return href && as.found ? self.showResult(as.found, href) : self.showResult(as.notFound || {});
+        });
       },
 
       /* ---- visibility ---- */
@@ -1604,7 +1815,7 @@
               if (!EMAIL_RE.test(v)) msg = S.invalidEmail; break;
             case 'phone':
               if (!validPhone(v)) msg = S.invalidPhone; break;
-            case 'text': case 'textarea':
+            case 'text': case 'textarea': case 'hidden':
               if (val.minLength && v.length < val.minLength) msg = fmtStr(S.textMinLength, { min: val.minLength });
               else if (val.maxLength && v.length > val.maxLength) msg = fmtStr(S.textMaxLength, { max: val.maxLength });
               else if (val.url && !validUrl(v)) msg = S.invalidUrl;
@@ -1745,7 +1956,7 @@
             var v = self.values[f.k];
             var out;
             switch (f.type) {
-              case 'text': case 'email': case 'phone': case 'choice':
+              case 'text': case 'email': case 'phone': case 'choice': case 'hidden':
                 if (v === '') return; out = v; break;
               case 'textarea':
                 if (v === '') return; out = f.richText ? toRichText(v) : v; break;
@@ -1797,8 +2008,13 @@
         var self = this;
         var u = adapter.userInfo ? adapter.userInfo() : {};
         var now = new Date();
-        return String(tpl).replace(/\{(form:title|user:name|user:email|date|time|field:[^}]+)\}/g, function (m, tok) {
+        return String(tpl).replace(/\{(form:title|user:name|user:email|date|time|lookup|field:[^}]+|var:[^}]+)\}/g, function (m, tok) {
           if (tok === 'form:title') return cfg.form.title || '';
+          if (tok === 'lookup') return self.result.lookup || '';
+          if (tok.indexOf('var:') === 0) {
+            var vars = cfg.form.vars || {};
+            return Object.prototype.hasOwnProperty.call(vars, tok.slice(4)) && vars[tok.slice(4)] != null ? String(vars[tok.slice(4)]) : '';
+          }
           if (tok === 'user:name') return u.name || '';
           if (tok === 'user:email') return u.email || '';
           if (tok === 'date') return now.toLocaleDateString();
@@ -1839,9 +2055,15 @@
         }).then(function () {
           return self.uploadAttachments();
         }).then(function (allOk) {
+          if (cfg.afterSubmit && allOk) return self.runAfterSubmit();
           self.view = allOk ? 'done' : 'attachRetry';
           self.scrollTop();
         }).catch(function (e) {
+          if (cfg.afterSubmit && cfg.afterSubmit.continueOnSaveError) {
+            // the save is a by-product here; the user still gets their result
+            console.warn('[BSP Forms] save failed, continuing (afterSubmit.continueOnSaveError):', e);
+            return self.runAfterSubmit();
+          }
           console.error('[BSP Forms] submit failed:', e);
           self.pageError = (e && e.message === 'no-context')
             ? S.noContext
@@ -1871,10 +2093,16 @@
         if (this.busy) return;
         this.busy = true;
         this.uploadAttachments().then(function (allOk) {
-          if (allOk) { self.view = 'done'; self.scrollTop(); }
+          if (allOk) {
+            if (cfg.afterSubmit) return self.runAfterSubmit();
+            self.view = 'done'; self.scrollTop();
+          }
         }).finally(function () { self.busy = false; });
       },
-      skipAttachments: function () { this.view = 'done'; this.scrollTop(); },
+      skipAttachments: function () {
+        if (cfg.afterSubmit) { this.runAfterSubmit(); return; }
+        this.view = 'done'; this.scrollTop();
+      },
       resetForm: function () {
         var self = this;
         Object.keys(defaultsSnapshot).forEach(function (k) {
@@ -1927,6 +2155,7 @@
     date: { ok: ['DateTime'], warn: [] },
     link: { ok: ['URL'], warn: [] },
     lookup: { ok: ['Lookup'], warn: [] },
+    hidden: { ok: ['Text', 'Choice', 'Note'], warn: ['URL'] },
     person: null // handled specially: User vs UserMulti
   };
 
@@ -1975,7 +2204,21 @@
           rows.push({ field: '—', column: fd.InternalName, expected: '(required by the list)', actual: fd.TypeAsString, level: 'warn' });
         }
       });
-      renderDoctor(def, rows, null, S);
+      // the afterSubmit lookup list: readable, and has both columns
+      var lk = cfg.afterSubmit && cfg.afterSubmit.lookup;
+      if (!lk) return renderDoctor(def, rows, null, S);
+      var where = 'lookup ' + (lk.listUrl || lk.listTitle);
+      return def.adapter.getListFields(lk).then(function (lfs) {
+        var ln = {};
+        (lfs || []).forEach(function (fd) { ln[fd.InternalName] = fd; });
+        [[lk.matchColumn, ['Text'], 'Text'], [lk.returnColumn, ['URL', 'Text', 'Note'], 'URL / Text']].forEach(function (c) {
+          var fd = ln[c[0]];
+          rows.push({ field: where, column: c[0], expected: c[2],
+            actual: fd ? fd.TypeAsString : '— (missing)', level: fd ? (c[1].indexOf(fd.TypeAsString) > -1 ? 'ok' : 'warn') : 'error' });
+        });
+      }, function (e) {
+        rows.push({ field: where, column: '—', expected: 'a list this user can read', actual: trimErr(e.message), level: 'error' });
+      }).then(function () { renderDoctor(def, rows, null, S); });
     }).catch(function (e) {
       renderDoctor(def, [], e, cfg.strings);
     });
