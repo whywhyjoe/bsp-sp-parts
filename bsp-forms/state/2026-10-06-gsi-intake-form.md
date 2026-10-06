@@ -2,7 +2,7 @@
 
 Last touched: 2026-10-06
 Mode: Joe
-Branch: bsp-forms-gsi-creative, pushed (not merged; the first form's work is on main)
+Branch: merged to main 2026-10-06 (31eecdc) and pushed; branch bsp-forms-gsi-creative still on origin
 State: two configs, engine 0.3.0; both dev-deployed and verified live cross-site; prod untouched
 
 ## What this is
@@ -66,7 +66,6 @@ straight submits from a page on another site.
 ## Next
 
 - [ ] User: confirm or change the three defaults above.
-- [ ] Merge `bsp-forms-gsi-creative` to main when the user says so.
 - [ ] Prod deploy, run by a human on the prod machine: upload `bsp-forms.js`,
       `bsp-forms.css` and both configs to `Code/bsp-forms/` (the configs go in
       `forms/`). Make one page per form from `webpart/bsp-forms.webpart.html`,
