@@ -2,8 +2,8 @@
 
 Last touched: 2026-10-05
 Mode: Joe
-Branch: bsp-forms-gsi-intake, pushed
-State: config + engine 0.2.0 on the branch; dev-deployed and verified live, cross-site (34/34); prod untouched
+Branch: merged to main 2026-10-05 (d0b4ed2) and pushed; branch bsp-forms-gsi-intake kept on origin
+State: config + engine 0.2.0 on main; dev-deployed and verified live, cross-site (34/34); prod untouched
 
 ## What this is
 
