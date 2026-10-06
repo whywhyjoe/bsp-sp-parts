@@ -159,7 +159,14 @@ re-scan, re-attempts it.
   another app on the same page also calls `setup` concurrently.
 - **Date-only values** are written as noon local time, so the stored date
   can't shift a day across time zones.
-- **No branching, drafts, or post-submit actions** in this phase; the config
+- **Post-submit:** one built-in action, `afterSubmit` — a lookup in another
+  list and a result screen (link, or copy + countdown redirect). Redirect
+  targets come only from the config (`form.vars`), never from the page URL.
+- **URL values:** `query` fills a field from a page-URL parameter
+  (`normalize` cleans it); `hidden` fields carry such values unseen and
+  `readOnly` text shows them; `queryError` replaces the form when a
+  required one is missing or invalid.
+- **No branching or drafts** in this phase; the config
   format leaves room for them (`visibleWhen` is the seam branching will reuse).
 - **50 MB** is the practical single-request ceiling for an attachment upload;
   keep `maxFileSizeMb` well below it.
@@ -173,6 +180,7 @@ re-scan, re-attempts it.
 | `forms/example-it-request.json` | Reference config exercising every feature. |
 | `forms/gsi-digital-initiatives-intake.json` | FCU GSI Digital Initiatives Technology Intake (live form). |
 | `forms/gsi-digital-creative-intake.json` | FCU GSI Digital & Creative Solutions Intake (live form, same list). |
+| `forms/classic-url-request.json` | Classic-link request: saves the request, looks up the new link, else sends the user to the link converter. |
 | `webpart/bsp-forms.webpart.html` | The web part insert snippet. |
 | `docs/CONFIG-REFERENCE.md` | Full JSON reference — every key, type, and rule. |
 | `dev/` | Local harness + mock adapter + vendored Alpine + `smoke.spec.js` regression suite (never deployed). |

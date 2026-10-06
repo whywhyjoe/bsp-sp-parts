@@ -1,0 +1,96 @@
+{
+  "$comment": "Documentation access / classic-link request. Opened from a redirect of an old (classic) FCU link: ?Link=<encoded original URL>&ResourceName=<encoded display name, optional>. On submit it (1) saves the request to Classic-URL-Requests — a failed save is logged and ignored — and (2) looks ResourceName up in Classic-URL-Redirects and shows that row's URL, linked with the resource name. No match, no ResourceName, or a failed lookup: copy the original link and count down to the SharePoint link converter. A missing/invalid Link skips the form entirely and sends the user to the converter. The converter URL and countdown are form.vars (edit them here; nothing in the page URL can change them). Assumed internal column names — confirm with data-validate: requests list Link (Text), ResourceName (Text), SourceDescription (Note, plain); redirects list ResourceName (Text), URL (Hyperlink or Text).",
+
+  "form": {
+    "title": "The link you followed has changed.",
+    "intro": "Due to the BMO transition to the modern SharePoint platform, FCU links have changed. Please complete this quick form to obtain the updated link. [Learn more about this transition.](https://bmo.sharepoint.com/TandO-FCU/SitePages/News/FCU-Website-Has-Gone-Modern.aspx)",
+    "appearance": {
+      "frame": "card",
+      "header": "band",
+      "tint": "sky",
+      "icon": "abacus-icons/digital-channels-48.svg"
+    },
+    "vars": {
+      "converterUrl": "",
+      "redirectSeconds": 5
+    }
+  },
+
+  "target": {
+    "siteUrl": "/sites/FCUPortal",
+    "listUrl": "Lists/Classic-URL-Requests",
+    "titleTemplate": "Classic link: {field:resourceName}"
+  },
+
+  "strings": {
+    "submit": "Get new link",
+    "submitting": "Finding your link…"
+  },
+
+  "pages": [
+    {
+      "id": "request",
+      "sections": [
+        {
+          "id": "link",
+          "fields": [
+            {
+              "id": "link",
+              "type": "hidden",
+              "column": "Link",
+              "query": "Link",
+              "required": true,
+              "validation": { "url": true, "maxLength": 255 }
+            },
+            {
+              "id": "resourceName",
+              "type": "text",
+              "readOnly": true,
+              "label": "Resource name",
+              "column": "ResourceName",
+              "query": "ResourceName",
+              "normalize": { "maxLength": 255 }
+            },
+            {
+              "id": "sourceDescription",
+              "type": "textarea",
+              "label": "Source description",
+              "hint": "Please describe where the link you clicked on was located. Specific information will help us ensure links on the BMO intranet are up to date.",
+              "required": true,
+              "rows": 4,
+              "column": "SourceDescription"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+
+  "afterSubmit": {
+    "continueOnSaveError": true,
+    "lookup": {
+      "siteUrl": "/sites/FCUPortal",
+      "listUrl": "Lists/Classic-URL-Redirects",
+      "matchField": "resourceName",
+      "matchColumn": "ResourceName",
+      "returnColumn": "URL"
+    },
+    "found": {
+      "title": "Here's your new link",
+      "message": "Access your resource using this new link. Please update your favorites, or any communications where you distribute links to the resource.",
+      "link": { "text": "{field:resourceName}" }
+    },
+    "notFound": {
+      "title": "Let's get your new link",
+      "message": "The original link has been copied to your clipboard. You are being redirected to the modern SharePoint link converter. Please paste the link into the converter in order to get the updated link. Thank you",
+      "copy": "{field:link}",
+      "redirect": { "url": "{var:converterUrl}", "seconds": "{var:redirectSeconds}" }
+    }
+  },
+
+  "queryError": {
+    "title": "Let's get your new link",
+    "message": "You are being redirected to the modern SharePoint link converter. Please paste the original link into the converter to get the updated link. Thank you",
+    "redirect": { "url": "{var:converterUrl}", "seconds": "{var:redirectSeconds}" }
+  }
+}

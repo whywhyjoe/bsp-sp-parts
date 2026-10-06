@@ -40,8 +40,9 @@ contract. Read both before changing behavior.
 | `webpart/bsp-forms.webpart.html` | The insert snippet users paste/point the web part at. |
 | `forms/gsi-digital-initiatives-intake.json` | Live form: FCU GSI Digital Initiatives Technology Intake → the Creative Digital Solutions intake list (internal column names; see its `$comment`). |
 | `forms/gsi-digital-creative-intake.json` | Live form: FCU GSI Digital & Creative Solutions Intake → the same list. Uses business time: urgent prompt + locked Urgent/Standard switch. |
+| `forms/classic-url-request.json` | Live form: classic-link request (`?Link=&ResourceName=`) → Classic-URL-Requests, lookup in Classic-URL-Redirects, else copy + redirect to the link converter (`form.vars`). |
 | `dev/` | Harness (`index.html`), mock adapter (`mock-sp.js`, same method names as the real adapter), vendored Alpine. Never deployed. |
-| `dev/live/` | Dev-tenant live smoke for the two GSI forms: `live-crosssite.js` (the list's twin on the tenant root site), `live-setup.ps1` (upload both configs, with `siteUrl` swapped to the dev root), `live-page.ps1` (test page per `-Config`), `live-submit.js` (initiatives form) and `live-creative.js` (creative form, clock pinned) — end-to-end + REST read-back. Needs the sp-env skill; never deployed, never run on prod. |
+| `dev/live/` | Dev-tenant live smoke for the two GSI forms: `live-crosssite.js` (the list's twin on the tenant root site), `live-setup.ps1` (upload both configs, with `siteUrl` swapped to the dev root), `live-page.ps1` (test page per `-Config`), `live-submit.js` (initiatives form), `live-creative.js` (creative form, clock pinned), `live-classic-lists.ps1` + `live-classic.js` (classic-link form) — end-to-end + REST read-back. Needs the sp-env skill; never deployed, never run on prod. |
 
 ## Paid-for gotchas (don't relearn these)
 
@@ -129,6 +130,19 @@ contract. Read both before changing behavior.
 - **Time-dependent tests pin the clock**: `page.clock.setFixedTime` in the
   smoke suite (Playwright ≥ 1.45); the `BSPForms.clock` seam on live pages.
   Never let a test's outcome depend on the weekday it runs.
+- **Every SharePoint read/write stays in `makeAdapter`** (plus its mock twin,
+  same method names). There's no shared, deployed list library elsewhere in
+  the BSP projects to call instead. `listOf(spec)` gives any list on any web
+  the same routing as the target list. Filter values go through `odataStr()`
+  (quotes doubled); the live classic test pins an apostrophe.
+- **No open redirects.** A redirect or result link must pass `safeHref`
+  (http(s) or server-relative only). Redirect URLs come from config
+  (`form.vars`), never from the page URL. Don't add a URL-parameter override
+  "for convenience".
+- **Clipboard needs a recent click.** The copy runs right after the submit
+  click's async work. If the browser refuses it, the Copy box appears and
+  the countdown pauses; `copyAgain` runs inside a new click. Don't let the
+  redirect fire while a copy failed.
 - The people API can't reliably filter disabled/room accounts; the adapter
   drops non-`User` principals and entries without an email. Best-effort by
   design — don't promise more in UI copy.
@@ -163,4 +177,5 @@ inspect `__BSPF_MOCK_WRITES__` for the exact payload.
 - Don't edit the design-system repos from here; extend via `bsp-forms.css`.
 - Deployed artifacts are only `bsp-forms.js`, `bsp-forms.css`, `forms/*.json`.
 - Next phases (not built, don't scaffold speculatively): branching, drafts,
-  post-submit actions, builder UI.
+  builder UI, and post-submit actions beyond `afterSubmit`'s single lookup +
+  result screen.

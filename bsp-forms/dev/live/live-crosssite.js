@@ -33,7 +33,9 @@ const FIELDS = {
   // used by gsi-digital-creative-intake.json
   Partners: '<Field Type="UserMulti" Name="Partners" StaticName="Partners" DisplayName="Partners" Mult="TRUE" UserSelectionMode="PeopleOnly" />',
   field_7: '<Field Type="Note" Name="field_7" StaticName="field_7" DisplayName="Links/Location" NumLines="6" RichText="TRUE" RichTextMode="FullHtml" />',
-  TranslationRequired: '<Field Type="Choice" Name="TranslationRequired" StaticName="TranslationRequired" DisplayName="Translation Required" Format="Dropdown">' + ch(['Yes', 'No']) + '</Field>'
+  TranslationRequired: '<Field Type="Choice" Name="TranslationRequired" StaticName="TranslationRequired" DisplayName="Translation Required" Format="Dropdown">' + ch(['Yes', 'No']) + '</Field>',
+  // ?Team= on both GSI forms; a Choice on prod (one choice), written as free text
+  Team: '<Field Type="Choice" Name="Team" StaticName="Team" DisplayName="Team" Format="Dropdown">' + ch(['FCU Comms/Sec Awareness']) + '</Field>'
 };
 
 (async () => {

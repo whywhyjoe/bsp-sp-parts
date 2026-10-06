@@ -49,6 +49,13 @@
           "columns": 2,
           "fields": [
             {
+              "id": "team",
+              "type": "hidden",
+              "column": "Team",
+              "query": "Team",
+              "normalize": { "keep": "alnum", "case": "lower", "maxLength": 40 }
+            },
+            {
               "id": "requestor",
               "type": "person",
               "label": "Requestor",

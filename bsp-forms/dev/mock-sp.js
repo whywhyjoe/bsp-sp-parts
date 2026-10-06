@@ -44,6 +44,7 @@
     { InternalName: 'AssetTeam', Title: 'Asset team', TypeAsString: 'Lookup', Required: false, ReadOnlyField: false },
     { InternalName: 'NeededBy', Title: 'Needed by', TypeAsString: 'DateTime', Required: false, ReadOnlyField: false },
     { InternalName: 'Urgency', Title: 'Urgency', TypeAsString: 'Choice', Required: false, ReadOnlyField: false },
+    { InternalName: 'SourceTeam', Title: 'Source team', TypeAsString: 'Text', Required: false, ReadOnlyField: false },
     { InternalName: 'IsRecurring', Title: 'Recurring', TypeAsString: 'Boolean', Required: false, ReadOnlyField: false },
     { InternalName: 'RecurrenceEnd', Title: 'Recurring until', TypeAsString: 'DateTime', Required: false, ReadOnlyField: false },
     { InternalName: 'ManagerAware', Title: 'Manager aware', TypeAsString: 'Boolean', Required: false, ReadOnlyField: false }
@@ -91,7 +92,28 @@
       console.info('[mock-sp] addAttachment', name, file.size + 'B');
       return delay(null, 300);
     },
-    getListFields: function () { return delay(LIST_FIELDS, 200); },
+    // afterSubmit lookup: window.BSPF_MOCK_LOOKUP maps match value -> URL
+    // (case-insensitive like SharePoint text compares); a Hyperlink-shaped
+    // { Url } value is unwrapped the same way the real adapter does
+    lookupValue: function (lk) {
+      var fail = maybeFail('lookupValue');
+      if (fail) return fail;
+      writes.push({ op: 'lookup', matchColumn: lk.matchColumn, value: lk.value, list: lk.listUrl || lk.listTitle });
+      var table = window.BSPF_MOCK_LOOKUP || { 'policy library': { Url: 'https://example.com/policy-library-new' } };
+      var hit = null;
+      Object.keys(table).forEach(function (k) { if (k.toLowerCase() === String(lk.value).toLowerCase()) hit = table[k]; });
+      if (hit && typeof hit === 'object') hit = hit.Url;
+      return delay(hit || null, 250);
+    },
+    getListFields: function (spec) {
+      if (spec) {
+        return delay([
+          { InternalName: 'ResourceName', Title: 'ResourceName', TypeAsString: 'Text', Required: false, ReadOnlyField: false },
+          { InternalName: 'URL', Title: 'URL', TypeAsString: 'URL', Required: false, ReadOnlyField: false }
+        ], 200);
+      }
+      return delay(LIST_FIELDS, 200);
+    },
     getLookupItems: function () {
       return maybeFail('getLookupItems') || delay(LOOKUP_ITEMS, 400);
     }

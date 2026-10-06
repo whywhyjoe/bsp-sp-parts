@@ -1,4 +1,4 @@
-/*! BSP Forms · v0.3.0 · bsp-forms.css */
+/*! BSP Forms · v0.4.0 · bsp-forms.css */
 /* =====================================================================
    BSP Forms — additive component layer for the JSON-driven forms app.
    ---------------------------------------------------------------------
@@ -136,6 +136,31 @@
   margin: 0; font: var(--type-caption1); color: var(--fg-info);
 }
 .bspf-field__lock .icon { flex: none; margin-top: var(--space-20); }
+
+/* Read-only value (readOnly text fields, e.g. carried in from the URL) —
+   reads as content, not as an input. */
+.bspf-readonly__value {
+  margin: 0; padding: var(--space-80) var(--space-120);
+  background: var(--surface-subtle);
+  border-radius: var(--radius-medium);
+  font: var(--type-body1-strong); color: var(--fg-primary);
+  overflow-wrap: anywhere;
+}
+
+/* Result screen (afterSubmit / queryError) — sits in the .bspf-done layout */
+.bspf-result__link {
+  display: inline-flex; align-items: center; gap: var(--space-80);
+  max-width: 100%; margin-top: var(--space-80);
+  font: var(--type-subtitle2); color: var(--accent-rest);
+  overflow-wrap: anywhere; text-align: left;
+}
+.bspf-result__link .icon { flex: none; transition: transform var(--motion-normal) var(--ease-out); }
+.bspf-result__link:hover .icon { transform: translateX(3px); }
+.bspf-result__copy { display: flex; flex-direction: column; align-items: center; gap: var(--space-120); width: 100%; max-width: 560px; }
+.bspf-result__copyrow { display: flex; gap: var(--space-80); width: 100%; }
+.bspf-result__copyrow .input { flex: 1; min-width: 0; }
+.bspf-result__count { margin: 0; font: var(--type-caption1); color: var(--fg-secondary); }
+@media (prefers-reduced-motion: reduce) { .bspf-result__link .icon { transition: none; } }
 
 /* Prompt dialog body text (the sheet itself is the design system's .dialog) */
 .bspf-dialog__msg { font: var(--type-body1); color: var(--fg-primary); margin: 0; }

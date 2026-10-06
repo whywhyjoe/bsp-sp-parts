@@ -28,4 +28,15 @@ foreach ($name in 'gsi-digital-initiatives-intake.json', 'gsi-digital-creative-i
   [IO.File]::WriteAllText($devCfg, $cfgText.Replace($prodSite, '"siteUrl": "/"'))
   Add-PnPFile -Path $devCfg -Folder "$folder/forms" -Connection $conn | Out-Null
 }
-Write-Host "uploaded engine + 2 GSI configs to $codeRel/bsp-forms/"
+# classic-url-request.json: its lists are on prod /sites/FCUPortal; on dev they're on the dev site
+# (live-classic-lists.ps1). The converter URL is empty in the repo until the user supplies it, so
+# dev points it at the dev site's home page as a stand-in redirect target.
+$name = 'classic-url-request.json'
+$cfgText = Get-Content (Join-Path $repo "forms\$name") -Raw
+$prodPortal = '"siteUrl": "/sites/FCUPortal"'
+if (-not $cfgText.Contains($prodPortal)) { throw "$name no longer has $prodPortal - update live-setup.ps1" }
+$cfgText = $cfgText.Replace($prodPortal, "`"siteUrl`": `"$siteRel`"")
+$cfgText = [regex]::Replace($cfgText, '"converterUrl":\s*"[^"]*"', "`"converterUrl`": `"$($t.dev.siteUrl)`"")
+[IO.File]::WriteAllText((Join-Path $devDir $name), $cfgText)
+Add-PnPFile -Path (Join-Path $devDir $name) -Folder "$folder/forms" -Connection $conn | Out-Null
+Write-Host "uploaded engine + 3 configs (2 GSI, classic-url-request) to $codeRel/bsp-forms/"
