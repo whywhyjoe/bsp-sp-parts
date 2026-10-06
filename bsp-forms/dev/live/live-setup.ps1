@@ -18,11 +18,14 @@ foreach ($f in 'bsp-forms.js', 'bsp-forms.css') {
 }
 # The repo config targets PROD's list site; on dev the twin list lives on the tenant root site
 # (live-crosssite.js), so the uploaded copy swaps only target.siteUrl - listUrl is identical.
-$cfgText = Get-Content (Join-Path $repo 'forms\gsi-digital-initiatives-intake.json') -Raw
 $prodSite = '"siteUrl": "/sites/FCUCommunicationsSecurityAwareness"'
-if (-not $cfgText.Contains($prodSite)) { throw "config no longer has $prodSite - update live-setup.ps1" }
-$devCfg = Join-Path ([IO.Path]::GetTempPath()) 'bspf-dev\gsi-digital-initiatives-intake.json'
-New-Item -ItemType Directory -Force -Path (Split-Path $devCfg) | Out-Null
-[IO.File]::WriteAllText($devCfg, $cfgText.Replace($prodSite, '"siteUrl": "/"'))
-Add-PnPFile -Path $devCfg -Folder "$folder/forms" -Connection $conn | Out-Null
-Write-Host "uploaded engine + config to $codeRel/bsp-forms/"
+$devDir = Join-Path ([IO.Path]::GetTempPath()) 'bspf-dev'
+New-Item -ItemType Directory -Force -Path $devDir | Out-Null
+foreach ($name in 'gsi-digital-initiatives-intake.json', 'gsi-digital-creative-intake.json') {
+  $cfgText = Get-Content (Join-Path $repo "forms\$name") -Raw
+  if (-not $cfgText.Contains($prodSite)) { throw "$name no longer has $prodSite - update live-setup.ps1" }
+  $devCfg = Join-Path $devDir $name
+  [IO.File]::WriteAllText($devCfg, $cfgText.Replace($prodSite, '"siteUrl": "/"'))
+  Add-PnPFile -Path $devCfg -Folder "$folder/forms" -Connection $conn | Out-Null
+}
+Write-Host "uploaded engine + 2 GSI configs to $codeRel/bsp-forms/"

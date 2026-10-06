@@ -1,0 +1,227 @@
+{
+  "$comment": "FCU GSI Digital & Creative Solutions Intake — the second built-in list form on the same list as gsi-digital-initiatives-intake.json (Creative Services Intake on FCUCommunicationsSecurityAwareness, addressed by URL; display name 'Creative Digital Solutions Inake'). Straight submit, one page, no branching. Columns are INTERNAL names (field_6 = Requested Launch Date, field_7 = Links/Location, field_9 = Description, Pillar_x002f_Partner = Pillar/Partner). Priority is a switch that writes 'Urgent' or 'Standard' (neither is a list choice yet; REST accepts it). Business time: Mon–Fri 9:00–17:00 Eastern, holidays not modeled; a launch date means 5pm Eastern that day (businessHours.dateAt). One business day = 8 working hours, i.e. the user's '24 hours'. A launch date within one business day opens the urgent prompt and locks Priority on Urgent.",
+
+  "form": {
+    "title": "FCU GSI Digital & Creative Solutions Intake",
+    "intro": "These services are provided by the Digital & Creative Solutions team, a part of FCU Governance, Strategy and Integration. To submit intakes for other GSI services, including FCU Communications and OCM, use the [GSI intake](/sites/FCUPortal/Go#gsi-intake).",
+    "appearance": {
+      "frame": "card",
+      "header": "band",
+      "tint": "sky",
+      "icon": "abacus-icons/digital-channels-48.svg"
+    },
+    "businessHours": {
+      "timeZone": "America/Toronto",
+      "days": [1, 2, 3, 4, 5],
+      "start": "09:00",
+      "end": "17:00",
+      "dateAt": "end"
+    }
+  },
+
+  "target": {
+    "siteUrl": "/sites/FCUCommunicationsSecurityAwareness",
+    "listUrl": "Lists/Creative Services Intake",
+    "titleTemplate": "{field:department} request — {date}"
+  },
+
+  "confirmation": {
+    "title": "Request submitted",
+    "message": "Your request has been logged with the Digital & Creative Solutions team. You'll hear from us with any follow-up questions.",
+    "allowAnother": true,
+    "illustration": "spot-illustrations/checkmark-l.svg"
+  },
+
+  "attachments": {
+    "enabled": true,
+    "section": "details",
+    "label": "Attachments",
+    "maxFiles": 10,
+    "maxFileSizeMb": 25
+  },
+
+  "strings": {
+    "submit": "Submit request"
+  },
+
+  "pages": [
+    {
+      "id": "request",
+      "sections": [
+        {
+          "id": "people",
+          "title": "Who's involved",
+          "description": "The lead contact, the team the work is for, and anyone else to keep in the loop.",
+          "icon": "person",
+          "columns": 2,
+          "fields": [
+            {
+              "id": "requestor",
+              "type": "person",
+              "label": "Requestor",
+              "hint": "Yourself or else the lead contact for the request.",
+              "required": true,
+              "column": "Requestor"
+            },
+            {
+              "id": "department",
+              "type": "text",
+              "label": "Department",
+              "hint": "Department or team that is the stakeholder of the deliverable (usually your team).",
+              "required": true,
+              "column": "Department",
+              "validation": { "maxLength": 255 }
+            },
+            {
+              "id": "partners",
+              "type": "person",
+              "multiple": true,
+              "label": "Partners",
+              "hint": "Any additional contacts to include with this project.",
+              "column": "Partners",
+              "span": "full"
+            }
+          ]
+        },
+        {
+          "id": "request",
+          "title": "Your request",
+          "description": "What you need and when.",
+          "icon": "edit",
+          "columns": 2,
+          "fields": [
+            {
+              "id": "title",
+              "type": "text",
+              "label": "Title",
+              "hint": "A short title describing your request. Leave it blank and we'll name it from your team and today's date.",
+              "column": "Title",
+              "span": "full",
+              "validation": { "maxLength": 255 }
+            },
+            {
+              "id": "requestType",
+              "type": "choice",
+              "label": "Request type",
+              "column": "RequestType",
+              "choices": [
+                { "value": "Development/App", "color": "blue" },
+                { "value": "Development/Flow", "color": "blue" },
+                { "value": "Development/Sharepoint", "color": "blue" },
+                { "value": "Development/Reporting", "color": "blue" },
+                { "value": "Graphics/Decks", "color": "berry" },
+                { "value": "Graphics/2D", "color": "berry" },
+                { "value": "Graphics/Video", "color": "berry" },
+                { "value": "Newsletter/Social", "color": "orange" },
+                { "value": "Website/New", "color": "teal" },
+                { "value": "Website/Update", "color": "teal" },
+                { "value": "Creative/Consult", "color": "lavender" },
+                { "value": "Development/Consult", "color": "lavender" },
+                { "value": "Website/Consult", "color": "lavender" },
+                { "value": "Other", "color": "gray" }
+              ]
+            },
+            {
+              "id": "pillar",
+              "type": "multichoice",
+              "label": "Pillar/Partner",
+              "hint": "Your department and any others the request serves.",
+              "required": true,
+              "column": "Pillar_x002f_Partner",
+              "choices": [
+                { "value": "BM I&I", "color": "blue" },
+                { "value": "Cyber Security", "color": "blue" },
+                { "value": "EFM", "color": "blue" },
+                { "value": "Physical Security", "color": "blue" },
+                { "value": "RR&C", "color": "blue" },
+                { "value": "GSI/Initiative Management", "color": "teal" },
+                { "value": "GSI/Comms", "color": "teal" },
+                { "value": "GSI/OCM", "color": "teal" },
+                { "value": "GSI/Strategy", "color": "teal" },
+                { "value": "GSI/Documentation", "color": "teal" },
+                { "value": "T&O", "color": "lavender" },
+                { "value": "BMO.com", "color": "lavender" },
+                { "value": "Branch", "color": "lavender" },
+                { "value": "Enterprise", "color": "lavender" },
+                { "value": "Other", "color": "gray" }
+              ]
+            },
+            {
+              "id": "launchDate",
+              "type": "date",
+              "label": "Requested launch date",
+              "hint": "Please allow a minimum of 2 business days when possible.",
+              "required": true,
+              "column": "field_6",
+              "rules": [
+                {
+                  "op": "onOrAfter",
+                  "compareTo": "@today",
+                  "mode": "block",
+                  "message": "The launch date can't be in the past."
+                }
+              ],
+              "prompt": {
+                "withinBusinessDays": 1,
+                "title": "Next business day request",
+                "message": "For next business day requests, your intake will be marked urgent in order to accommodate your business need. Thank you!",
+                "confirm": { "label": "OK", "set": { "priority": true } },
+                "alternative": { "label": "Change to 48 hours", "moveToBusinessDays": 2 }
+              }
+            },
+            {
+              "id": "priority",
+              "type": "boolean",
+              "label": "Priority",
+              "column": "Priority",
+              "values": { "on": "Urgent", "off": "Standard" },
+              "lockWhen": { "field": "launchDate", "op": "withinBusinessDays", "value": 1 },
+              "lockValue": true,
+              "lockNote": "Needed within one business day, so this request is urgent. Pick a later launch date to change it."
+            }
+          ]
+        },
+        {
+          "id": "details",
+          "title": "Details",
+          "description": "The more we know up front, the fewer follow-up questions.",
+          "icon": "document",
+          "columns": 2,
+          "fields": [
+            {
+              "id": "description",
+              "type": "textarea",
+              "label": "Description",
+              "hint": "Please include all specific information needed to complete your request. If you require consultation, please indicate.",
+              "required": true,
+              "rows": 6,
+              "column": "field_9",
+              "richText": true,
+              "span": "full"
+            },
+            {
+              "id": "links",
+              "type": "textarea",
+              "label": "Links/Location",
+              "hint": "Include any SharePoint or other links relevant to your request. If your request involves a specific site or page, include the link here.",
+              "rows": 3,
+              "column": "field_7",
+              "richText": true,
+              "span": "full"
+            },
+            {
+              "id": "translation",
+              "type": "choice",
+              "label": "Translation required",
+              "column": "TranslationRequired",
+              "choices": [
+                { "value": "Yes", "color": "blue" },
+                { "value": "No", "color": "gray" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -29,7 +29,11 @@ const FIELDS = {
     'GSI/Strategy', 'GSI/Documentation', 'T&O', 'BMO.com', 'Branch', 'Enterprise', 'Other']) + '</Field>',
   field_6: '<Field Type="DateTime" Name="field_6" StaticName="field_6" DisplayName="Requested Launch Date" Required="TRUE" Format="DateOnly" />',
   field_9: '<Field Type="Note" Name="field_9" StaticName="field_9" DisplayName="Description" Required="TRUE" NumLines="6" RichText="TRUE" RichTextMode="FullHtml" />',
-  UserBase: '<Field Type="Text" Name="UserBase" StaticName="UserBase" DisplayName="UserBase" />'
+  UserBase: '<Field Type="Text" Name="UserBase" StaticName="UserBase" DisplayName="UserBase" />',
+  // used by gsi-digital-creative-intake.json
+  Partners: '<Field Type="UserMulti" Name="Partners" StaticName="Partners" DisplayName="Partners" Mult="TRUE" UserSelectionMode="PeopleOnly" />',
+  field_7: '<Field Type="Note" Name="field_7" StaticName="field_7" DisplayName="Links/Location" NumLines="6" RichText="TRUE" RichTextMode="FullHtml" />',
+  TranslationRequired: '<Field Type="Choice" Name="TranslationRequired" StaticName="TranslationRequired" DisplayName="Translation Required" Format="Dropdown">' + ch(['Yes', 'No']) + '</Field>'
 };
 
 (async () => {

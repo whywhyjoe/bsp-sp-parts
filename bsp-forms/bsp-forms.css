@@ -1,4 +1,4 @@
-/*! BSP Forms · v0.2.0 · bsp-forms.css */
+/*! BSP Forms · v0.3.0 · bsp-forms.css */
 /* =====================================================================
    BSP Forms — additive component layer for the JSON-driven forms app.
    ---------------------------------------------------------------------
@@ -125,6 +125,20 @@
   .bspf-fields--2 > .msgbar,
   .bspf-fields--2 > .field__hint { grid-column: 1 / -1; }
 }
+
+/* Locked switch (lockWhen) — still reads clearly as ON, just not
+   clickable; the note under it says why. The design system has no
+   disabled .switch state, so it lives here, scoped to .bspf. */
+.bspf .switch:has(input:disabled) { cursor: not-allowed; }
+.bspf .switch input:disabled + .switch__track { opacity: .7; }
+.bspf-field__lock {
+  display: flex; align-items: flex-start; gap: var(--space-60);
+  margin: 0; font: var(--type-caption1); color: var(--fg-info);
+}
+.bspf-field__lock .icon { flex: none; margin-top: var(--space-20); }
+
+/* Prompt dialog body text (the sheet itself is the design system's .dialog) */
+.bspf-dialog__msg { font: var(--type-body1); color: var(--fg-primary); margin: 0; }
 
 /* Field extras on top of .field */
 .bspf-field__warning { margin: 0; font: var(--type-caption1); color: var(--fg-warning); }

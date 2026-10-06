@@ -62,7 +62,8 @@ async function testConfigErrors(browser) {
     }],
     ['duplicate section id → error card', cfg => { cfg.pages[1].sections[1].id = cfg.pages[1].sections[0].id; }],
     ['columns: 3 → error card', cfg => { cfg.pages[0].sections[0].columns = 3; }],
-    ['unknown attachments.section → error card', cfg => { cfg.attachments.section = 'nope'; }]
+    ['unknown attachments.section → error card', cfg => { cfg.attachments.section = 'nope'; }],
+    ['prompt without form.businessHours → error card', cfg => { delete cfg.form.businessHours; }]
   ]) {
     const page = await browser.newPage();
     await page.route('**/example-it-request.json', async route => {
@@ -148,11 +149,71 @@ async function testDoctorRichText(browser) {
   }
 }
 
+/* Business-time tests pin the page clock (page.clock) so weekday/hour never
+   depend on when the suite runs. 2030-01-08 is a Tuesday; January Eastern
+   time is UTC-5, so 15:00Z = 10:00 ET and 22:00Z = 17:00 ET. */
+const TUE_10AM_ET = '2030-01-08T15:00:00Z';
+const FRI_5PM_ET = '2030-01-11T22:00:00Z';
+
+async function toPage(page, i) {
+  // jump straight to a page (bypasses validation) — test-only
+  await page.evaluate(n => { document.querySelector('.bspf')._x_dataStack[0].page = n; }, i);
+  await page.waitForTimeout(150);
+}
+
+async function testBusinessPrompt(browser) {
+  console.log('business-day prompt + lock:');
+  const page = await browser.newPage({ viewport: { width: 1100, height: 1600 } });
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+  await page.clock.setFixedTime(new Date(FRI_5PM_ET));
+  await page.goto(BASE);
+  await page.waitForTimeout(1000);
+  await toPage(page, 1);
+  const dlg = page.locator('.bspf-dialog');
+  const sw = page.locator('[data-bspf-field="urgency"] input[type="checkbox"]');
+  const date = page.locator('[data-bspf-field="neededBy"] input');
+
+  await date.fill('0202-01-14'); // a mid-typing year: past, must not prompt
+  await page.waitForTimeout(200);
+  check('past/partial date → no prompt', !(await dlg.isVisible()));
+
+  await date.fill('2030-01-14'); // Mon 5pm = 8 working hours after Fri 5pm: within
+  await page.waitForTimeout(250);
+  check('within one business day → prompt opens', await dlg.isVisible());
+  await page.waitForTimeout(100);
+  check('prompt focuses OK', await page.evaluate(() => document.activeElement && document.activeElement.textContent.trim() === 'OK'));
+  await page.click('.bspf-dialog__alt');
+  await page.waitForTimeout(200);
+  check('"Change" moves the date 2 business days out (Tue)', (await date.inputValue()) === '2030-01-15', await date.inputValue());
+  check('…and leaves urgency off and unlocked', !(await sw.isChecked()) && !(await sw.isDisabled()));
+
+  await date.fill('2030-01-14');
+  await page.waitForTimeout(250);
+  check('prompt reopens for a new within-window date', await dlg.isVisible());
+  await page.keyboard.press('Escape'); // Escape = OK (keep the date)
+  await page.waitForTimeout(200);
+  check('OK keeps the date', (await date.inputValue()) === '2030-01-14');
+  check('OK sets urgency on and locks it', (await sw.isChecked()) && (await sw.isDisabled()));
+  check('switch reads "Urgent", lock note shows',
+    (await page.locator('[data-bspf-field="urgency"] .switch').textContent()).trim() === 'Urgent' &&
+    await page.locator('[data-bspf-field="urgency"] .bspf-field__lock').isVisible());
+
+  await date.fill('2030-01-21');
+  await page.waitForTimeout(250);
+  const st = { checked: await sw.isChecked(), disabled: await sw.isDisabled(), dlg: await dlg.isVisible(), date: await date.inputValue() };
+  check('a later date unlocks (value stays Urgent)', st.checked && !st.disabled && !st.dlg, JSON.stringify(st));
+  check('no page errors', pageErrors.length === 0, pageErrors.join(' | '));
+  await page.close();
+}
+
 async function testFullFlow(browser) {
   console.log('full submit flow:');
   const page = await browser.newPage({ viewport: { width: 1100, height: 2600 } });
   const pageErrors = [];
   page.on('pageerror', e => pageErrors.push(e.message));
+  // Tue 10:00 ET: tomorrow (Wed 5pm) is 15 working hours out — no prompt
+  await page.clock.setFixedTime(new Date(TUE_10AM_ET));
   await page.goto(BASE);
   await page.waitForTimeout(1200);
   check('mount ready', (await page.getAttribute('[data-bsp-form]', 'data-bspf-state')) === 'ready');
@@ -190,7 +251,7 @@ async function testFullFlow(browser) {
     'Current laptop is out of warranty & failing;\nneeded for <daily> development work.');
 
   // date rules: warn (rush) then cross-field block, then fix
-  const plus = d => { const t = new Date(); t.setDate(t.getDate() + d); return t.toISOString().slice(0, 10); };
+  const plus = d => { const t = new Date(TUE_10AM_ET); t.setUTCDate(t.getUTCDate() + d); return t.toISOString().slice(0, 10); };
   await page.fill('[data-bspf-field="neededBy"] input', plus(1));
   await page.waitForTimeout(250);
   check('date warn (rush) shows', await page.locator('[data-bspf-field="neededBy"] .bspf-field__warning').isVisible());
@@ -237,6 +298,7 @@ async function testFullFlow(browser) {
   check('richText textarea → escaped HTML with <br>',
     p.Justification === '<div>Current laptop is out of warranty &amp; failing;<br>needed for &lt;daily&gt; development work.</div>',
     JSON.stringify(p.Justification));
+  check('word switch writes its "off" value', p.Urgency === 'Standard', JSON.stringify(p.Urgency));
   check('title template rendered', typeof p.Title === 'string' && p.Title.indexOf('Dev Tester') > -1);
   check('attachment uploaded after retry', writes.some(w => w.op === 'addAttachment' && w.name === 'quote.pdf'));
   check('no page errors', pageErrors.length === 0, pageErrors.join(' | '));
@@ -249,6 +311,7 @@ async function testFullFlow(browser) {
     await testEditMode(browser);
     await testConfigErrors(browser);
     await testPresentation(browser);
+    await testBusinessPrompt(browser);
     await testDoctorRichText(browser);
     await testFullFlow(browser);
   } finally {
