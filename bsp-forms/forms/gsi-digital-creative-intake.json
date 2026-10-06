@@ -1,5 +1,5 @@
 {
-  "$comment": "FCU GSI Digital & Creative Solutions Intake — the second built-in list form on the same list as gsi-digital-initiatives-intake.json (Creative Services Intake on FCUCommunicationsSecurityAwareness, addressed by URL; display name 'Creative Digital Solutions Inake'). Straight submit, one page, no branching. Columns are INTERNAL names (field_6 = Requested Launch Date, field_7 = Links/Location, field_9 = Description, Pillar_x002f_Partner = Pillar/Partner). Priority is a switch that writes 'Urgent' or 'Standard' (neither is a list choice yet; REST accepts it). Business time: Mon–Fri 9:00–17:00 Eastern, holidays not modeled; a launch date means 5pm Eastern that day (businessHours.dateAt). One business day = 8 working hours, i.e. the user's '24 hours'. A launch date within one business day opens the urgent prompt and locks Priority on Urgent.",
+  "$comment": "FCU GSI Digital & Creative Solutions Intake — the second built-in list form on the same list as gsi-digital-initiatives-intake.json (Creative Services Intake on FCUCommunicationsSecurityAwareness, addressed by URL; display name 'Creative Digital Solutions Inake'). Straight submit, one page, no branching. Columns are INTERNAL names (field_6 = Requested Launch Date, field_7 = Links/Location, field_9 = Description, Pillar_x002f_Partner = Pillar/Partner). Priority is a switch the user sets, writing 'Urgent' or 'Standard' (neither is a list choice yet; REST accepts it). The launch date has a time (includeTime; the viewer's own zone, converted to Eastern for the business-time rule). Business time: Mon–Fri 9:00–17:00 Eastern, holidays not modeled; one business day = 8 working hours (the user's '24 hours'). A launch within 2 business days (the user's '48 business hours', boundary inclusive) shows the short-notice callout — no popup, nothing set automatically. Translation Required is a checkbox writing 'Yes'/'No'.",
 
   "form": {
     "title": "FCU GSI Digital & Creative Solutions Intake",
@@ -159,6 +159,7 @@
               "label": "Requested launch date",
               "hint": "Please allow a minimum of 2 business days when possible.",
               "required": true,
+              "includeTime": true,
               "column": "field_6",
               "rules": [
                 {
@@ -167,24 +168,21 @@
                   "mode": "block",
                   "message": "The launch date can't be in the past."
                 }
-              ],
-              "prompt": {
-                "withinBusinessDays": 1,
-                "title": "Next business day request",
-                "message": "For next business day requests, your intake will be marked urgent in order to accommodate your business need. Thank you!",
-                "confirm": { "label": "OK", "set": { "priority": true } },
-                "alternative": { "label": "Change to 48 hours", "moveToBusinessDays": 2 }
-              }
+              ]
             },
             {
               "id": "priority",
               "type": "boolean",
               "label": "Priority",
               "column": "Priority",
-              "values": { "on": "Urgent", "off": "Standard" },
-              "lockWhen": { "field": "launchDate", "op": "withinBusinessDays", "value": 1 },
-              "lockValue": true,
-              "lockNote": "Needed within one business day, so this request is urgent. Pick a later launch date to change it."
+              "values": { "on": "Urgent", "off": "Standard" }
+            },
+            {
+              "id": "shortNotice",
+              "type": "note",
+              "style": "warning",
+              "text": "You've selected a deadline under 48 business hours. We'll try to meet your request. Please allow additional lead time when your business case permits.",
+              "visibleWhen": { "field": "launchDate", "op": "withinBusinessDays", "value": 2 }
             }
           ]
         },
@@ -218,13 +216,11 @@
             },
             {
               "id": "translation",
-              "type": "choice",
+              "type": "boolean",
+              "control": "checkbox",
               "label": "Translation required",
               "column": "TranslationRequired",
-              "choices": [
-                { "value": "Yes", "color": "blue" },
-                { "value": "No", "color": "gray" }
-              ]
+              "values": { "on": "Yes", "off": "No" }
             }
           ]
         }

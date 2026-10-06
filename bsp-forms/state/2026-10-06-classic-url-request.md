@@ -56,15 +56,17 @@ name, optional>`.
 
 ## Next
 
-- [ ] **User: the link converter's URL.** Put it in
-      `form.vars.converterUrl`. While it's empty, the not-found and bad-link
-      screens show their message but don't redirect (a console warning
-      explains why).
-- [ ] User: confirm the assumed internal column names, or let the doctor do
-      it. Requests: `Link` (Text), `ResourceName` (Text), `SourceDescription`
-      (Note, plain). Redirects: `ResourceName` (Text), `URL` (Hyperlink or
-      Text). Also confirm the lists' URLs are `Lists/Classic-URL-Requests` and
-      `Lists/Classic-URL-Redirects`.
+- [ ] **User: the link converter's URL.** The user will set it themselves, in
+      `form.vars.converterUrl` (line 14). Editing the deployed JSON on prod is
+      enough, since configs load with no-cache. While it's empty, the
+      not-found and bad-link screens show their message but don't redirect.
+- [ ] **User: create both lists on prod** to match dev (the user doesn't have
+      them yet; spec given in chat 2026-10-06; `live-classic-lists.ps1` is the
+      reference). Requests: `Link` (Text 255), `ResourceName` (Text 255),
+      `SourceDescription` (plain multi-line). Redirects: `ResourceName`
+      (Text), `URL` (Hyperlink). Each column is created with exactly that name
+      first, so the internal name matches. Then load once with
+      `data-validate`.
 - [ ] Defaults the user may want changed: the field label "Source
       description", the result titles "Here's your new link" and "Let's get
       your new link", the 5-second countdown, and the brand icon.

@@ -122,7 +122,10 @@ contract. Read both before changing behavior.
   `Intl.DateTimeFormat` + civil day numbers), never in viewer-local or UTC
   `Date` math: that's what makes it immune to the viewer's zone and DST. Past
   days are never "within" (`bizWithin`), or a half-typed year (`0202-…`)
-  locks Urgent; the prompt has the same guard. Pinned in the smoke suite.
+  locks Urgent; the prompt has the same guard. A picked **time**
+  (`includeTime`) is in the viewer's zone. `bizAtDate` turns it into an
+  instant and then into business-zone wall time, never reading "14:00" as
+  Eastern. The smoke suite runs that test in Pacific time.
 - **A date prompt decides before locks apply.** `dateChanged` opens the
   prompt and only enforces `lockWhen` if no prompt opened. Otherwise the
   lock flips the value on before the user answers, and "Change to 48 hours"

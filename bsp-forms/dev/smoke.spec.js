@@ -323,6 +323,44 @@ async function testClassic(browser) {
   }
 }
 
+/* The Digital & Creative config: launch date+time, the 48-business-hour
+   callout, no popup/lock, Translation as a checkbox. The browser runs in
+   PACIFIC time to prove picks are converted to Eastern before counting. */
+async function testCreativeCallout(browser) {
+  console.log('creative form (48h callout, viewer in Pacific time):');
+  const ctx = await browser.newContext({ viewport: { width: 1100, height: 1600 }, timezoneId: 'America/Los_Angeles' });
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on('pageerror', e => errs.push(e.message));
+  await page.clock.setFixedTime(new Date(FRI_5PM_ET));
+  await page.route('**/example-it-request.json', async route => {
+    await route.fulfill({ json: await (await route.fetch({ url: new URL('../forms/gsi-digital-creative-intake.json', BASE).href })).json() });
+  });
+  await page.goto(BASE);
+  await page.waitForTimeout(1000);
+  const date = page.locator('[data-bspf-field="launchDate"] input');
+  const note = page.locator('.msgbar:has-text("under 48 business hours")');
+  check('launch date is one date+time control', (await date.getAttribute('type')) === 'datetime-local');
+  // Fri 5pm ET -> Tue 5pm ET = 16 working hours (inclusive): 2pm Pacific
+  await date.fill('2030-01-15T14:00');
+  await page.waitForTimeout(200);
+  check('Tue 2pm PT (= 5pm ET, 48h) → callout', await note.isVisible());
+  await date.fill('2030-01-16T06:00'); // Wed 9:00 ET: still 16h — the 9am boundary counts
+  await page.waitForTimeout(200);
+  check('Wed 6:00 PT (= 9:00 ET) → callout (boundary inclusive)', await note.isVisible());
+  await date.fill('2030-01-16T06:01'); // Wed 9:01 ET: 16h01m
+  await page.waitForTimeout(200);
+  check('Wed 6:01 PT (= 9:01 ET) → no callout', !(await note.isVisible()));
+  await date.fill('2030-01-14T10:00');
+  await page.waitForTimeout(300);
+  const sw = page.locator('[data-bspf-field="priority"] input');
+  check('no popup, Priority untouched and unlocked', (await page.locator('.bspf-dialog').count()) === 0 &&
+    !(await sw.isChecked()) && !(await sw.isDisabled()));
+  check('Translation is a checkbox', (await page.locator('[data-bspf-field="translation"] label.check input[type="checkbox"]').count()) === 1);
+  check('no page errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
 async function testFullFlow(browser) {
   console.log('full submit flow:');
   const page = await browser.newPage({ viewport: { width: 1100, height: 2600 } });
@@ -395,7 +433,7 @@ async function testFullFlow(browser) {
   check('bad file type rejected', await page.locator('.bspf-attach .field__error').isVisible());
   check('accepted file listed', (await page.locator('.bspf-page:visible .bspf-attach__item').count()) === 1);
 
-  await page.click('[data-bspf-field="managerAware"] .switch');
+  await page.check('[data-bspf-field="managerAware"] label.check input');
   await page.evaluate(() => { window.BSPF_MOCK_FAIL = { addAttachment: true }; });
   await navClick(page, 'Submit request');
   await page.waitForTimeout(1800);
@@ -434,6 +472,7 @@ async function testFullFlow(browser) {
     await testPresentation(browser);
     await testBusinessPrompt(browser);
     await testClassic(browser);
+    await testCreativeCallout(browser);
     await testDoctorRichText(browser);
     await testFullFlow(browser);
   } finally {

@@ -2,8 +2,9 @@
 //   live-page.ps1 -PageName bsp-forms-gsi-creative-test -Config gsi-digital-creative-intake.json)
 // end to end and read the created items back via REST from the cross-site twin list
 // (live-crosssite.js). The engine's business clock is pinned with the BSPForms.clock seam to
-// Friday 17:00 Eastern, so the urgent prompt behaves the same whenever this runs; the dates it
-// enters are in 2030, so the real-clock past-date rule never interferes.
+// Friday 17:00 Eastern, and the browser runs in Eastern time, so the 48-business-hour callout
+// and the saved UTC times are the same whenever this runs; the dates it enters are in 2030,
+// so the real-clock past-date rule never interferes.
 // Creates two real items in the dev twin list each run. Screenshots go to the OS temp dir.
 'use strict';
 const path = require('path');
@@ -54,7 +55,7 @@ async function afterSubmit(page) {
 (async () => {
   const site = tenants.dev.siteUrl;
   const listApi = tenants.dev.tenantRoot.replace(/\/$/, '') + "/_api/web/GetList('" + encodeURIComponent('/Lists/Creative Services Intake') + "')";
-  const ctx = await chromium.launchPersistentContext(path.join(SPENV, 'auth', 'pw-profile'), { headless: true, viewport: { width: 1280, height: 1000 } });
+  const ctx = await chromium.launchPersistentContext(path.join(SPENV, 'auth', 'pw-profile'), { headless: true, viewport: { width: 1280, height: 1000 }, timezoneId: 'America/Toronto' });
   await ctx.addInitScript(t => { window.BSPForms = window.BSPForms || {}; window.BSPForms.clock = () => t; }, FRI_5PM_ET);
   const page = ctx.pages()[0] || await ctx.newPage();
   const errs = [];
@@ -78,54 +79,43 @@ async function afterSubmit(page) {
 
   const before = await page.evaluate(async (s) => (await (await fetch(s + '/items?$select=Id&$orderby=Id desc&$top=1', { headers: { accept: 'application/json;odata=nometadata' } })).json()).value, listApi);
   const lastId = before.length ? before[0].Id : 0;
-  const dlg = page.locator('.bspf-dialog');
   const sw = page.locator('[data-bspf-field="priority"] input[type="checkbox"]');
   const date = page.locator('[data-bspf-field="launchDate"] input');
+  const note = page.locator('.msgbar:has-text("under 48 business hours")');
+  check('launch date is one date+time control', (await date.getAttribute('type')) === 'datetime-local');
 
-  // ---- submission 1: next-business-day launch, user clicks OK -> Urgent
-  await page.fill('[data-bspf-field="title"] input', 'Creative live test 1 — urgent');
+  // ---- submission 1: Mon 10:00 ET launch (1 working hour after the pinned Fri 5pm):
+  //      callout shows, nothing automatic; the user marks it Urgent and ticks Translation
+  await page.fill('[data-bspf-field="title"] input', 'Creative live test 1 — short notice');
   await person(page, 'requestor', 'joe');
   await page.fill('[data-bspf-field="department"] input', 'FCU Digital (dev test)');
   await person(page, 'partners', 'joe');
   await pick(page, 'requestType', 'Graphics/Decks');
   await pick(page, 'pillar', 'GSI/Comms');
-  await date.fill('2030-01-14'); // Mon 5pm ET = 8 working hours after Fri 5pm: within one business day
+  await date.fill('2030-01-14T10:00');
   await page.waitForTimeout(400);
-  check('next-business-day date → prompt', await dlg.isVisible());
-  check('prompt text and buttons', await page.evaluate(() => {
-    const d = document.querySelector('.bspf-dialog');
-    return /next business day requests, your intake will be marked urgent/i.test(d.innerText) &&
-      d.querySelector('.bspf-dialog__ok').textContent === 'OK' && d.querySelector('.bspf-dialog__alt').textContent === 'Change to 48 hours';
-  }));
-  await page.locator('.bspf').screenshot({ path: path.join(OUT, 'creative-prompt.png') }).catch(() => {});
-  await page.screenshot({ path: path.join(OUT, 'creative-prompt-page.png') });
-  await page.click('.bspf-dialog__ok');
-  await page.waitForTimeout(250);
-  check('OK → Urgent, locked, note shown', (await sw.isChecked()) && (await sw.isDisabled()) &&
-    await page.locator('[data-bspf-field="priority"] .bspf-field__lock').isVisible());
+  check('short notice → callout, no popup', await note.isVisible() && (await page.locator('.bspf-dialog').count()) === 0);
+  check('…and Priority left alone (Standard, unlocked)', !(await sw.isChecked()) && !(await sw.isDisabled()));
+  await page.click('[data-bspf-field="priority"] .switch'); // the DS switch hides its real checkbox
   await page.fill('[data-bspf-field="description"] textarea', 'Deck refresh.\nSecond line.');
   await page.fill('[data-bspf-field="links"] textarea', '/sites/x/page-one\n/sites/x/page-two');
-  await pick(page, 'translation', 'Yes');
+  await page.check('[data-bspf-field="translation"] input');
   await page.setInputFiles('input[type="file"]', [{ name: 'brief.txt', mimeType: 'text/plain', buffer: Buffer.from('dev test attachment') }]);
   await page.locator('.bspf').screenshot({ path: path.join(OUT, 'creative-filled.png') });
   await navClick(page, 'Submit request');
   const r1 = await afterSubmit(page);
   check('submission 1 → confirmation', r1 === 'done', r1);
 
-  // ---- submission 2: same date, user picks "Change to 48 hours" -> Tue, Standard
+  // ---- submission 2: a week out — no callout; Standard; Translation unticked
   await navClick(page, 'Submit another');
   await page.waitForTimeout(600);
   await person(page, 'requestor', 'joe');
   await page.fill('[data-bspf-field="department"] input', 'Team Two');
   await pick(page, 'pillar', 'Other');
-  await date.fill('2030-01-14');
+  await date.fill('2030-01-21T13:30');
   await page.waitForTimeout(400);
-  check('prompt again after reset', await dlg.isVisible());
-  await page.click('.bspf-dialog__alt');
-  await page.waitForTimeout(250);
-  check('"Change to 48 hours" → Tue 2030-01-15, Standard, unlocked',
-    (await date.inputValue()) === '2030-01-15' && !(await sw.isChecked()) && !(await sw.isDisabled()), await date.inputValue());
-  await page.fill('[data-bspf-field="description"] textarea', 'Second test, moved date.');
+  check('a week out → no callout', !(await note.isVisible()));
+  await page.fill('[data-bspf-field="description"] textarea', 'Second test, a week out.');
   await navClick(page, 'Submit request');
   const r2 = await afterSubmit(page);
   check('submission 2 → confirmation', r2 === 'done', r2);
@@ -140,8 +130,8 @@ async function afterSubmit(page) {
   const [a, b] = items;
   check('two items created', items.length === 2, items.length);
   if (a) {
-    check('1: Priority "Urgent" (not a list choice — REST accepts it)', a.Priority === 'Urgent', a.Priority);
-    check('1: launch date kept (Mon 2030-01-14)', /^2030-01-14/.test(a.field_6 || ''), a.field_6);
+    check('1: Priority "Urgent" (set by the user; not a list choice — REST accepts it)', a.Priority === 'Urgent', a.Priority);
+    check('1: launch date+time saved (Mon 10:00 ET = 15:00Z)', a.field_6 === '2030-01-14T15:00:00Z', a.field_6);
     check('1: Partners saved', a.PartnersId && (a.PartnersId.results || a.PartnersId).length === 1, JSON.stringify(a.PartnersId));
     check('1: Links/Location keeps line breaks', /page-one<br\s*\/?>\/sites\/x\/page-two/.test(a.field_7 || ''), JSON.stringify(a.field_7));
     check('1: Description keeps line breaks', /Deck refresh\.<br\s*\/?>Second line\./.test(a.field_9 || ''));
@@ -151,9 +141,9 @@ async function afterSubmit(page) {
   }
   if (b) {
     check('2: Priority "Standard"', b.Priority === 'Standard', b.Priority);
-    check('2: date moved to Tue 2030-01-15', /^2030-01-15/.test(b.field_6 || ''), b.field_6);
+    check('2: launch date+time saved (Mon 13:30 ET = 18:30Z)', b.field_6 === '2030-01-21T18:30:00Z', b.field_6);
     check('2: Title from template', /^Team Two request — /.test(b.Title || ''), b.Title);
-    check('2: Translation left blank', b.TranslationRequired === null, b.TranslationRequired);
+    check('2: Translation unticked → "No"', b.TranslationRequired === 'No', b.TranslationRequired);
     check('Team from ?team= (any case), normalized', a.Team === 'fcucommssecawareness' && b.Team === 'fcucommssecawareness', a.Team + ' / ' + b.Team);
   }
   check('no page errors', !errs.length, errs.join(' | '));

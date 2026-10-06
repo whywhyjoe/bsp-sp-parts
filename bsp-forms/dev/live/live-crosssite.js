@@ -27,7 +27,7 @@ const FIELDS = {
   Pillar_x002f_Partner: '<Field Type="MultiChoice" Name="Pillar_x002f_Partner" StaticName="Pillar_x002f_Partner" DisplayName="Pillar/Partner" Required="TRUE">' + ch([
     'BM I&I', 'Cyber Security', 'EFM', 'Physical Security', 'RR&C', '----', 'GSI/Initiative Management', 'GSI/Comms', 'GSI/OCM',
     'GSI/Strategy', 'GSI/Documentation', 'T&O', 'BMO.com', 'Branch', 'Enterprise', 'Other']) + '</Field>',
-  field_6: '<Field Type="DateTime" Name="field_6" StaticName="field_6" DisplayName="Requested Launch Date" Required="TRUE" Format="DateOnly" />',
+  field_6: '<Field Type="DateTime" Name="field_6" StaticName="field_6" DisplayName="Requested Launch Date" Required="TRUE" Format="DateTime" />',
   field_9: '<Field Type="Note" Name="field_9" StaticName="field_9" DisplayName="Description" Required="TRUE" NumLines="6" RichText="TRUE" RichTextMode="FullHtml" />',
   UserBase: '<Field Type="Text" Name="UserBase" StaticName="UserBase" DisplayName="UserBase" />',
   // used by gsi-digital-creative-intake.json
@@ -70,6 +70,16 @@ const FIELDS = {
         body: JSON.stringify({ parameters: { SchemaXml: xml, Options: 8 } }) }); // 8 = AddFieldInternalNameHint
       if (!r.ok) throw new Error('field ' + name + ' ' + r.status + ' ' + await r.text());
       log.push('added ' + name);
+    }
+    // field_6 is Date AND time on prod (the creative form picks a time); older twins were date-only
+    r = await fetch(listApi + "/fields/getbyinternalnameortitle('field_6')?$select=DisplayFormat", { headers: { accept: J } });
+    if (r.ok && (await r.json()).DisplayFormat !== 1) {
+      const V = 'application/json;odata=verbose';
+      r = await fetch(listApi + "/fields/getbyinternalnameortitle('field_6')", { method: 'POST',
+        headers: { accept: V, 'content-type': V, 'X-RequestDigest': digest, 'X-HTTP-Method': 'MERGE', 'IF-MATCH': '*' },
+        body: JSON.stringify({ __metadata: { type: 'SP.FieldDateTime' }, DisplayFormat: 1 }) });
+      if (!r.ok) throw new Error('field_6 -> DateTime ' + r.status + ' ' + await r.text());
+      log.push('field_6 switched to Date and time');
     }
     const check = (await (await fetch(listApi + '/fields?$select=InternalName&$filter=Hidden eq false', { headers: { accept: J } })).json()).value.map(f => f.InternalName);
     return { log, missing: Object.keys(FIELDS).filter(n => !check.includes(n)) };
