@@ -2,7 +2,7 @@
 
 Last touched: 2026-10-06
 Mode: Joe
-Branch: bsp-forms-creative-callout, pushed (not merged); earlier work is on main
+Branch: all work merged to main 2026-10-06 and pushed
 State: two configs, engine 0.4.1; both dev-deployed and verified live cross-site; prod untouched
 
 ## What this is
