@@ -23,6 +23,8 @@
        libBase:    '/sites/FCUPortal/Code/lib/',        // alpine + pnp
        alpineUrl:  null,   // full override of the Alpine url
        pnpUrl:     null,   // full override of the pnpjs 2 bundle url
+       intlUrl:    null,   // full override of the bilingual intl.js url
+                           // (loaded only by forms with form.languages)
        webUrl:     null,   // page web absolute url override
        mockSp:     null    // dev-only mock adapter (see dev/mock-sp.js)
      };
@@ -32,7 +34,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '0.4.1';
+  var VERSION = '0.5.0';
   var NS = window.BSPForms = window.BSPForms || {};
   if (NS.__engineLoaded) { if (NS.scan) NS.scan(); return; }
   NS.__engineLoaded = true;
@@ -59,6 +61,7 @@
   var libBase = settings.libBase || (engineBase ? normPath(engineBase + '../lib/') : '');
   var alpineUrl = settings.alpineUrl || (libBase + 'alpine.js');
   var pnpUrl = settings.pnpUrl || (libBase + 'pnp2.bundle.js');
+  var intlUrl = settings.intlUrl || (libBase + 'intl.js');
 
   var hostNonce = (scriptEl && scriptEl.nonce) ||
     (function () { var s = document.querySelector('script[nonce]'); return s ? s.nonce : ''; })();
@@ -248,8 +251,162 @@
     editModeNote: 'BSP Forms — renders in view mode. Config:',
     stepOf: 'Step {n} of {total}',
     doctorTitle: 'Form configuration check',
-    doctorOk: 'OK', doctorWarn: 'Check', doctorError: 'Problem'
+    doctorOk: 'OK', doctorWarn: 'Check', doctorError: 'Problem',
+    // assignments rows, current user, submit confirmation, header card
+    assignLoading: 'Loading the items assigned to you…',
+    assignLoadError: 'The items assigned to you couldn’t be loaded. Try again in a moment.',
+    assignNoUser: 'Your account couldn’t be identified, so the items assigned to you can’t be loaded.',
+    assignRetry: 'Try again',
+    assignRowRequired: 'Make a selection for this row.',
+    assignAllRequired: 'Make a selection for every row.',
+    assignProgress: '{n} of {total} complete',
+    assignSomeDone: '{n} of your items were already submitted and aren’t shown.',
+    assignClear: 'Clear selection',
+    assignSaved: 'Saved',
+    assignEmptyTitle: 'Nothing to complete',
+    assignEmptyMessage: 'There are no items assigned to you right now.',
+    assignDoneTitle: 'Already submitted',
+    assignDoneMessage: 'You’ve already submitted a response for everything assigned to you.',
+    rowsPartial: '{n} of {total} rows are confirmed saved; the rest may not be. Select {submit} to finish — rows already saved are checked first and skipped.',
+    rowsFailed: 'Not every row could be saved. Select {submit} to try again — rows that did save are checked first and skipped.',
+    assignMore: 'Only the first {max} of your items are shown. Submit these, then reload the page to see the rest.',
+    assignKeysMore: 'More than {max} earlier responses were found, so some items you already answered may show again.',
+    submitConfirmTitle: 'Please confirm', submitConfirmOk: 'Confirm', submitConfirmCancel: 'Go back',
+    userLoading: 'Identifying you…',
+    opensNewTab: '(opens in a new tab)'
   };
+
+  /* French defaults (form.languages includes "fr"). Same keys as above;
+     a form's own strings override either set. */
+  var DEFAULT_STRINGS_FR = {
+    next: 'Suivant', back: 'Précédent', submit: 'Soumettre', submitting: 'Envoi en cours…',
+    requiredField: 'Ce champ est obligatoire.',
+    invalidEmail: 'Entrez une adresse courriel valide (nom@exemple.com).',
+    invalidPhone: 'Entrez un numéro de téléphone valide.',
+    invalidUrl: 'Entrez une adresse Web valide commençant par http:// ou https://.',
+    invalidNumber: 'Entrez un nombre.',
+    numberInteger: 'Entrez un nombre entier.',
+    numberMin: 'La valeur doit être d’au moins {min}.',
+    numberMax: 'La valeur ne doit pas dépasser {max}.',
+    textMinLength: 'Entrez au moins {min} caractères.',
+    textMaxLength: 'Entrez au plus {max} caractères.',
+    patternMismatch: 'Le format ne correspond pas à celui attendu.',
+    choiceRequired: 'Choisissez une option.',
+    multiMin: 'Choisissez au moins {min} option(s).',
+    multiMax: 'Choisissez au plus {max} option(s).',
+    personRequired: 'Ajoutez au moins une personne.',
+    personMax: 'Ajoutez au plus {max} personnes.',
+    personPlaceholder: 'Tapez un nom ou une adresse courriel…',
+    personSearching: 'Recherche dans l’annuaire…',
+    personNoResults: 'Aucune personne correspondante.',
+    personResolveFailed: 'Impossible de confirmer {name} dans l’annuaire. Retirez cette personne, puis ajoutez-la de nouveau.',
+    dateAfter: 'La date doit être postérieure à {other}.',
+    dateOnOrAfter: 'La date ne peut pas précéder {other}.',
+    dateBefore: 'La date doit être antérieure à {other}.',
+    dateOnOrBefore: 'La date ne peut pas dépasser {other}.',
+    todayLabel: 'aujourd’hui',
+    comboPlaceholder: 'Sélectionnez une option',
+    comboPlaceholderMulti: 'Sélectionnez une ou plusieurs options',
+    fillInPlaceholder: 'Ou entrez votre propre valeur…',
+    fillInAdd: 'Ajouter',
+    lookupLoading: 'Chargement des options…',
+    lookupError: 'Impossible de charger les options de ce champ. Réessayez plus tard.',
+    linkUrlPlaceholder: 'https://…',
+    linkDescPlaceholder: 'Texte affiché (facultatif)',
+    attachDrop: 'Glissez des fichiers ici ou cliquez pour parcourir',
+    attachHint: '',
+    attachTooLarge: '{name} dépasse la limite de {max} Mo.',
+    attachTooMany: 'Vous pouvez joindre au plus {max} fichiers.',
+    attachBadType: '{name} n’est pas un type de fichier accepté. Types acceptés : {types}.',
+    attachRequired: 'Joignez au moins un fichier.',
+    attachRemove: 'Retirer',
+    attachDone: 'Téléversé',
+    pageError: 'Corrigez les champs en surbrillance pour continuer.',
+    submitFailed: 'Votre réponse n’a pas été soumise — rien n’a été enregistré. Réessayez dans un moment.',
+    submitFailedDetail: 'Détails : {detail}',
+    attachPartialTitle: 'Réponse enregistrée — pièces jointes incomplètes',
+    attachPartial: 'Vos réponses ont été enregistrées, mais {n} pièce(s) jointe(s) n’ont pas pu être téléversée(s).',
+    attachRetry: 'Réessayer les téléversements',
+    attachSkip: 'Continuer sans elles',
+    confirmTitle: 'Merci — votre réponse a été soumise.',
+    promptTitle: 'Veuillez confirmer', promptOk: 'OK',
+    redirectCountdown: 'Redirection dans {n} secondes…',
+    redirectPaused: 'Copiez d’abord le lien; vous serez ensuite redirigé.',
+    redirectNow: 'Y aller maintenant',
+    copyBlocked: 'Votre navigateur n’a pas permis la copie automatique. Copiez le lien ci-dessous pour continuer.',
+    copyLabel: 'Lien d’origine', copyButton: 'Copier le lien',
+    confirmMessage: '',
+    confirmAnother: 'Soumettre une autre réponse',
+    configLoadError: 'Ce formulaire n’a pas pu être chargé. Si le problème persiste, communiquez avec le responsable du formulaire.',
+    configLoadDetail: '(BSP Forms : {detail})',
+    noContext: 'Aucune connexion SharePoint n’a été trouvée sur cette page; le formulaire ne peut donc pas être soumis.',
+    editModeNote: 'BSP Forms — s’affiche en mode lecture. Configuration :',
+    stepOf: 'Étape {n} de {total}',
+    doctorTitle: 'Vérification de la configuration du formulaire',
+    doctorOk: 'OK', doctorWarn: 'À vérifier', doctorError: 'Problème',
+    assignLoading: 'Chargement des éléments qui vous sont attribués…',
+    assignLoadError: 'Impossible de charger les éléments qui vous sont attribués. Réessayez dans un moment.',
+    assignNoUser: 'Votre compte n’a pas pu être identifié; les éléments qui vous sont attribués ne peuvent donc pas être chargés.',
+    assignRetry: 'Réessayer',
+    assignRowRequired: 'Faites une sélection pour cette ligne.',
+    assignAllRequired: 'Faites une sélection pour chaque ligne.',
+    assignProgress: '{n} sur {total} terminé(s)',
+    assignSomeDone: '{n} de vos éléments ont déjà été soumis et ne sont pas affichés.',
+    assignClear: 'Effacer la sélection',
+    assignSaved: 'Enregistré',
+    assignEmptyTitle: 'Rien à remplir',
+    assignEmptyMessage: 'Aucun élément ne vous est attribué pour le moment.',
+    assignDoneTitle: 'Déjà soumis',
+    assignDoneMessage: 'Vous avez déjà soumis une réponse pour tout ce qui vous est attribué.',
+    rowsPartial: 'L’enregistrement de {n} ligne(s) sur {total} est confirmé; les autres ne le sont peut-être pas. Sélectionnez {submit} pour terminer — les lignes déjà enregistrées sont vérifiées, puis ignorées.',
+    rowsFailed: 'Certaines lignes n’ont pas pu être enregistrées. Sélectionnez {submit} pour réessayer — les lignes déjà enregistrées sont vérifiées, puis ignorées.',
+    assignMore: 'Seuls les {max} premiers éléments qui vous sont attribués sont affichés. Soumettez-les, puis rechargez la page pour voir les autres.',
+    assignKeysMore: 'Plus de {max} réponses antérieures ont été trouvées; certains éléments auxquels vous avez déjà répondu pourraient donc réapparaître.',
+    submitConfirmTitle: 'Veuillez confirmer', submitConfirmOk: 'Confirmer', submitConfirmCancel: 'Revenir',
+    userLoading: 'Identification en cours…',
+    opensNewTab: '(s’ouvre dans un nouvel onglet)'
+  };
+
+  /* ------------------------------------------------------------------
+     Bilingual configs (form.languages: ["en", "fr"]). Any author string
+     may be an { "en": "…", "fr": "…" } pair; localize() resolves every
+     pair to the active language before normalizing, falling back to
+     English for a missing or empty translation (the intl library's rule).
+     The language itself comes from the bilingual library (window.intl,
+     bilingual/intl.js), which the engine loads for such forms; on
+     intl.setLang() the form re-renders in place, keeping its state.
+     ------------------------------------------------------------------ */
+  var LANGS = ['en', 'fr'];
+  function isLangPair(o) {
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return false;
+    var keys = Object.keys(o);
+    return keys.length > 0 && keys.every(function (k) {
+      return LANGS.indexOf(k) > -1 && (o[k] == null || typeof o[k] === 'string');
+    });
+  }
+  function localize(v, lang) {
+    if (Array.isArray(v)) return v.map(function (x) { return localize(x, lang); });
+    if (isLangPair(v)) return (v[lang] != null && v[lang] !== '') ? v[lang] : (v.en != null ? v.en : '');
+    if (v && typeof v === 'object') {
+      var out = {};
+      Object.keys(v).forEach(function (k) {
+        // an own "__proto__" key from JSON stays plain data
+        Object.defineProperty(out, k, { value: localize(v[k], lang), enumerable: true, writable: true, configurable: true });
+      });
+      return out;
+    }
+    return v;
+  }
+  function formLangs(raw) {
+    var l = raw && raw.form && raw.form.languages;
+    return Array.isArray(l) && l.length ? l : null;
+  }
+  function activeLang(raw) {
+    var langs = formLangs(raw) || ['en'];
+    var cur = window.intl && typeof window.intl.getLang === 'function' ? window.intl.getLang() : null;
+    if (langs.indexOf(cur) > -1) return cur;
+    return LANGS.indexOf(langs[0]) > -1 ? langs[0] : 'en';
+  }
 
   /* ------------------------------------------------------------------
      Asset loading — idempotent; every injected element carries a
@@ -335,6 +492,25 @@
     if (window.Alpine) return Promise.resolve();
     return loadScript(alpineUrl, 'alpine');
   }
+  // the bilingual library, for forms that declare form.languages. A page
+  // may already load it (its own strings.js etc.); otherwise it comes from
+  // the shared lib folder. If it can't load, the form still renders, in
+  // its first language.
+  function whenIntl(raw) {
+    var langs = formLangs(raw);
+    if (!langs || langs.length < 2 || window.intl) return Promise.resolve();
+    return loadScript(intlUrl, 'intl').catch(function (e) {
+      console.warn('[BSP Forms] intl.js unavailable — showing the form in "' + langs[0] + '":', e);
+    });
+  }
+  var intlWired = false;
+  function wireIntl() {
+    if (intlWired || !window.intl || typeof window.intl.onChange !== 'function') return;
+    intlWired = true;
+    window.intl.onChange(function () {
+      Object.keys(NS._defs).forEach(function (uid) { relocalize(NS._defs[uid]); });
+    });
+  }
 
   /* ------------------------------------------------------------------
      SharePoint page context + user
@@ -393,6 +569,17 @@
     var c = ctxs[0] || {};
     return { name: c.userDisplayName || '', email: c.userEmail || '', login: c.userLoginName || '' };
   }
+  // every address a user's rows may be keyed by: the profile email, plus
+  // the UPN from the claims login (they differ for some accounts).
+  // Lower-cased and de-duplicated; SharePoint compares text case-blind anyway.
+  function userEmails(u) {
+    var out = [];
+    [u && u.email, u && u.login && String(u.login).split('|').pop()].forEach(function (a) {
+      a = String(a || '').trim().toLowerCase();
+      if (a.indexOf('@') > 0 && out.indexOf(a) < 0) out.push(a);
+    });
+    return out;
+  }
   function absUrl(u) {
     if (!u) return u;
     if (/^https?:/i.test(u)) return u;
@@ -437,6 +624,9 @@
     // OData string literal: a single quote is doubled (same rule as the
     // dcspad SPUtils esc helper)
     function odataStr(v) { return String(v).replace(/'/g, "''"); }
+    function userFilter(col, emails) {
+      return emails.map(function (e) { return col + " eq '" + odataStr(e) + "'"; }).join(' or ');
+    }
     // pnp loaded + page web known (resolved over REST when the page has no
     // _spPageContextInfo). Every SharePoint call goes through this.
     function whenCtx() {
@@ -465,6 +655,19 @@
       if (cfg.target.listId) return w.lists.getById(cfg.target.listId);
       if (cfg.target.listUrl) return w.getList(listServerRelUrl(cfg.target.listUrl));
       return w.lists.getByTitle(cfg.target.listTitle);
+    }
+    // items.add without a type name looks it up through pnp's 5-day
+    // localStorage cache, keyed by the list's RELATIVE url (this bundle has
+    // no pnp.Web): same-titled lists on two webs share one entry tenant-wide,
+    // and the add fails with "A type named SP.Data.… could not be resolved".
+    // Ask the target list itself, uncached, once per adapter.
+    var entityType = null;
+    function listEntityType() {
+      if (entityType) return Promise.resolve(entityType);
+      return list().select('ListItemEntityTypeFullName').get().then(function (r) {
+        entityType = r.ListItemEntityTypeFullName;
+        return entityType;
+      });
     }
 
     return {
@@ -513,8 +716,8 @@
         }).then(function (r) { return r.data.Id; });
       },
       addItem: function (payload) {
-        return whenCtx().then(function () {
-          return list().items.add(payload);
+        return whenCtx().then(listEntityType).then(function (type) {
+          return list().items.add(payload, type);
         }).then(function (r) { return { id: r.data.Id, item: r.item }; });
       },
       addAttachment: function (itemRef, name, file) {
@@ -534,6 +737,74 @@
           var v = rows && rows[0] ? rows[0][lk.returnColumn] : null;
           if (v && typeof v === 'object') v = v.Url;
           return v ? String(v) : null;
+        });
+      },
+      // assignments: the source rows whose userColumn holds one of the
+      // user's addresses. { rows: [{ ID, …columns }], more: bool } — one
+      // extra row is asked for, so a cut-off list is reported, never silent.
+      getAssignments: function (src, emails) {
+        var max = src.top || 500;
+        return whenCtx().then(function () {
+          var items = listOf(src).items;
+          items = items.select.apply(items, ['Id'].concat(src._cols));
+          return items.filter(userFilter(src.userColumn, emails))
+            .orderBy(src.orderBy || src.labelColumn, true)
+            .top(max + 1)
+            .get();
+        }).then(function (rows) {
+          rows = rows || [];
+          return {
+            more: rows.length > max,
+            rows: rows.slice(0, max).map(function (it) {
+              var o = { ID: it.Id };
+              src._cols.forEach(function (c) { o[c] = it[c] == null ? '' : it[c]; });
+              return o;
+            })
+          };
+        });
+      },
+      // keyColumn values of the rows this user already saved to the target
+      // list (assignments.responses) — those source rows aren't shown again.
+      // { keys: [string], more: bool } — more = the read hit its cap.
+      getRowKeys: function (rk, emails) {
+        var max = ROW_KEYS_MAX;
+        return whenCtx().then(function () {
+          return list().items.select(rk.keyColumn)
+            .filter(userFilter(rk.userColumn, emails))
+            .top(max + 1)
+            .get();
+        }).then(function (rows) {
+          rows = rows || [];
+          return {
+            more: rows.length > max,
+            keys: rows.slice(0, max).map(function (r) { return r[rk.keyColumn]; })
+              .filter(function (v) { return v != null && v !== ''; }).map(String)
+          };
+        });
+      },
+      // which of these keys this user already has in the target list — an
+      // exact check for a handful of rows (the retry after a failed save), so
+      // ROW_KEYS_MAX never applies. A number is sent as a number literal (a
+      // Number column rejects a quoted one); chunks keep the URL short.
+      getRowKeysFor: function (rk, emails, values) {
+        var chunks = [];
+        for (var i = 0; i < values.length; i += 20) chunks.push(values.slice(i, i + 20));
+        return whenCtx().then(function () {
+          return Promise.all(chunks.map(function (part) {
+            var keys = part.map(function (v) {
+              return rk.keyColumn + ' eq ' + (typeof v === 'number' ? v : "'" + odataStr(v) + "'");
+            }).join(' or ');
+            return list().items.select(rk.keyColumn)
+              .filter('(' + userFilter(rk.userColumn, emails) + ') and (' + keys + ')')
+              .top(part.length * 10)
+              .get();
+          }));
+        }).then(function (pages) {
+          var out = [];
+          pages.forEach(function (rows) {
+            (rows || []).forEach(function (r) { if (r[rk.keyColumn] != null) out.push(String(r[rk.keyColumn])); });
+          });
+          return out;
         });
       },
       getListFields: function (spec) {
@@ -564,7 +835,11 @@
      Config normalization + structural validation
      ------------------------------------------------------------------ */
   var TYPES = ['text', 'textarea', 'email', 'phone', 'number', 'currency', 'choice',
-    'multichoice', 'boolean', 'date', 'person', 'link', 'lookup', 'heading', 'note', 'hidden'];
+    'multichoice', 'boolean', 'date', 'person', 'link', 'lookup', 'heading', 'note', 'hidden',
+    'assignments', 'currentUser'];
+  // display-only types: no value, no validation, no column
+  var STATIC_TYPES = { heading: 1, note: 1, currentUser: 1 };
+  var TINTS = ['sky', 'blue', 'neutral'];
 
   /* Values from the page URL (field.query). Parameter names match
      case-insensitively; URLSearchParams decodes the value, so an encoded
@@ -595,15 +870,56 @@
   }
   var PILL_CYCLE = ['blue', 'green', 'lavender', 'orange', 'teal', 'berry', 'yellow', 'sky', 'red', 'gray'];
 
-  function normalizeConfig(raw) {
+  /* assignments: one row per source-list item keyed to the current user,
+     one choice per row; the form saves one target item per row. */
+  function isIdCol(c) { return c === 'ID' || c === 'Id'; }
+  // one read of the user's earlier responses (a list view page)
+  var ROW_KEYS_MAX = 5000;
+  function normalizeAssignments(f, errors) {
+    var where = 'field "' + f.id + '"';
+    var src = f.source = Object.assign({}, f.source || {});
+    if (!src.listTitle && !src.listUrl) errors.push(where + ': source.listTitle or source.listUrl is required');
+    if (!src.userColumn) errors.push(where + ': source.userColumn is required');
+    if (!src.labelColumn) errors.push(where + ': source.labelColumn is required');
+    if (!f.column) errors.push(where + ': column (where each row\'s choice is saved) is required');
+    f.rowColumns = (f.rowColumns && typeof f.rowColumns === 'object') ? f.rowColumns : {};
+    // every source column the rows need: label, detail, and what rowColumns copies
+    var cols = [];
+    [src.labelColumn, src.detailColumn].concat(Object.keys(f.rowColumns).map(function (k) { return f.rowColumns[k]; }))
+      .forEach(function (c) { if (c && !isIdCol(c) && cols.indexOf(c) < 0) cols.push(c); });
+    src._cols = cols;
+    var rs = f.responses;
+    if (rs != null) {
+      if (!rs.userColumn || !rs.keyColumn) errors.push(where + ': responses needs userColumn and keyColumn');
+      else if (!f.rowColumns[rs.keyColumn]) {
+        errors.push(where + ': responses.keyColumn "' + rs.keyColumn + '" must be a rowColumns target (e.g. "' + rs.keyColumn + '": "ID")');
+      }
+    }
+  }
+
+  function normalizeConfig(raw, lang) {
     var errors = [];
-    var cfg = JSON.parse(JSON.stringify(raw || {}));
+    lang = lang || 'en';
+    var langs = formLangs(raw);
+    if (raw && raw.form && raw.form.languages != null &&
+        (!langs || !langs.every(function (l) { return LANGS.indexOf(l) > -1; }))) {
+      errors.push('form.languages must be a non-empty array of "en" / "fr"');
+    }
+    var cfg = localize(JSON.parse(JSON.stringify(raw || {})), lang);
+    cfg._lang = lang;
+    cfg._multiLang = !!langs && langs.length > 1;
 
     cfg.form = cfg.form || {};
     cfg.form.appearance = Object.assign(
       { frame: 'card', header: 'band', tint: 'sky', icon: null },
       cfg.form.appearance || {});
-    cfg.strings = Object.assign({}, DEFAULT_STRINGS, cfg.strings || {});
+    cfg.strings = Object.assign({}, DEFAULT_STRINGS, lang === 'fr' ? DEFAULT_STRINGS_FR : {}, cfg.strings || {});
+    var hc = cfg.form.headerCard;
+    if (hc != null && (typeof hc !== 'object' || !hc.title || !hc.url)) {
+      errors.push('form.headerCard needs title and url');
+    }
+    var sc = cfg.submitConfirm;
+    if (sc != null && (typeof sc !== 'object' || !sc.message)) errors.push('submitConfirm needs a message');
     // business calendar for withinBusinessDays rules and date prompts
     var bhRaw = cfg.form.businessHours;
     cfg._bh = null;
@@ -655,6 +971,9 @@
         if (sec.columns != null && sec.columns !== 1 && sec.columns !== 2) {
           errors.push('section "' + sec.id + '": columns must be 1 or 2');
         }
+        if (sec.tint != null && TINTS.indexOf(sec.tint) < 0) {
+          errors.push('section "' + sec.id + '": tint must be ' + TINTS.join(', '));
+        }
         sec.fields.forEach(function (f, fi) {
           if (!f.id) { errors.push('field #' + (fi + 1) + ' in section "' + sec.id + '" is missing an id'); f.id = sec.id + '_f' + fi; }
           if (TYPES.indexOf(f.type) < 0) errors.push('field "' + f.id + '": unknown type "' + f.type + '"');
@@ -669,15 +988,18 @@
             try { f._pattern = new RegExp(f.validation.pattern); }
             catch (e) { errors.push('field "' + f.id + '": validation.pattern is invalid (' + e.message + ')'); }
           }
-          if (f.type === 'choice' || f.type === 'multichoice') {
+          if (f.type === 'choice' || f.type === 'multichoice' || f.type === 'assignments') {
             var ch = Array.isArray(f.choices) ? f.choices : [];
             if (!ch.length) errors.push('field "' + f.id + '": choices are required for type ' + f.type);
             f.choices = ch.map(function (c, ci) {
+              // value is what's saved; label (optional, may be bilingual) is shown
               var o = (typeof c === 'string') ? { value: c } : Object.assign({}, c);
               if (!o.color) o.color = PILL_CYCLE[ci % PILL_CYCLE.length];
+              if (!o.label) o.label = o.value;
               return o;
             });
           }
+          if (f.type === 'assignments') normalizeAssignments(f, errors);
           if (f.type === 'lookup') {
             f.lookup = f.lookup || {};
             if (!f.lookup.listTitle) errors.push('field "' + f.id + '": lookup.listTitle is required');
@@ -685,7 +1007,7 @@
           }
           if (f.type === 'person') f.multiple = !!f.multiple;
           if (f.type === 'date') f.includeTime = !!f.includeTime;
-          if (f.type === 'heading' || f.type === 'note') f.column = null;
+          if (STATIC_TYPES[f.type]) f.column = null;
           byKey[k] = f; keyOfId[f.id] = k; ordered.push(f);
         });
       });
@@ -770,6 +1092,19 @@
       checkScreen(as.notFound, 'afterSubmit.notFound');
     }
     if (cfg.queryError) checkScreen(cfg.queryError, 'queryError');
+
+    // assignments: at most one per form; it turns submit into one item per row
+    var asgs = ordered.filter(function (f) { return f.type === 'assignments'; });
+    if (asgs.length > 1) errors.push('only one assignments field per form (found ' + asgs.length + ')');
+    cfg._asg = asgs[0] || null;
+    if (cfg._asg && cfg.attachments.enabled) errors.push('attachments can\'t be combined with an assignments field (one item per row)');
+    if (cfg._asg && cfg._asg.visibleWhen) errors.push('field "' + cfg._asg.id + '": an assignments field can\'t have visibleWhen');
+    if (cfg.target.set != null) {
+      if (typeof cfg.target.set !== 'object' || Array.isArray(cfg.target.set)) errors.push('target.set must be an object of column → template');
+      else Object.keys(cfg.target.set).forEach(function (col) {
+        if (typeof cfg.target.set[col] !== 'string') errors.push('target.set.' + col + ' must be a string template');
+      });
+    }
 
     if (cfg.attachments.enabled && cfg.attachments.section != null) {
       // render inside a section (its page wins over attachments.page)
@@ -1023,7 +1358,7 @@
     h += '<span class="bspf-combo__value">';
     h += '<span class="bspf-combo__placeholder" x-show="!values.' + K + '">' + esc(f.placeholder || S.comboPlaceholder) + '</span>';
     f.choices.forEach(function (c) {
-      h += '<span class="bspf-pill bspf-pill--' + esc(c.color) + '" x-show="values.' + K + '===' + esc(jstr(c.value)) + '"><span>' + esc(c.value) + '</span></span>';
+      h += '<span class="bspf-pill bspf-pill--' + esc(c.color) + '" x-show="values.' + K + '===' + esc(jstr(c.value)) + '"><span>' + esc(c.label) + '</span></span>';
     });
     if (f.fillIn) {
       h += '<span class="bspf-pill bspf-pill--gray" x-show="isCustom(' + kq + ')" x-cloak><span x-text="values.' + K + '"></span></span>';
@@ -1035,7 +1370,7 @@
       h += '<button type="button" class="bspf-combo__option" role="option"' +
         ' :aria-selected="values.' + K + '===' + vq + ' ? \'true\' : \'false\'"' +
         ' @click="pickChoice(' + kq + ',' + vq + ')">' +
-        pillHtml(c.color, esc(c.value)) +
+        pillHtml(c.color, esc(c.label)) +
         '<span class="bspf-combo__check" x-show="values.' + K + '===' + vq + '" x-cloak>' + icon('ic-fluent-checkmark-24-regular') + '</span>' +
         '</button>';
     });
@@ -1060,7 +1395,7 @@
     h += '<span class="bspf-combo__placeholder" x-show="!values.' + K + '.length">' + esc(f.placeholder || S.comboPlaceholderMulti) + '</span>';
     f.choices.forEach(function (c) {
       var vq = esc(jstr(c.value));
-      h += '<span class="bspf-pill bspf-pill--' + esc(c.color) + '" x-show="values.' + K + '.indexOf(' + vq + ')>-1"><span>' + esc(c.value) + '</span>' +
+      h += '<span class="bspf-pill bspf-pill--' + esc(c.color) + '" x-show="values.' + K + '.indexOf(' + vq + ')>-1"><span>' + esc(c.label) + '</span>' +
         '<button type="button" class="bspf-pill__remove" aria-label="' + esc(S.attachRemove) + '" @click.stop="toggleMulti(' + kq + ',' + vq + ')">' + icon('ic-fluent-dismiss-24-regular') + '</button>' +
         '</span>';
     });
@@ -1077,7 +1412,7 @@
       h += '<button type="button" class="bspf-combo__option" role="option"' +
         ' :aria-selected="values.' + K + '.indexOf(' + vq + ')>-1 ? \'true\' : \'false\'"' +
         ' @click="toggleMulti(' + kq + ',' + vq + ')">' +
-        pillHtml(c.color, esc(c.value)) +
+        pillHtml(c.color, esc(c.label)) +
         '<span class="bspf-combo__check" x-show="values.' + K + '.indexOf(' + vq + ')>-1" x-cloak>' + icon('ic-fluent-checkmark-24-regular') + '</span>' +
         '</button>';
     });
@@ -1173,6 +1508,122 @@
       '<div class="msgbar__body">' + prose(f.text || '') + '</div></div>';
   }
 
+  function dotHtml(color) {
+    return '<span class="bspf-dot bspf-dot--' + esc(color) + '" aria-hidden="true"></span>';
+  }
+
+  /* assignments — a table of the user's rows, a dot-choice dropdown per row.
+     Rows arrive after load (x-for), so ids are built from the row id. */
+  function renderAssignments(f, S) {
+    var K = f.k, kq = esc(jstr(K)), base = f.domId;
+    var h = '<div class="field bspf-field--full bspf-asg" data-bspf-field="' + esc(K) + '">';
+    if (f.label) {
+      h += '<span class="field__label" id="' + esc(base) + '-lbl">' + esc(f.label) +
+        (f.required ? ' <span class="field__req" aria-hidden="true">*</span>' : '') + '</span>';
+    }
+    if (f.hint) h += '<p class="field__hint">' + prose(f.hint) + '</p>';
+
+    h += '<div class="bspf-asg__state" x-show="asg.state===\'loading\'">' +
+      '<span class="spinner spinner--16" aria-hidden="true"></span><span>' + esc(S.assignLoading) + '</span></div>';
+    h += '<div class="msgbar msgbar--danger" role="alert" x-show="asg.state===\'error\'" x-cloak>' +
+      icon(ICONS.danger, 20).replace('class="icon', 'class="msgbar__icon icon') +
+      '<div class="msgbar__body bspf-asg__err"><span x-text="asg.msg"></span>' +
+      '<button type="button" class="btn btn--sm" @click="loadAssignments()">' + esc(S.assignRetry) + '</button></div></div>';
+    // a cut-off read (too many rows / earlier responses) — shown, never silent
+    h += '<template x-for="(w, wi) in asg.warn" :key="wi">' +
+      '<div class="msgbar msgbar--warning bspf-asg__warn" role="status" x-show="asg.state===\'ready\'">' +
+      icon(ICONS.warning, 20).replace('class="icon', 'class="msgbar__icon icon') +
+      '<div class="msgbar__body" x-text="w"></div></div></template>';
+
+    // the per-row combo: same control/menu as a choice field, dot + label values
+    var c = '<div class="bspf-combo bspf-asg__combo" @click.outside="row.open=false" @keydown.escape.stop="row.open=false">';
+    c += '<div class="bspf-combo__control" role="combobox" tabindex="0" aria-haspopup="listbox"' +
+      ' :id="' + esc(jstr(base + '-x')) + ' + row.id"' +
+      ' :aria-labelledby="' + esc(jstr(base + '-c2 ' + base + '-r')) + ' + row.id"' +
+      ' :aria-expanded="row.open ? \'true\' : \'false\'" :aria-invalid="row.err ? \'true\' : \'false\'"' +
+      ' :aria-disabled="row.saved ? \'true\' : \'false\'"' +
+      ' @click="rowToggle(' + kq + ', row)" @keydown.enter.prevent="rowToggle(' + kq + ', row)"' +
+      ' @keydown.space.prevent="rowToggle(' + kq + ', row)">';
+    c += '<span class="bspf-combo__value">';
+    c += '<span class="bspf-combo__placeholder" x-show="!row.value">' + esc(f.placeholder || S.comboPlaceholder) + '</span>';
+    f.choices.forEach(function (ch) {
+      c += '<span class="bspf-zone" x-show="row.value===' + esc(jstr(ch.value)) + '" x-cloak>' +
+        dotHtml(ch.color) + '<span>' + esc(ch.label) + '</span></span>';
+    });
+    c += '</span>';
+    // clear: stops Enter/Space reaching the control (whose .prevent would
+    // swallow the button's own activation)
+    c += '<button type="button" class="bspf-combo__clear" x-show="row.value && !row.saved" x-cloak' +
+      ' aria-label="' + esc(S.assignClear) + '" title="' + esc(S.assignClear) + '"' +
+      ' @click.stop="rowPick(' + kq + ', row, \'\')" @keydown.enter.stop @keydown.space.stop>' +
+      icon('ic-fluent-dismiss-24-regular', 16) + '</button>';
+    c += '<span class="bspf-asg__savedmark" x-show="row.saved" x-cloak>' + icon('ic-fluent-checkmark-circle-24-filled', 16) +
+      '<span class="bspf-sr">' + esc(S.assignSaved) + '</span></span>';
+    c += icon('ic-fluent-chevron-down-24-regular', 16).replace('class="icon', 'class="bspf-combo__chevron icon') + '</div>';
+    c += '<div class="bspf-combo__menu" x-show="row.open" x-cloak role="listbox">';
+    c += '<button type="button" class="bspf-combo__option bspf-combo__option--clear" role="option" aria-selected="false"' +
+      ' x-show="row.value" @click="rowPick(' + kq + ', row, \'\')">' +
+      icon('ic-fluent-dismiss-24-regular', 16) + '<span>' + esc(S.assignClear) + '</span></button>';
+    f.choices.forEach(function (ch) {
+      var vq = esc(jstr(ch.value));
+      c += '<button type="button" class="bspf-combo__option" role="option"' +
+        ' :aria-selected="row.value===' + vq + ' ? \'true\' : \'false\'" @click="rowPick(' + kq + ', row, ' + vq + ')">' +
+        dotHtml(ch.color) + '<span>' + esc(ch.label) + '</span>' +
+        '<span class="bspf-combo__check" x-show="row.value===' + vq + '" x-cloak>' + icon('ic-fluent-checkmark-24-regular') + '</span></button>';
+    });
+    c += '</div></div>';
+
+    h += '<div class="bspf-asg__table" role="table" x-show="asg.state===\'ready\'" x-cloak' +
+      (f.label ? ' aria-labelledby="' + esc(base) + '-lbl"' : '') + '>';
+    h += '<div class="bspf-asg__head" role="row">' +
+      '<span role="columnheader" id="' + esc(base) + '-c1">' + esc(f.rowLabel || '') + '</span>' +
+      '<span role="columnheader" id="' + esc(base) + '-c2">' + esc(f.choiceLabel || '') + '</span></div>';
+    h += '<template x-for="(row, i) in values.' + K + '" :key="row.id">';
+    h += '<div class="bspf-asg__row" role="row" :class="rowClass(' + kq + ', row)" :style="{ \'--bspf-i\': i }">';
+    h += '<div class="bspf-asg__area" role="cell">' +
+      '<span class="bspf-asg__label" :id="' + esc(jstr(base + '-r')) + ' + row.id" x-text="row.label"></span>';
+    if (f.source.detailColumn) h += '<span class="bspf-asg__detail" x-show="row.detail" x-text="row.detail"></span>';
+    h += '</div>';
+    h += '<div class="bspf-asg__pick" role="cell">' + c +
+      '<p class="field__error" x-show="row.err" x-text="row.err" x-cloak></p></div>';
+    h += '</div></template></div>';
+
+    h += '<div class="progress progress--subtle bspf-asg__progress" x-show="asg.state===\'ready\' && values.' + K + '.length > 1" x-cloak' +
+      ' :class="{ \'progress--success\': rowsDone(' + kq + ')===values.' + K + '.length }"' +
+      ' role="progressbar" aria-valuemin="0" :aria-valuemax="values.' + K + '.length" :aria-valuenow="rowsDone(' + kq + ')">' +
+      '<div class="progress__meta"><span class="progress__label">' + icon('ic-fluent-checkmark-circle-24-regular', 16) +
+      '<span x-text="progressText(' + kq + ')"></span></span></div>' +
+      '<div class="progress__track"><div class="progress__fill" :style="{ width: rowsPct(' + kq + ') + \'%\' }"></div></div></div>';
+    h += '<p class="field__hint" x-show="asg.skipped" x-cloak x-text="fmt(' + esc(jstr(S.assignSomeDone)) + ', { n: asg.skipped })"></p>';
+    h += '<p class="field__error" role="alert" x-show="errors.' + K + '" x-text="errors.' + K + '" x-cloak></p>';
+    return h + '</div>';
+  }
+
+  /* currentUser — who is filling the form in (photo, name, email) */
+  function renderCurrentUser(f, S) {
+    var h = '<div class="field bspf-field--full bspf-who" data-bspf-field="' + esc(f.k) + '">';
+    if (f.label) h += '<span class="field__label">' + esc(f.label) + '</span>';
+    h += '<div class="bspf-who__card">';
+    h += '<span class="bspf-who__avatar">' +
+      '<template x-if="me.email && !photoFail._me"><img class="bspf-who__photo" :src="photoUrl(me)" alt="" @error="photoFail._me=true"></template>' +
+      '<span class="avatar avatar--48" x-show="!me.email || photoFail._me" x-text="me.ready ? initials(me.name || me.email) : \'\'"></span></span>';
+    h += '<span class="bspf-who__id">' +
+      '<span class="bspf-who__name" x-text="me.ready ? (me.name || me.email) : ' + esc(jstr(S.userLoading)) + '"></span>' +
+      '<span class="bspf-who__mail" x-show="me.name && me.email" x-text="me.email"></span></span>';
+    h += '<span class="spinner spinner--16 bspf-who__spin" x-show="!me.ready" aria-hidden="true"></span>';
+    h += '</div>';
+    if (f.hint) h += '<p class="field__hint">' + prose(f.hint) + '</p>';
+    return h + '</div>';
+  }
+
+  // {var:name} from form.vars, for config values used at render time
+  function fillVars(s, cfg) {
+    var vars = cfg.form.vars || {};
+    return String(s == null ? '' : s).replace(/\{var:([^}]+)\}/g, function (m, name) {
+      return Object.prototype.hasOwnProperty.call(vars, name) && vars[name] != null ? String(vars[name]) : '';
+    });
+  }
+
   function renderAttachments(cfg, S, uid) {
     var a = cfg.attachments;
     var labelId = uid + '-att-label'; // per-instance: DOM ids are document-global
@@ -1218,6 +1669,8 @@
       case 'person': return renderPerson(f, S);
       case 'heading': return renderHeading(f);
       case 'note': return renderNote(f);
+      case 'assignments': return renderAssignments(f, S);
+      case 'currentUser': return renderCurrentUser(f, S);
       case 'hidden': return ''; // carried in state + submitted, never rendered
       default: return '';
     }
@@ -1229,17 +1682,38 @@
     var card = ap.frame !== 'plain';
     var pages = cfg.pages;
     var last = pages.length - 1;
-    var h = '<div class="bspf' + (card ? ' bspf--card' : '') + '" x-data="BSPForms.instance(' + esc(jstr(uid)) + ')" data-bspf-uid="' + esc(uid) + '">';
+    // a bilingual form says which language it's in (screen-reader voice), as
+    // lang-keep so the bilingual library's dual-DOM rules never hide or
+    // disable it; the page's own <html lang> stays the page's business
+    var h = '<div class="bspf' + (card ? ' bspf--card' : '') + (cfg._multiLang ? ' lang-keep" lang="' + esc(cfg._lang) : '') +
+      '" x-data="BSPForms.instance(' + esc(jstr(uid)) + ')" data-bspf-uid="' + esc(uid) + '">';
 
     // Header — shown on every view so the form keeps its identity through
     // the confirmation screen.
-    if ((cfg.form.title && cfg.form.showTitle !== false) || cfg.form.intro || ap.icon) {
-      var headCls = 'bspf__head' + (ap.header === 'band' ? ' bspf__head--band bspf__head--' + esc(ap.tint || 'sky') : '');
+    // header card: a link tile beside the intro (job aid, policy, …)
+    var hc = cfg.form.headerCard;
+    var hcHref = hc ? safeHref(fillVars(hc.url, cfg)) : '';
+    if (hc && !hcHref) console.warn('[BSP Forms] form.headerCard not shown: its url is empty or not http(s)/server-relative');
+    if ((cfg.form.title && cfg.form.showTitle !== false) || cfg.form.intro || ap.icon || hcHref) {
+      var headCls = 'bspf__head' + (ap.header === 'band' ? ' bspf__head--band bspf__head--' + esc(ap.tint || 'sky') : '') +
+        (hcHref ? ' bspf__head--hascard' : '');
       h += '<header class="' + headCls + '">';
       h += '<div class="bspf__head-copy">';
       if (cfg.form.title && cfg.form.showTitle !== false) h += '<h2 class="bspf__title">' + esc(cfg.form.title) + '</h2>';
       if (cfg.form.intro) h += '<p class="bspf__intro">' + prose(cfg.form.intro) + '</p>';
       h += '</div>';
+      if (hcHref) {
+        // an asset path (abacus-icons/x.svg) or a sprite name (shield)
+        var hcIcon = !hc.icon ? icon('ic-fluent-info-24-regular', 24)
+          : /[./]/.test(hc.icon) ? '<img src="' + esc(resolveAsset(hc.icon)) + '" alt="">'
+            : icon('ic-fluent-' + esc(hc.icon) + '-24-regular', 24);
+        h += '<a class="bspf-tipcard lift" href="' + esc(hcHref) + '" target="_blank" rel="noopener noreferrer">' +
+          '<span class="bspf-tipcard__icon">' + hcIcon + '</span>' +
+          '<span class="bspf-tipcard__copy"><span class="bspf-tipcard__title">' + esc(hc.title) + '</span>' +
+          (hc.text ? '<span class="bspf-tipcard__text">' + esc(hc.text) + '</span>' : '') + '</span>' +
+          icon('ic-fluent-open-24-regular', 16).replace('class="icon', 'class="bspf-tipcard__go icon') +
+          '<span class="bspf-sr">' + esc(S.opensNewTab) + '</span></a>';
+      }
       if (ap.icon) h += '<img class="bspf__head-icon" src="' + esc(resolveAsset(ap.icon)) + '" alt="">';
       h += '</header>';
     }
@@ -1247,6 +1721,9 @@
     // Body
     h += '<form class="bspf__body" x-show="view===\'form\'" novalidate @submit.prevent="nextOrSubmit()">';
     h += '<div class="bspf__content">';
+    // answers are frozen while a submit runs: native controls via the
+    // disabled fieldset, the custom pickers by their own busy guards
+    h += '<fieldset class="bspf__lock" :disabled="busy">';
 
     // Stepper
     if (pages.length > 1) {
@@ -1268,7 +1745,7 @@
       if (pages.length > 1 && pg.title) h += '<h3 class="bspf-page__title">' + esc(pg.title) + '</h3>';
       if (pg.description) h += '<p class="bspf-page__desc">' + prose(pg.description) + '</p>';
       pg.sections.forEach(function (sec) {
-        h += '<section class="bspf-section"';
+        h += '<section class="bspf-section' + (sec.tint ? ' bspf-section--tint bspf-section--' + esc(sec.tint) : '') + '"';
         if (sec.visibleWhen) h += ' x-show="secVis(' + esc(jstr(sec.id)) + ')" x-cloak';
         h += '>';
         if (sec.icon && (sec.title || sec.description)) {
@@ -1298,7 +1775,7 @@
       icon(ICONS.danger, 20).replace('class="icon', 'class="msgbar__icon icon') +
       '<div class="msgbar__body" x-text="pageError"></div></div>';
 
-    h += '</div>'; // .bspf__content
+    h += '</fieldset></div>'; // .bspf__lock, .bspf__content
 
     h += '<div class="bspf-nav' + (card ? ' bspf-nav--foot' : '') + '">';
     h += '<button type="button" class="btn" x-show="page>0" x-cloak @click="prev()">' + esc(S.back) + '</button>';
@@ -1328,8 +1805,22 @@
       '<span class="spinner spinner--16 spinner--on-accent" x-show="busy" x-cloak aria-hidden="true"></span> ' + esc(S.attachRetry) + '</button>' +
       '</div></div></div>';
 
-    // Prompt dialog (date-field prompts) — the design system's .scrim + .dialog
-    if (cfg._ordered.some(function (f) { return f.prompt; })) {
+    // Nothing-to-do screens for an assignments form (no rows / all submitted)
+    if (cfg._asg) {
+      [['empty', cfg._asg.empty, S.assignEmptyTitle, S.assignEmptyMessage, 'ic-fluent-info-24-regular', ' bspf-done__icon--info'],
+        ['allDone', cfg._asg.allDone, S.assignDoneTitle, S.assignDoneMessage, 'ic-fluent-checkmark-circle-24-filled', '']
+      ].forEach(function (v) {
+        var spec = v[1] || {};
+        var msg = spec.message != null ? spec.message : v[3];
+        h += '<div class="bspf-done bspf-done--' + v[0] + '" x-show="view===\'' + v[0] + '\'" x-cloak>' +
+          '<svg class="icon icon--48 bspf-done__icon' + v[5] + '" aria-hidden="true"><use href="#' + v[4] + '"/></svg>' +
+          '<h2 class="bspf-done__title">' + esc(spec.title || v[2]) + '</h2>' +
+          (msg ? '<p class="bspf-done__msg">' + prose(msg) + '</p>' : '') + '</div>';
+      });
+    }
+
+    // Dialog (date-field prompts, submit confirmation) — the design system's .scrim + .dialog
+    if (cfg._ordered.some(function (f) { return f.prompt; }) || cfg.submitConfirm) {
       var dlgId = uid + '-dlg';
       h += '<div class="scrim bspf-dialog" x-show="dlg.open" x-cloak @keydown="dlgKey($event)">' +
         '<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="' + esc(dlgId) + '-t"' +
@@ -1399,6 +1890,7 @@
         case 'boolean': return !!f.default;
         case 'link': return { url: (f.default && f.default.url) || '', desc: (f.default && f.default.desc) || '' };
         case 'lookup': return null;
+        case 'assignments': return []; // rows arrive from loadAssignments()
         case 'number': case 'currency': return (f.default != null ? f.default : '');
         default: return (f.default != null ? String(f.default) : '');
       }
@@ -1408,7 +1900,7 @@
     var pq = {}, pRes = {}, pBusy = {}, pOpen = {}, pIdx = {};
     var lkOpts = {}, lkBusy = {}, lkErr = {};
     cfg._ordered.forEach(function (f) {
-      if (f.type === 'heading' || f.type === 'note') return;
+      if (STATIC_TYPES[f.type]) return;
       values[f.k] = defaultValue(f);
       errors[f.k] = ''; warnings[f.k] = ''; touched[f.k] = false;
       if (f.type === 'choice' || f.type === 'multichoice' || f.type === 'lookup') { ui[f.k] = false; fill[f.k] = ''; }
@@ -1428,25 +1920,176 @@
       filesMeta: [], dragging: false,
       pageError: '',
       // date prompt dialog; promptAck[k] = the value the user already answered for
-      dlg: { open: false, k: null, title: '', html: '', ok: '', alt: '' },
+      dlg: { open: false, mode: 'prompt', k: null, title: '', html: '', ok: '', alt: '' },
       promptAck: {},
       // result screen (afterSubmit / queryError) + its optional countdown redirect
       result: { title: '', html: '', href: '', linkText: '', lookup: '', copyText: '', copyFailed: false, copied: false },
       redir: { url: '', left: 0, paused: false },
+      // assignments load state ('idle' | 'loading' | 'ready' | 'error' |
+      // 'empty' | 'done'), and the signed-in user for currentUser fields
+      asg: { state: 'idle', msg: '', skipped: 0, warn: [] },
+      me: { name: '', email: '', ready: false },
 
       init: function () {
         store.state = this;
+        var self = this;
+        // re-rendered for a language switch: take the previous state over
+        var carry = def.carry;
+        def.carry = null;
+        if (carry) {
+          Object.keys(carry.values).forEach(function (k) { if (k in self.values) self.values[k] = carry.values[k]; });
+          ['page', 'view', 'filesMeta', 'promptAck', 'asg', 'me', 'result'].forEach(function (p) {
+            if (carry[p] !== undefined) self[p] = carry[p];
+          });
+          if (cfg._asg) (this.values[cfg._asg.k] || []).forEach(function (r) { r.open = false; });
+        }
         // begin loading pnp + resolving the page web in the background so
         // submit/search are warm
         if (!adapter.isMock) adapter.ready().catch(function () { /* surfaced on use */ });
+        if (cfg._asg) {
+          if (this.asg.state === 'idle' || this.asg.state === 'loading') this.loadAssignments();
+        } else if (!this.me.ready && cfg._ordered.some(function (f) { return f.type === 'currentUser'; })) {
+          this.loadMe();
+        }
+        if (carry) return;
         // a required/invalid URL value (field.query) can't be fixed by the
         // user: show queryError instead of the form
-        var self = this;
         if (cfg.queryError && cfg._ordered.some(function (f) { return f.query && !self.check(f.k); })) {
           this.view = 'result';
           this.showResult(cfg.queryError);
         }
       },
+
+      /* ---- current user + assignments ---- */
+      readMe: function () {
+        var u = adapter.userInfo ? adapter.userInfo() : {};
+        this.me = { name: u.name || '', email: u.email || userEmails(u)[0] || '', ready: true };
+        return u;
+      },
+      loadMe: function () {
+        var self = this;
+        adapter.ready().then(function () { self.readMe(); })
+          .catch(function (e) { console.warn('[BSP Forms] current user unavailable:', e); self.me.ready = true; });
+      },
+      loadAssignments: function () {
+        var self = this, f = cfg._asg, k = f.k, src = f.source;
+        this.asg.state = 'loading'; this.asg.msg = ''; this.asg.warn = []; this.errors[k] = '';
+        adapter.ready().then(function () {
+          var emails = userEmails(self.readMe());
+          if (!emails.length) throw new Error('no-user');
+          return Promise.all([
+            adapter.getAssignments(src, emails),
+            self.doneKeys(emails)
+          ]);
+        }).then(function (res) {
+          var rows = res[0].rows || [], done = res[1];
+          // a cut-off read is said out loud, never silent
+          var warn = [];
+          if (res[0].more) {
+            var max = src.top || 500;
+            console.warn('[BSP Forms] assignments: more than ' + max + ' rows match; showing the first ' + max);
+            warn.push(fmtStr(S.assignMore, { max: max }));
+          }
+          if (done.more) {
+            console.warn('[BSP Forms] assignments: more than ' + ROW_KEYS_MAX + ' earlier responses; some answered rows may show again');
+            warn.push(fmtStr(S.assignKeysMore, { max: ROW_KEYS_MAX }));
+          }
+          self.asg.warn = warn;
+          var open = rows.filter(function (r) { return !done.has(self.rowKey(r)); });
+          self.values[k] = open.map(function (r) {
+            return {
+              id: String(r.ID), label: String(r[src.labelColumn] == null ? '' : r[src.labelColumn]),
+              detail: src.detailColumn ? String(r[src.detailColumn] == null ? '' : r[src.detailColumn]) : '',
+              data: r, value: '', err: '', open: false, saved: false
+            };
+          });
+          self.asg.skipped = rows.length - open.length;
+          if (!rows.length) { self.asg.state = 'empty'; self.view = 'empty'; }
+          // all shown rows done but a read was cut off (more rows, or more
+          // earlier responses than one read covers): "already submitted"
+          // could be false, so say what we know instead
+          else if (!open.length && (res[0].more || done.more)) { self.asg.state = 'error'; self.asg.msg = warn.join(' '); }
+          else if (!open.length) { self.asg.state = 'done'; self.view = 'allDone'; }
+          else self.asg.state = 'ready';
+        }).catch(function (e) {
+          console.error('[BSP Forms] assignments load failed:', e);
+          self.asg.state = 'error';
+          self.asg.msg = e && e.message === 'no-user' ? S.assignNoUser
+            : e && e.message === 'no-context' ? S.noContext : S.assignLoadError;
+        });
+      },
+      // a source row's key as the responses list stores it (keyColumn's source)
+      rowKey: function (r) {
+        var f = cfg._asg;
+        if (!f.responses) return null;
+        var c = f.rowColumns[f.responses.keyColumn];
+        var v = isIdCol(c) ? r.ID : r[c];
+        return v == null ? null : String(v);
+      },
+      // keys this user already has in the target list → { has(key), more }
+      doneKeys: function (emails) {
+        var f = cfg._asg;
+        if (!f.responses) return Promise.resolve({ has: function () { return false; }, more: false });
+        return adapter.getRowKeys(f.responses, emails).then(function (res) {
+          var set = Object.create(null);
+          (res.keys || []).forEach(function (v) { set[String(v)] = true; });
+          return { has: function (key) { return key != null && !!set[key]; }, more: !!res.more };
+        });
+      },
+      // after a failed save, an add may have reached SharePoint even though
+      // the browser never heard back. Before trying again, ask the list about
+      // exactly the unsaved rows (getRowKeysFor — no read cap applies) and
+      // mark the ones it has as saved, so a retry can't save them twice.
+      // Without `responses` there is nothing to ask; the retry then trusts row.saved.
+      reconcileRows: function () {
+        var self = this, f = cfg._asg, rows = this.values[f.k];
+        if (!f.responses) return Promise.resolve();
+        var src = f.rowColumns[f.responses.keyColumn];
+        var pending = rows.filter(function (r) { return !r.saved; });
+        // the key as it's stored: the ID is a number, other columns as read
+        var vals = pending.map(function (r) { return isIdCol(src) ? Number(r.id) : r.data[src]; })
+          .filter(function (v) { return v != null && v !== ''; });
+        if (!vals.length) return Promise.resolve();
+        return adapter.getRowKeysFor(f.responses, userEmails(adapter.userInfo ? adapter.userInfo() : {}), vals)
+          .then(function (have) {
+            pending.forEach(function (r) {
+              if (have.indexOf(self.rowKey(r.data)) > -1) { r.saved = true; r.open = false; r.err = ''; }
+            });
+          });
+      },
+      rowToggle: function (k, row) {
+        if (row.saved || this.busy) return;
+        var open = !row.open;
+        this.values[k].forEach(function (r) { r.open = false; });
+        row.open = open;
+      },
+      rowPick: function (k, row, v) {
+        if (row.saved || this.busy) return; // answers are frozen while saving
+        row.value = v; row.open = false;
+        row.err = '';
+        if (this.errors[k]) this.check(k);
+      },
+      choiceColor: function (k, v) {
+        var c = (cfg._byKey[k].choices || []).filter(function (x) { return x.value === v; })[0];
+        return c ? c.color : '';
+      },
+      rowClass: function (k, row) {
+        var color = row.value ? this.choiceColor(k, row.value) : '';
+        // is-open lifts the row over its siblings so the menu isn't covered
+        return (color ? 'is-set bspf-asg__row--' + color : '') + (row.saved ? ' is-saved' : '') +
+          (row.err ? ' is-error' : '') + (row.open ? ' is-open' : '');
+      },
+      rowsDone: function (k) {
+        return (this.values[k] || []).filter(function (r) { return !!r.value; }).length;
+      },
+      rowsPct: function (k) {
+        var n = (this.values[k] || []).length;
+        return n ? Math.round(this.rowsDone(k) / n * 100) : 0;
+      },
+      progressText: function (k) {
+        return fmtStr(S.assignProgress, { n: this.rowsDone(k), total: (this.values[k] || []).length });
+      },
+      fmt: function (tpl, map) { return fmtStr(tpl, map); },
 
       /* ---- result screens: afterSubmit found/notFound, queryError ---- */
       showResult: function (spec, href) {
@@ -1580,6 +2223,7 @@
       maybePrompt: function (k) {
         if (!this.promptDue(k)) return false;
         var pr = cfg._byKey[k].prompt;
+        this.dlg.mode = 'prompt';
         this.dlg.k = k;
         this.dlg.title = pr.title || S.promptTitle;
         this.dlg.html = prose(pr.message);
@@ -1596,14 +2240,39 @@
         });
         return true;
       },
+      // submitConfirm: a last look before an irreversible submit. Focus starts
+      // on the safe button; Escape goes back.
+      openSubmitConfirm: function () {
+        var sc = cfg.submitConfirm;
+        this.dlg.mode = 'submit';
+        this.dlg.k = null;
+        this.dlg.title = sc.title || S.submitConfirmTitle;
+        this.dlg.html = prose(sc.message);
+        this.dlg.ok = sc.confirm || S.submitConfirmOk;
+        this.dlg.alt = sc.cancel || S.submitConfirmCancel;
+        this.dlg.open = true;
+        var root = this.$root;
+        this.$nextTick(function () {
+          requestAnimationFrame(function () {
+            var b = root.querySelector('.bspf-dialog__alt');
+            if (b) b.focus();
+          });
+        });
+      },
       dlgClose: function () {
-        var k = this.dlg.k;
+        var k = this.dlg.k, mode = this.dlg.mode;
         this.dlg.open = false; this.dlg.k = null;
-        var f = cfg._byKey[k];
-        var inp = f && document.getElementById(f.domId);
+        var f = k && cfg._byKey[k];
+        var inp = mode === 'submit' ? this.$root.querySelector('.bspf__body button[type="submit"]')
+          : f && document.getElementById(f.domId);
         if (inp) this.$nextTick(function () { inp.focus(); });
       },
       dlgConfirm: function () {
+        if (this.dlg.mode === 'submit') {
+          this.dlgClose();
+          this.submitForm(true);
+          return;
+        }
         // keep the date; apply confirm.set (e.g. mark the request urgent)
         var self = this, k = this.dlg.k, pr = cfg._byKey[k].prompt;
         this.promptAck[k] = this.values[k];
@@ -1616,6 +2285,7 @@
         this.dlgClose();
       },
       dlgAlt: function () {
+        if (this.dlg.mode === 'submit') { this.dlgClose(); return; } // go back
         // move the date to the first one at least N business days out
         var k = this.dlg.k, f = cfg._byKey[k];
         var d = bizDateAfter(cfg._bh, +f.prompt.alternative.moveToBusinessDays, nowMs());
@@ -1632,7 +2302,12 @@
         this.dlgClose();
       },
       dlgKey: function (e) {
-        if (e.key === 'Escape') { e.preventDefault(); this.dlgConfirm(); return; }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          // a prompt's Escape keeps the date (OK); a submit confirmation's goes back
+          if (this.dlg.mode === 'submit') this.dlgClose(); else this.dlgConfirm();
+          return;
+        }
         if (e.key !== 'Tab') return;
         // keep focus inside the dialog (two buttons)
         var btns = Array.prototype.filter.call(this.$root.querySelectorAll('.bspf-dialog .btn'),
@@ -1670,22 +2345,26 @@
         });
       },
       pickChoice: function (k, v) {
+        if (this.busy) return;
         this.values[k] = (this.values[k] === v) ? '' : v;
         this.ui[k] = false; this.touched[k] = true; this.check(k);
       },
       pickFill: function (k) {
+        if (this.busy) return;
         var v = (this.fill[k] || '').trim();
         if (!v) return;
         this.values[k] = v; this.fill[k] = ''; this.ui[k] = false;
         this.touched[k] = true; this.check(k);
       },
       toggleMulti: function (k, v) {
+        if (this.busy) return;
         var arr = this.values[k];
         var i = arr.indexOf(v);
         if (i > -1) arr.splice(i, 1); else arr.push(v);
         this.touched[k] = true; this.check(k);
       },
       pickFillMulti: function (k) {
+        if (this.busy) return;
         var v = (this.fill[k] || '').trim();
         if (!v) return;
         if (this.values[k].indexOf(v) < 0) this.values[k].push(v);
@@ -1707,6 +2386,7 @@
         }).finally(function () { self.lkBusy[k] = false; });
       },
       pickLookup: function (k, opt) {
+        if (this.busy) return;
         var cur = this.values[k];
         this.values[k] = (cur && cur.id === opt.id) ? null : { id: opt.id, text: opt.text };
         this.ui[k] = false; this.touched[k] = true; this.check(k);
@@ -1745,6 +2425,7 @@
         });
       },
       addPerson: function (k, s) {
+        if (this.busy) return;
         if (!this.canAddPerson(k)) return;
         this.values[k].push({ key: s.key, text: s.text, email: s.email, id: s.id || null });
         this.pq[k] = ''; this.pRes[k] = []; this.pIdx[k] = -1; this.pOpen[k] = false;
@@ -1756,10 +2437,12 @@
         }).catch(function (e) { console.warn('[BSP Forms] ensureUser deferred to submit:', e); });
       },
       removePerson: function (k, i) {
+        if (this.busy) return;
         this.values[k].splice(i, 1);
         this.touched[k] = true; this.check(k);
       },
       maybePopPerson: function (k, ev) {
+        if (this.busy) return;
         if ((this.pq[k] || '').length === 0 && this.values[k].length) {
           ev.preventDefault();
           this.values[k].pop();
@@ -1790,7 +2473,10 @@
       /* ---- attachments ---- */
       pickFiles: function (ev) { this.addFiles(ev.target.files); ev.target.value = ''; },
       dropFiles: function (ev) { this.dragging = false; this.addFiles(ev.dataTransfer && ev.dataTransfer.files); },
+      // the file set is frozen while a submit runs: the dropzone is a div, so
+      // the disabled fieldset doesn't stop a drop — these guards do
       addFiles: function (fileList) {
+        if (this.busy) return;
         if (!fileList || !fileList.length) return;
         var a = cfg.attachments, self = this;
         var err = '';
@@ -1812,6 +2498,7 @@
         if (!err && a.required && this.filesMeta.length) this.errors._attachments = '';
       },
       removeFile: function (i) {
+        if (this.busy) return;
         var fm = this.filesMeta[i];
         if (!fm) return;
         delete store.files[fm.uid];
@@ -1826,6 +2513,17 @@
         if (!this.fieldActive(f)) { this.errors[k] = ''; this.warnings[k] = ''; return true; }
         var v = this.values[k];
         var msg = '', warn = '';
+        if (f.type === 'assignments') {
+          // rows not loaded can't be submitted; otherwise each row needs a choice
+          if (this.asg.state !== 'ready') msg = this.asg.state === 'error' ? (this.asg.msg || S.assignLoadError) : S.assignLoading;
+          else if (f.required) {
+            var missing = 0;
+            v.forEach(function (r) { r.err = r.value || r.saved ? '' : S.assignRowRequired; if (r.err) missing++; });
+            if (missing) msg = S.assignAllRequired;
+          }
+          this.errors[k] = msg;
+          return !msg;
+        }
         var val = f.validation || {};
 
         var empty = isEmptyVal(v) || (f.type === 'link' && !v.url) || (f.type === 'boolean' && !v);
@@ -1891,7 +2589,7 @@
       pageFieldKeys: function (i) {
         var self = this, keys = [];
         cfg._ordered.forEach(function (f) {
-          if (f.page !== i || f.type === 'heading' || f.type === 'note') return;
+          if (f.page !== i || STATIC_TYPES[f.type]) return;
           if (!self.fieldActive(f)) return;
           keys.push(f.k);
         });
@@ -1939,6 +2637,16 @@
         var self = this;
         var k = this.pageFieldKeys(this.page).filter(function (x) { return self.errors[x]; })[0];
         if (!k) return;
+        if (cfg._byKey[k].type === 'assignments') {
+          // the first row missing a choice (or the retry button) — after the
+          // tick that renders the rows' aria-invalid
+          var root = this.$root;
+          this.$nextTick(function () {
+            var r = root.querySelector('[data-bspf-field="' + k + '"] [aria-invalid="true"], [data-bspf-field="' + k + '"] .btn');
+            if (r) r.focus();
+          });
+          return;
+        }
         var elx = document.getElementById(cfg._byKey[k].domId);
         if (elx && elx.focus) elx.focus();
       },
@@ -1948,10 +2656,24 @@
         var n = this.filesMeta.filter(function (m) { return m.status !== 'done'; }).length;
         return fmtStr(S.attachPartial, { n: n });
       },
-      buildPayload: function () {
+      // row: an assignments row — its payload adds rowColumns + the row's
+      // choice, and {row:Col} tokens resolve against it
+      buildPayload: function (row) {
         var self = this;
         var payload = {};
         var titleMapped = false;
+        // the answers as they were when the submit started (store.snap), so
+        // nothing changed mid-save can leak into a later row's item
+        var V = store.snap || this.values;
+        // target.set: fixed columns from templates ({user:name}, {now}, …);
+        // a field mapped to the same column wins
+        var set = cfg.target.set || {};
+        Object.keys(set).forEach(function (col) {
+          var v = self.renderTemplate(set[col], row);
+          if (v === '') return;
+          payload[col] = v;
+          if (col === 'Title') titleMapped = true;
+        });
         // dev aid: a shared column should have at most one visible field
         cfg._sharedColumns.forEach(function (col) {
           var visIds = (cfg._colFields[col] || []).filter(function (id) {
@@ -1967,7 +2689,7 @@
           if (!f.column || !self.fieldActive(f)) return null;
           if (f.type === 'person') {
             // resolve any unresolved ids now
-            return Promise.all(self.values[f.k].map(function (p) {
+            return Promise.all(V[f.k].map(function (p) {
               if (p.id) return p.id;
               return adapter.ensureUser(p.key).then(function (id) { p.id = id; return id; })
                 .catch(function () { throw new Error(fmtStr(S.personResolveFailed, { name: p.text })); });
@@ -1977,7 +2699,7 @@
         })).then(function () {
           cfg._ordered.forEach(function (f) {
             if (!f.column || !self.fieldActive(f)) return;
-            var v = self.values[f.k];
+            var v = V[f.k];
             var out;
             switch (f.type) {
               case 'text': case 'email': case 'phone': case 'choice': case 'hidden':
@@ -2022,29 +2744,51 @@
             payload[f.column] = out;   // duplicate column mappings: later fields win
             if (f.column === 'Title') titleMapped = true;
           });
+          if (row) {
+            var fa = cfg._asg;
+            Object.keys(fa.rowColumns).forEach(function (col) {
+              var srcCol = fa.rowColumns[col];
+              var v = isIdCol(srcCol) ? Number(row.id) : row.data[srcCol];
+              if (v == null || v === '') return;
+              payload[col] = v;
+              if (col === 'Title') titleMapped = true;
+            });
+            payload[fa.column] = row.value;
+          }
           if (!titleMapped && cfg.target.titleTemplate) {
-            payload.Title = self.renderTemplate(cfg.target.titleTemplate);
+            payload.Title = self.renderTemplate(cfg.target.titleTemplate, row);
           }
           return payload;
         });
       },
-      renderTemplate: function (tpl) {
+      renderTemplate: function (tpl, row) {
         var self = this;
         var u = adapter.userInfo ? adapter.userInfo() : {};
         var now = new Date();
-        return String(tpl).replace(/\{(form:title|user:name|user:email|date|time|lookup|field:[^}]+|var:[^}]+)\}/g, function (m, tok) {
+        return String(tpl).replace(/\{(form:title|user:name|user:email|date|time|now|lookup|field:[^}]+|var:[^}]+|row:[^}]+)\}/g, function (m, tok) {
           if (tok === 'form:title') return cfg.form.title || '';
+          // {now}: the submit's instant as ISO 8601 (UTC) — what a Date and
+          // Time column takes; SharePoint shows it in the site's time zone.
+          // Every row of one submit shares it.
+          if (tok === 'now') return store.submitAt || new Date(nowMs()).toISOString();
+          if (tok.indexOf('row:') === 0) {
+            if (!row) return '';
+            var c = tok.slice(4);
+            var rv = isIdCol(c) ? row.id : row.data[c];
+            return rv == null ? '' : String(rv);
+          }
           if (tok === 'lookup') return self.result.lookup || '';
           if (tok.indexOf('var:') === 0) {
             var vars = cfg.form.vars || {};
             return Object.prototype.hasOwnProperty.call(vars, tok.slice(4)) && vars[tok.slice(4)] != null ? String(vars[tok.slice(4)]) : '';
           }
           if (tok === 'user:name') return u.name || '';
-          if (tok === 'user:email') return u.email || '';
+          if (tok === 'user:email') return u.email || userEmails(u)[0] || '';
           if (tok === 'date') return now.toLocaleDateString();
           if (tok === 'time') return now.toLocaleTimeString();
           if (tok.indexOf('field:') === 0) {
-            var v = self._get(tok.slice(6));
+            var fk = cfg._keyOfId[tok.slice(6)];
+            var v = fk ? (store.snap || self.values)[fk] : undefined;
             if (Array.isArray(v)) return v.map(function (p) { return p && p.text ? p.text : p; }).join(', ');
             if (v && typeof v === 'object') return v.text || v.url || '';
             return v == null ? '' : String(v);
@@ -2059,7 +2803,8 @@
         this.pageError = '';
         return true;
       },
-      submitForm: function () {
+      // confirmed: true when the submitConfirm dialog's Confirm sent us here
+      submitForm: function (confirmed) {
         var self = this;
         if (this.busy) return;
         // an unanswered date prompt (e.g. the form sat open overnight) is
@@ -2068,8 +2813,17 @@
         if (pk) { this.maybePrompt(pk); return; }
         this.applyLocks();
         if (!this.validateAll()) return;
+        if (cfg.submitConfirm && confirmed !== true) { this.openSubmitConfirm(); return; }
         this.busy = true; this.pageError = '';
+        store.submitAt = new Date(nowMs()).toISOString();
+        // what was validated and confirmed is what gets saved (see buildPayload)
+        store.snap = JSON.parse(JSON.stringify(this.values));
         adapter.ready().then(function () {
+          if (!cfg._asg) return null;
+          // an earlier attempt failed: some "unsaved" rows may be in the list
+          return store.rowsUncertain ? self.reconcileRows() : null;
+        }).then(function () {
+          if (cfg._asg) return self.saveRows();
           if (store.itemId) return null; // already created — only attachments remain
           return self.buildPayload().then(function (payload) {
             return adapter.addItem(payload).then(function (r) {
@@ -2077,7 +2831,7 @@
             });
           });
         }).then(function () {
-          return self.uploadAttachments();
+          return cfg._asg ? true : self.uploadAttachments();
         }).then(function (allOk) {
           if (cfg.afterSubmit && allOk) return self.runAfterSubmit();
           self.view = allOk ? 'done' : 'attachRetry';
@@ -2089,10 +2843,37 @@
             return self.runAfterSubmit();
           }
           console.error('[BSP Forms] submit failed:', e);
-          self.pageError = (e && e.message === 'no-context')
-            ? S.noContext
-            : S.submitFailed + (e && e.message ? ' ' + fmtStr(S.submitFailedDetail, { detail: trimErr(e.message) }) : '');
-        }).finally(function () { self.busy = false; });
+          var detail = e && e.message ? ' ' + fmtStr(S.submitFailedDetail, { detail: trimErr(e.message) }) : '';
+          var rows = cfg._asg ? self.values[cfg._asg.k] : [];
+          var saved = rows.filter(function (r) { return r.saved; }).length;
+          // a failed add may still have landed: the next attempt checks first
+          if (cfg._asg) store.rowsUncertain = true;
+          self.pageError = (e && e.message === 'no-context') ? S.noContext
+            // some rows made it: say so, so a retry (saved rows are skipped) feels safe
+            : saved ? fmtStr(S.rowsPartial, { n: saved, total: rows.length, submit: S.submit }) + detail
+              // "nothing was saved" can't be promised for rows: an add may have landed unseen
+              : cfg._asg ? fmtStr(S.rowsFailed, { submit: S.submit }) + detail
+                : S.submitFailed + detail;
+        }).finally(function () { self.busy = false; store.snap = null; });
+      },
+      // one target item per assignments row, in order, built from the
+      // submit's snapshot (store.snap). A saved row is never sent again
+      // (row.saved on the live row); after a failure, reconcileRows() first
+      // marks rows the list already has, so a retry only sends the rest.
+      saveRows: function () {
+        var self = this, k = cfg._asg.k, chain = Promise.resolve();
+        var live = Object.create(null);
+        this.values[k].forEach(function (r) { live[r.id] = r; });
+        (store.snap ? store.snap[k] : this.values[k]).forEach(function (snapRow) {
+          chain = chain.then(function () {
+            var row = live[snapRow.id];
+            if (!row || row.saved) return null;
+            return self.buildPayload(snapRow)
+              .then(function (p) { return adapter.addItem(p); })
+              .then(function () { row.saved = true; row.open = false; });
+          });
+        });
+        return chain.then(function () { store.rowsUncertain = false; });
       },
       uploadAttachments: function () {
         var self = this;
@@ -2136,9 +2917,12 @@
         Object.keys(this.warnings).forEach(function (k) { self.warnings[k] = ''; });
         Object.keys(this.touched).forEach(function (k) { self.touched[k] = false; });
         this.filesMeta = [];
-        store.files = {}; store.itemId = null; store.itemRef = null;
+        store.files = {}; store.itemId = null; store.itemRef = null; store.submitAt = null;
+        store.snap = null; store.rowsUncertain = false;
         this.promptAck = {}; this.dlg.open = false; this.dlg.k = null;
         this.page = 0; this.pageError = ''; this.view = 'form';
+        // the rows just saved now count as submitted and drop out
+        if (cfg._asg) this.loadAssignments();
         this.scrollTop();
       }
     };
@@ -2180,6 +2964,8 @@
     link: { ok: ['URL'], warn: [] },
     lookup: { ok: ['Lookup'], warn: [] },
     hidden: { ok: ['Text', 'Choice', 'Note'], warn: ['URL'] },
+    assignments: { ok: ['Text', 'Choice'], warn: ['Note'] },
+    words: { ok: ['Choice', 'Text'], warn: ['Note'] }, // a boolean saving words (values)
     person: null // handled specially: User vs UserMulti
   };
 
@@ -2219,18 +3005,56 @@
           actual: actual + (fd.ReadOnlyField ? ' (read-only)' : ''), level: level
         });
       });
+      // columns written without a field: target.set and an assignments
+      // field's rowColumns (expected type: what's written there)
+      var fa = cfg._asg;
+      var extra = Object.create(null);
+      Object.keys(cfg.target.set || {}).forEach(function (col) {
+        extra[col] = { from: 'target.set', expected: /\{now\}/.test(cfg.target.set[col]) ? ['DateTime'] : ['Text', 'Note', 'Choice'] };
+      });
+      if (fa) Object.keys(fa.rowColumns).forEach(function (col) {
+        extra[col] = { from: fa.id + ' · row', expected: isIdCol(fa.rowColumns[col]) ? ['Number', 'Text'] : ['Text', 'Note', 'Choice', 'Number'] };
+      });
+      Object.keys(extra).forEach(function (col) {
+        var fd = byName[col], x = extra[col];
+        rows.push({
+          field: x.from, column: col, expected: x.expected.join(' / '),
+          actual: fd ? fd.TypeAsString + (fd.ReadOnlyField ? ' (read-only)' : '') : '— (missing)',
+          level: !fd || fd.ReadOnlyField ? 'error' : x.expected.indexOf(fd.TypeAsString) > -1 ? 'ok' : 'warn'
+        });
+      });
+      if (fa && fa.responses) {
+        var ufd = byName[fa.responses.userColumn];
+        rows.push({ field: fa.id + ' · responses', column: fa.responses.userColumn, expected: 'Text',
+          actual: ufd ? ufd.TypeAsString : '— (missing)', level: ufd ? (ufd.TypeAsString === 'Text' ? 'ok' : 'warn') : 'error' });
+      }
       // list-required columns nothing maps to
       (fields || []).forEach(function (fd) {
         if (!fd.Required || fd.ReadOnlyField) return;
-        var mapped = cfg._ordered.some(function (f) { return f.column === fd.InternalName; });
+        var mapped = !!extra[fd.InternalName] || cfg._ordered.some(function (f) { return f.column === fd.InternalName; });
         var viaTemplate = fd.InternalName === 'Title' && cfg.target.titleTemplate;
         if (!mapped && !viaTemplate) {
           rows.push({ field: '—', column: fd.InternalName, expected: '(required by the list)', actual: fd.TypeAsString, level: 'warn' });
         }
       });
+      // the assignments source list: readable, and has every column the rows use
+      var srcCheck = !fa ? Promise.resolve() : def.adapter.getListFields(fa.source).then(function (sfs) {
+        var sn = {};
+        (sfs || []).forEach(function (fd) { sn[fd.InternalName] = fd; });
+        var where = 'source ' + (fa.source.listUrl || fa.source.listTitle);
+        [fa.source.userColumn].concat(fa.source._cols).forEach(function (col) {
+          var fd = sn[col];
+          rows.push({ field: where, column: col, expected: col === fa.source.userColumn ? 'Text' : 'Text / Number / Choice',
+            actual: fd ? fd.TypeAsString : '— (missing)',
+            level: !fd ? 'error' : (col !== fa.source.userColumn || fd.TypeAsString === 'Text') ? 'ok' : 'warn' });
+        });
+      }, function (e) {
+        rows.push({ field: 'source ' + (fa.source.listUrl || fa.source.listTitle), column: '—', expected: 'a list this user can read',
+          actual: trimErr(e.message), level: 'error' });
+      });
       // the afterSubmit lookup list: readable, and has both columns
       var lk = cfg.afterSubmit && cfg.afterSubmit.lookup;
-      if (!lk) return renderDoctor(def, rows, null, S);
+      if (!lk) return srcCheck.then(function () { renderDoctor(def, rows, null, S); });
       var where = 'lookup ' + (lk.listUrl || lk.listTitle);
       return def.adapter.getListFields(lk).then(function (lfs) {
         var ln = {};
@@ -2247,8 +3071,8 @@
       renderDoctor(def, [], e, cfg.strings);
     });
   }
-  // a switch with word values writes text, so it maps like a choice
-  function compatType(f) { return f.type === 'boolean' && f.values ? 'choice' : f.type; }
+  // a switch/checkbox with word values writes text: a Choice or Text column
+  function compatType(f) { return f.type === 'boolean' && f.values ? 'words' : f.type; }
   function expectedLabel(f) {
     if (f.type === 'person') return f.multiple ? 'UserMulti' : 'User';
     var c = TYPE_COMPAT[compatType(f)];
@@ -2366,6 +3190,41 @@
     });
   }
 
+  /* Language switch (intl.setLang): rebuild the form in the new language
+     and carry its state over — answers, page, view, loaded rows, user.
+     Runs after the current submit settles; a form mid-save isn't touched. */
+  function snapshotState(st) {
+    var out = {};
+    // plain-data copies (answers, rows, result text); open menus/dialogs don't carry
+    ['values', 'page', 'view', 'filesMeta', 'promptAck', 'asg', 'me', 'result'].forEach(function (p) {
+      out[p] = st[p] === undefined ? undefined : JSON.parse(JSON.stringify(st[p]));
+    });
+    return out;
+  }
+  function relocalize(def) {
+    if (!def.multiLang || !def.root || !def.root.isConnected) return;
+    var lang = activeLang(def.raw);
+    if (lang === def.cfg._lang) return;
+    var st = def.store.state;
+    if (st && st.busy) { setTimeout(function () { relocalize(def); }, 400); return; }
+    var norm = normalizeConfig(def.raw, lang);
+    if (norm.errors.length) { console.error('[BSP Forms] config errors (' + lang + '):', norm.errors); return; }
+    var cfg = norm.cfg;
+    cfg._ordered.forEach(function (f) { f.domId = def.uid + '-' + f.k; });
+    def.carry = st ? snapshotState(st) : null;
+    def.cfg = cfg;
+    var old = def.root;
+    try { if (window.Alpine && window.Alpine.destroyTree) window.Alpine.destroyTree(old); } catch (e) { /* best effort */ }
+    var host = document.createElement('div');
+    host.innerHTML = renderForm(def.uid, cfg);
+    var root = host.firstChild;
+    old.parentNode.replaceChild(root, old);
+    def.root = root;
+    activateAlpine(root).then(function () {
+      if (def.mount.hasAttribute('data-validate')) runDoctor(def);
+    });
+  }
+
   function initMount(mount) {
     ensureStyles();
     installNavWatcher();
@@ -2386,8 +3245,13 @@
     mount.setAttribute('data-bspf-state', 'initializing');
     var spriteReady = ensureSprite();
 
+    var rawCfg = null;
     loadConfig(mount).then(function (raw) {
-      var norm = normalizeConfig(raw);
+      rawCfg = raw;
+      return whenIntl(raw);
+    }).then(function () {
+      var raw = rawCfg;
+      var norm = normalizeConfig(raw, activeLang(raw));
       if (norm.errors.length) {
         console.error('[BSP Forms] config errors:', norm.errors);
         throw new Error(norm.errors.join('; '));
@@ -2398,16 +3262,18 @@
 
       var adapter = makeAdapter(cfg);
       var def = NS._defs[uid] = {
-        uid: uid, cfg: cfg, mount: mount, adapter: adapter,
-        store: { files: {}, fileSeq: 0, itemId: null, itemRef: null, pSeq: {}, state: null }
+        uid: uid, cfg: cfg, raw: raw, mount: mount, adapter: adapter, root: null, carry: null,
+        multiLang: (formLangs(raw) || []).length > 1,
+        store: { files: {}, fileSeq: 0, itemId: null, itemRef: null, pSeq: {}, state: null, submitAt: null, snap: null, rowsUncertain: false }
       };
+      if (def.multiLang) wireIntl();
 
       return spriteReady.then(function () {
         // edit note first (hidden in view mode by CSS), then the app root
         if (!mount.querySelector('.bspf-editnote')) mount.appendChild(editNote(configUrl, cfg.strings));
         var host = document.createElement('div');
         host.innerHTML = renderForm(uid, cfg);
-        var root = host.firstChild;
+        var root = def.root = host.firstChild;
         mount.appendChild(root);
         return activateAlpine(root).then(function () {
           mount.setAttribute('data-bspf-state', 'ready');

@@ -1,7 +1,8 @@
 # DEV ONLY (never run on prod; needs the sp-env global skill + dev cert auth).
-# Uploads bsp-forms.js, bsp-forms.css and forms/gsi-digital-initiatives-intake.json to
-# <code root>/bsp-forms/ on the dev site (the prod layout, beside bsp-design/ and lib/) via PnP,
-# not the OneDrive mirror. The list the form writes to is created by live-crosssite.js.
+# Uploads bsp-forms.js, bsp-forms.css and the live configs to <code root>/bsp-forms/ on the dev
+# site (the prod layout, beside bsp-design/ and lib/) via PnP, not the OneDrive mirror, plus the
+# bilingual library to the lib root. The lists come from live-crosssite.js (GSI),
+# live-classic-lists.ps1 and live-zone-lists.js.
 # Order: node live-crosssite.js (once) -> live-setup.ps1 -> live-page.ps1 -Ver <n> -> node live-submit.js
 $ErrorActionPreference = 'Stop'
 . "$HOME\.claude\skills\sp-env\scripts\sp-env-common.ps1"
@@ -39,4 +40,19 @@ $cfgText = $cfgText.Replace($prodPortal, "`"siteUrl`": `"$siteRel`"")
 $cfgText = [regex]::Replace($cfgText, '"converterUrl":\s*"[^"]*"', "`"converterUrl`": `"$($t.dev.siteUrl)`"")
 [IO.File]::WriteAllText((Join-Path $devDir $name), $cfgText)
 Add-PnPFile -Path (Join-Path $devDir $name) -Folder "$folder/forms" -Connection $conn | Out-Null
-Write-Host "uploaded engine + 3 configs (2 GSI, classic-url-request) to $codeRel/bsp-forms/"
+# ps-zone-attestation.json: prod's lists are on /teams/FCUWebDatastores, a different site from the
+# page; on dev the twins are on the tenant root site (live-zone-lists.js), so both siteUrl lines
+# swap to "/". The empty job aid URL becomes the dev site's home page, so the card shows.
+$name = 'ps-zone-attestation.json'
+$cfgText = Get-Content (Join-Path $repo "forms\$name") -Raw
+$prodStore = '"siteUrl": "/teams/FCUWebDatastores"'
+if (([regex]::Matches($cfgText, [regex]::Escape($prodStore))).Count -ne 2) { throw "$name no longer has two $prodStore lines - update live-setup.ps1" }
+$cfgText = $cfgText.Replace($prodStore, '"siteUrl": "/"')
+if ($cfgText -notmatch '"jobAidUrl":\s*""') { throw "$name no longer has an empty jobAidUrl - update live-setup.ps1" }
+$cfgText = [regex]::Replace($cfgText, '"jobAidUrl":\s*""', "`"jobAidUrl`": `"$($t.dev.siteUrl)`"")
+[IO.File]::WriteAllText((Join-Path $devDir $name), $cfgText)
+Add-PnPFile -Path (Join-Path $devDir $name) -Folder "$folder/forms" -Connection $conn | Out-Null
+# the bilingual library, which bilingual forms load from the shared lib folder
+$bilingual = Join-Path (Split-Path $repo -Parent) 'bilingual\intl.js'
+Add-PnPFile -Path $bilingual -Folder $t.dev.roots.lib -Connection $conn | Out-Null
+Write-Host "uploaded engine + 4 configs (2 GSI, classic-url-request, ps-zone-attestation) to $codeRel/bsp-forms/, intl.js to $siteRel/$($t.dev.roots.lib)/"

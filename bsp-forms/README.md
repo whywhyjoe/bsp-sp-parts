@@ -68,6 +68,20 @@ two-line web part insert.
 - **All UX and error strings** live in the engine's defaults and are
   overridable per form via `strings` (intro, title, confirmation screen, and
   every message).
+- **Bilingual (EN/FR):** `form.languages` makes any text in the config an
+  `{ "en", "fr" }` pair. The language comes from the repo's
+  [bilingual](../bilingual/) library (`intl.js`), which the engine loads from
+  `lib/`. Every engine message ships in French. `intl.setLang()` re-renders
+  the form in place, answers kept.
+- **Assignments:** an `assignments` field lists the signed-in user's rows from
+  a source list (filtered by their email), with a clearable color-dot dropdown
+  per row. Submit saves one item per row from the answers as confirmed. After a
+  failure, a retry re-checks the list and skips rows already saved. Rows
+  already answered drop out. "Nothing assigned" and "all done" have their own
+  screens. Pairs with `currentUser` (photo, name and email), `target.set`
+  (`{user:name}`, `{now}` …) and `submitConfirm` (an "are you sure?" dialog).
+- **Header card:** `form.headerCard` puts a link tile (job aid, policy) beside
+  the intro, opening in a new tab. Sections can take a soft `tint` panel.
 - **Doctor mode:** add `data-validate` to the div (or run
   `BSPForms.validate(div)` in devtools) to render a report comparing the
   config's column mappings against the real list schema.
@@ -85,6 +99,7 @@ Code/
 ├─ bsp-design/         the BSP design system (colors_and_type.css,
 │                      components.css, fluent-basic-icons.svg)
 ├─ lib/                alpine.js · pnp2.bundle.js  (self-hosted)
+│                      · intl.js (from bilingual/ — only bilingual forms load it)
 └─ bsp-forms/          ← this folder's runtime files
    ├─ bsp-forms.js     the engine (one classic script)
    ├─ bsp-forms.css    the form layer (BSP-token-built)
@@ -92,7 +107,7 @@ Code/
 ```
 
 Non-standard layouts: set `window.BSP_FORMS_SETTINGS = { designBase, libBase,
-alpineUrl, pnpUrl }` before the engine script (see
+alpineUrl, pnpUrl, intlUrl }` before the engine script (see
 `webpart/bsp-forms.webpart.html`).
 
 **Cache-busting:** the web part's `?v=` on `bsp-forms.js` is the version stamp
@@ -126,9 +141,9 @@ a mock adapter (`dev/mock-sp.js`) records writes to
 `bsp-design-system`**.
 
 ```
-cd <folder containing various/ and bsp-design-system/>
+cd <folder containing bsp-sp-parts/ and bsp-design-system/>
 python -m http.server 8000
-# → http://localhost:8000/various/bsp-forms/dev/index.html   (?validate for the doctor)
+# → http://localhost:8000/bsp-sp-parts/bsp-forms/dev/index.html   (?validate for the doctor, ?form=<name> for another config)
 ```
 
 Set `window.BSPF_MOCK_FAIL = { addItem: true }` (or `addAttachment`, …) in
@@ -139,7 +154,7 @@ devtools to exercise the error paths.
 paths, the full submit flow, and the payload invariants:
 
 ```
-node various/bsp-forms/dev/smoke.spec.js   # server running as above
+node bsp-sp-parts/bsp-forms/dev/smoke.spec.js   # server running as above
 ```
 
 If a form fails to initialize on a live page (e.g. a transient config fetch),
@@ -170,6 +185,22 @@ re-scan, re-attempts it.
   format leaves room for them (`visibleWhen` is the seam branching will reuse).
 - **50 MB** is the practical single-request ceiling for an attachment upload;
   keep `maxFileSizeMb` well below it.
+- **Assignments privacy (e.g. the zone attestation).** The form shows only
+  the signed-in user's rows, but that's a filter in the browser, not
+  security. Anyone with read access to the source list can read all of it
+  over REST or in the list itself. To stop people seeing others'
+  assignments, give each source item its own permissions: break inheritance
+  on the list so ordinary users have no list-wide access, then grant each
+  item **Read** to the person in its email column. The form keeps working
+  unchanged, because the filter then only ever sees the user's own items. A
+  standard-connector Power Automate flow can grant it automatically ("When an
+  item is created" → "Grant access to an item or a folder", recipient = the
+  email column, role = Read, notify = no). For the responses list, use
+  item-level settings *Read items that were created by the user* / *Create
+  items and edit items that were created by the user*. Users can still edit
+  their own responses through the list UI or REST. If "can't change them" has
+  to be enforced, give them a custom permission level with **Add Items** and
+  **View Items** but not **Edit Items**.
 
 ## Files
 
@@ -181,6 +212,7 @@ re-scan, re-attempts it.
 | `forms/gsi-digital-initiatives-intake.json` | FCU GSI Digital Initiatives Technology Intake (live form). |
 | `forms/gsi-digital-creative-intake.json` | FCU GSI Digital & Creative Solutions Intake (live form, same list). |
 | `forms/classic-url-request.json` | Classic-link request: saves the request, looks up the new link, else sends the user to the link converter. |
+| `forms/ps-zone-attestation.json` | Physical Security Zones Attestation (bilingual): the user's assigned areas, a zone per area, attest + confirm; one response item per area. |
 | `webpart/bsp-forms.webpart.html` | The web part insert snippet. |
 | `docs/CONFIG-REFERENCE.md` | Full JSON reference — every key, type, and rule. |
 | `dev/` | Local harness + mock adapter + vendored Alpine + `smoke.spec.js` regression suite (never deployed). |

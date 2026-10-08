@@ -18,9 +18,14 @@
   <script>
   window.BSP_FORMS_SETTINGS = {
     designBase: "/sites/FCUPortal/Code/bsp-design/",
-    libBase:    "/sites/FCUPortal/Code/lib/"
+    libBase:    "/sites/FCUPortal/Code/lib/",
+    intlUrl:    "/sites/FCUPortal/Code/lib/intl.js"   // bilingual forms only
   };
   </script>
+
+  Bilingual forms (form.languages) take their language from bilingual/intl.js
+  (deployed to Code/lib/). Its detection is still the ?lang=fr placeholder —
+  see bilingual/README.md.
   ===================================================================== -->
 
 <div data-bsp-form data-config="/sites/FCUPortal/Code/bsp-forms/forms/example-it-request.json"></div>
