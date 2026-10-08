@@ -70,7 +70,7 @@ name, optional>`.
 - [ ] Defaults the user may want changed: the field label "Source
       description", the result titles "Here's your new link" and "Let's get
       your new link", the 5-second countdown, and the brand icon.
-- [ ] Prod: upload the engine and config, and make the page from the web part
+- [ ] Prod: follow docs/PROD-DEPLOY.md section 3. Upload the engine and config, and make the page from the web part
       stub with `?v=` bumped and `data-validate` for the first load. The doctor
       checks both lists. Everyone needs **read** access to
       Classic-URL-Redirects and **add** access to Classic-URL-Requests.

@@ -7,6 +7,8 @@ or by copying into the OneDrive-synced folder for that library. Nothing under
 separate reference folder for Copilot Chat, not to `Code`; see
 [COPILOT.md](COPILOT.md).)
 
+Sections: 1 engine updates, 2 zone attestation, 3 classic link request.
+
 Paths below use the standard layout, `/sites/FCUPortal/Code/`. The engine finds
 `bsp-design/` and `lib/` as siblings of its own folder, so `bsp-forms/` must sit
 in the **same** library as those two. Use whatever path your existing
@@ -140,3 +142,75 @@ and `intl.js` itself.
   refresh. Keep each zone's `value` in English and translate only `label`.
 - A new attestation round: clear or archive the Responses list. Areas with a
   response for that user are treated as done and aren't shown again.
+
+## 3. Installing the classic link request form
+
+Needs engine 0.4.0 or later (section 1). No `intl.js`.
+
+### a. The two lists (by hand), on `/sites/FCUPortal`
+
+Create each column with **exactly** this name first, as in section 2. Both
+lists live on `/sites/FCUPortal` even if the form page is elsewhere.
+
+**Classic-URL-Requests** (the save):
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `Link` | Single line of text, 255 | The old link. Longer links aren't truncated; they get the error screen. |
+| `ResourceName` | Single line of text, 255 | |
+| `SourceDescription` | Multiple lines of text, **plain text** | Where the user found the link. |
+
+The form fills `Title` itself (`Classic link: <resource name>`).
+
+**Classic-URL-Redirects** (the lookup):
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `ResourceName` | Single line of text | Matched exactly against `?ResourceName=`. |
+| `URL` | Hyperlink | The new link. |
+
+**Permissions:** everyone who follows old links needs **Read** on
+Classic-URL-Redirects and **Add** on Classic-URL-Requests. A failed save is
+ignored on purpose, so missing Add rights fail silently. Check that this is set.
+
+### b. The config
+
+1. In `bsp-forms/forms/classic-url-request.json`, set
+   `form.vars.converterUrl` to the SharePoint link converter's URL. While it's
+   empty, the not-found and bad-link screens show their message but go
+   nowhere. It must be `http(s)://…` or server-relative; anything else is
+   refused. You can also set it later in the deployed copy.
+2. Upload it to `Code/bsp-forms/forms/`.
+3. Check that `bsp-design/abacus-icons/digital-channels-48.svg` exists on prod
+   (the header icon).
+
+### c. The page
+
+Add a Modern Script Editor web part with:
+
+```html
+<div data-bsp-form data-validate
+     data-config="/sites/FCUPortal/Code/bsp-forms/forms/classic-url-request.json"></div>
+<script src="https://TENANT.sharepoint.com/sites/FCUPortal/Code/bsp-forms/bsp-forms.js?v=0.5.0"></script>
+```
+
+Whatever sends old links here must open the page as
+`…/<page>.aspx?Link=<encoded old URL>&ResourceName=<encoded name>`.
+`ResourceName` is optional; without it the user always gets the converter.
+
+### d. Check it
+
+1. Load the page with a test `?Link=…&ResourceName=…`. The *Form
+   configuration check* table should be all **OK**, including both lists.
+   Remove `data-validate` and republish.
+2. Add one row to Classic-URL-Redirects and open the page with its
+   `ResourceName`: submit should show the new link and add a request item.
+3. Open it with an unknown `ResourceName`: the old link is copied and the
+   countdown goes to the converter.
+4. Open it with no `?Link=`: it skips the form and goes to the converter.
+
+### Changing it later
+
+Wording, the countdown (`form.vars.redirectSeconds`) and the converter URL:
+edit the deployed JSON; it's live on refresh. New redirects are just new rows
+in Classic-URL-Redirects.
