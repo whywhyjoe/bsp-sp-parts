@@ -43,7 +43,12 @@ async function afterSubmit(page) {
   });
 }
 const visible = (page, field) => page.locator(`[data-bspf-field="${field}"]`).isVisible();
-function ymd(days) { const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); }
+// local calendar date (the browser compares local days); toISOString would give the UTC date,
+// which after 8pm Eastern is already tomorrow
+function ymd(days) {
+  const d = new Date(); d.setDate(d.getDate() + days);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
 
 (async () => {
   const site = tenants.dev.siteUrl;

@@ -80,10 +80,26 @@
     addItem: function (payload) {
       var fail = maybeFail('addItem');
       if (fail) return fail;
+      // BSPF_MOCK_FAIL.addItemAfter = n: the first n adds succeed, then they fail
+      var F = window.BSPF_MOCK_FAIL || {};
+      var adds = writes.filter(function (w) { return w.op === 'addItem'; }).length;
+      if (F.addItemAfter != null && adds >= F.addItemAfter) {
+        return Promise.reject(new Error('mock addItem failure after ' + F.addItemAfter + ' (BSPF_MOCK_FAIL.addItemAfter)'));
+      }
+      // BSPF_MOCK_FAIL.addItemLostAfter = n: after n good adds, the next add
+      // LANDS (it's recorded) but the browser never hears back — the
+      // "committed, response lost" case
+      if (F.addItemLostAfter != null && adds >= F.addItemLostAfter && !F.__lost) {
+        F.__lost = true;
+        writes.push({ op: 'addItem', id: ++nextId, payload: JSON.parse(JSON.stringify(payload)), lost: true });
+        return delay(null, 200).then(function () { throw new Error('mock: response lost after the add landed (BSPF_MOCK_FAIL.addItemLostAfter)'); });
+      }
       var id = ++nextId;
       writes.push({ op: 'addItem', id: id, payload: JSON.parse(JSON.stringify(payload)) });
       console.info('[mock-sp] addItem #' + id, payload);
-      return delay({ id: id, item: { __mockItemId: id, attachmentFiles: { add: function () { } } } }, 500);
+      // BSPF_MOCK_ADD_MS: how long an add takes (default 500)
+      var ms = window.BSPF_MOCK_ADD_MS != null ? window.BSPF_MOCK_ADD_MS : 500;
+      return delay({ id: id, item: { __mockItemId: id, attachmentFiles: { add: function () { } } } }, ms);
     },
     addAttachment: function (itemRef, name, file) {
       var fail = maybeFail('addAttachment');
@@ -116,6 +132,82 @@
     },
     getLookupItems: function () {
       return maybeFail('getLookupItems') || delay(LOOKUP_ITEMS, 400);
+    },
+    // assignments: window.BSPF_MOCK_ASSIGNMENTS (rows, each with ID + the
+    // source columns and the user column) filtered like the real adapter —
+    // userColumn equal to any of the user's addresses, case-insensitive
+    getAssignments: function (src, emails) {
+      var fail = maybeFail('getAssignments');
+      if (fail) return fail;
+      writes.push({ op: 'getAssignments', list: src.listUrl || src.listTitle, emails: emails.slice() });
+      var max = src.top || 500;
+      var rows = (window.BSPF_MOCK_ASSIGNMENTS || ASSIGNMENTS).filter(function (r) {
+        return emails.indexOf(String(r[src.userColumn] || '').toLowerCase()) > -1;
+      }).map(function (r) {
+        var o = { ID: r.ID };
+        src._cols.forEach(function (c) { o[c] = r[c] == null ? '' : r[c]; });
+        return o;
+      }).sort(function (a, b) {
+        var c = src.orderBy || src.labelColumn;
+        return String(a[c]).localeCompare(String(b[c]));
+      });
+      // same shape as the real adapter: cut at max, say if there were more
+      return delay({ rows: rows.slice(0, max), more: rows.length > max }, 450);
+    },
+    // keys already saved for this user: window.BSPF_MOCK_DONE plus every
+    // row this page has saved through addItem (including a "lost" one).
+    // window.BSPF_MOCK_KEYS_CAP = n: the read returns only the first n keys
+    // and reports itself cut off — like the real adapter past ROW_KEYS_MAX.
+    getRowKeys: function (rk) {
+      var fail = maybeFail('getRowKeys');
+      if (fail) return fail;
+      var keys = (window.BSPF_MOCK_DONE || []).map(String);
+      writes.forEach(function (w) {
+        if (w.op === 'addItem' && w.payload[rk.keyColumn] != null) keys.push(String(w.payload[rk.keyColumn]));
+      });
+      writes.push({ op: 'getRowKeys' });
+      var cap = window.BSPF_MOCK_KEYS_CAP;
+      return delay(cap != null && keys.length > cap ? { keys: keys.slice(0, cap), more: true } : { keys: keys, more: false }, 200);
+    },
+    // the exact check for a few keys (no cap), as the real adapter does
+    getRowKeysFor: function (rk, emails, values) {
+      var fail = maybeFail('getRowKeysFor');
+      if (fail) return fail;
+      writes.push({ op: 'getRowKeysFor', values: values.slice() });
+      var keys = (window.BSPF_MOCK_DONE || []).map(String);
+      writes.forEach(function (w) {
+        if (w.op === 'addItem' && w.payload[rk.keyColumn] != null) keys.push(String(w.payload[rk.keyColumn]));
+      });
+      var want = values.map(String);
+      return delay(keys.filter(function (k) { return want.indexOf(k) > -1; }), 150);
     }
+  };
+  // what the dev tester is assigned (plus a row for someone else, which the
+  // user filter must drop)
+  var ASSIGNMENTS = [
+    { ID: 11, UserEmail: 'Dev.Tester@example.com', UserDescription: 'Branch manager', AreaName: 'Floor 3 — East wing' },
+    { ID: 12, UserEmail: 'dev.tester@example.com', UserDescription: 'Branch manager', AreaName: 'Floor 1 — Lobby & vault' },
+    { ID: 13, UserEmail: 'dev.tester@example.com', UserDescription: 'Branch manager', AreaName: 'Parking level P2' },
+    { ID: 14, UserEmail: 'someone.else@example.com', UserDescription: 'Facilities', AreaName: 'Data centre — Hall B' }
+  ];
+  // per-list schemas for the doctor (window.BSPF_MOCK_FIELDS[listTitle] wins)
+  var ZONE_FIELDS = {
+    'PS_Zone-Attestation-Assignments': ['UserEmail:Text', 'UserDescription:Text', 'AreaName:Text'],
+    'PS_Zone-Attestation-Responses': ['Title:Text', 'LookupID:Number', 'UserName:Text', 'UserEmail:Text', 'UserDescription:Text',
+      'AreaName:Text', 'ZoneSelection:Text', 'Attestation:Text', 'AttestationTime:DateTime']
+  };
+  function fieldsOf(defs) {
+    return defs.map(function (d) {
+      var p = d.split(':');
+      return { InternalName: p[0], Title: p[0], TypeAsString: p[1], Required: p[0] === 'Title', ReadOnlyField: false };
+    });
+  }
+  var baseFields = window.BSPF_MOCK_SP.getListFields;
+  window.BSPF_MOCK_SP.getListFields = function (spec, target) {
+    var name = spec ? (spec.listTitle || spec.listUrl) : (window.BSPF_MOCK_TARGET || null);
+    var custom = window.BSPF_MOCK_FIELDS && name && window.BSPF_MOCK_FIELDS[name];
+    if (custom) return delay(custom, 200);
+    if (name && ZONE_FIELDS[name]) return delay(fieldsOf(ZONE_FIELDS[name]), 200);
+    return baseFields(spec, target);
   };
 })();

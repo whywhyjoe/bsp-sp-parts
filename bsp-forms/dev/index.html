@@ -18,7 +18,11 @@
 
     If your bsp-design-system clone lives elsewhere, adjust designBase
     below. Writes land on window.__BSPF_MOCK_WRITES__ (see mock-sp.js);
-    add ?validate to the URL to also render the doctor report.
+    add ?validate to the URL to also render the doctor report, and
+    ?form=<name> to load forms/<name>.json instead of the reference
+    config (e.g. ?form=ps-zone-attestation). Bilingual forms get the
+    bilingual library from ../../bilingual/intl.js; the EN / FR buttons
+    call intl.setLang() (or open with ?lang=fr).
   ================================================================== -->
   <style>
     /* Harness chrome only — the page around the web-part div. */
@@ -28,11 +32,13 @@
       font: 600 13px/1.4 "Segoe UI", sans-serif; letter-spacing: .02em;
     }
     .harness-bar small { font-weight: 400; opacity: .7; }
+    .harness-bar button { margin-left: 8px; font: inherit; padding: 1px 8px; cursor: pointer; }
     .harness-canvas { max-width: 860px; margin: 24px auto; background: #fff; border-radius: 8px; padding: 32px; }
   </style>
 </head>
 <body>
-  <div class="harness-bar">BSP Forms · dev harness <small>— mock SharePoint, vendored Alpine · writes logged to <code>__BSPF_MOCK_WRITES__</code></small></div>
+  <div class="harness-bar">BSP Forms · dev harness <small>— mock SharePoint, vendored Alpine · writes logged to <code>__BSPF_MOCK_WRITES__</code></small>
+    <button type="button" onclick="window.intl && intl.setLang('en')">EN</button><button type="button" onclick="window.intl && intl.setLang('fr')">FR</button></div>
 
   <!-- Simulates the modern-page canvas + the web part's own padding. -->
   <div class="harness-canvas">
@@ -43,14 +49,21 @@
       window.BSP_FORMS_SETTINGS = {
         designBase: '../../../bsp-design-system/',   // sibling clone (adjust if yours differs)
         alpineUrl: 'vendor/alpine.js',               // vendored, dev-only
+        intlUrl: '../../bilingual/intl.js',          // the repo's bilingual library
         mockSp: window.BSPF_MOCK_SP
       };
     </script>
     <div data-bsp-form data-config="../forms/example-it-request.json"></div>
     <script>
-      if (location.search.indexOf('validate') > -1) {
-        document.querySelector('[data-bsp-form]').setAttribute('data-validate', '');
-      }
+      (function () {
+        var mount = document.querySelector('[data-bsp-form]');
+        var form = /[?&]form=([\w-]+)/.exec(location.search);
+        if (form) {
+          mount.setAttribute('data-config', '../forms/' + form[1] + '.json');
+          if (form[1] === 'ps-zone-attestation') window.BSPF_MOCK_TARGET = 'PS_Zone-Attestation-Responses';
+        }
+        if (location.search.indexOf('validate') > -1) mount.setAttribute('data-validate', '');
+      })();
     </script>
     <script src="../bsp-forms.js"></script>
     <!-- ==================================================================== -->

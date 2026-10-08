@@ -41,7 +41,9 @@ contract. Read both before changing behavior.
 | `forms/gsi-digital-initiatives-intake.json` | Live form: FCU GSI Digital Initiatives Technology Intake → the Creative Digital Solutions intake list (internal column names; see its `$comment`). |
 | `forms/gsi-digital-creative-intake.json` | Live form: FCU GSI Digital & Creative Solutions Intake → the same list. Uses business time: urgent prompt + locked Urgent/Standard switch. |
 | `forms/classic-url-request.json` | Live form: classic-link request (`?Link=&ResourceName=`) → Classic-URL-Requests, lookup in Classic-URL-Redirects, else copy + redirect to the link converter (`form.vars`). |
+| `forms/ps-zone-attestation.json` | Live form (bilingual): Physical Security Zones Attestation — `assignments` rows from PS_Zone-Attestation-Assignments, one PS_Zone-Attestation-Responses item per row (both lists on /teams/FCUWebDatastores, addressed by title), `currentUser`, `headerCard` (job aid, `form.vars.jobAidUrl`), `submitConfirm`, `target.set`. The reference config for all of those (they can't all live in example-it-request.json: assignments excludes attachments). |
 | `dev/` | Harness (`index.html`), mock adapter (`mock-sp.js`, same method names as the real adapter), vendored Alpine. Never deployed. |
+| `dev/live/live-zone-lists.js` + `live-zone.js` | Dev-tenant live test of the zone attestation, cross-site like prod (lists on /teams/FCUWebDatastores, page on /sites/FCUPortal): the twin lists are on the tenant **root** site (indexed `UserEmail`, unique `AreaName`, own-items read on Responses), the page on the dev site. The test seeds rows as the signed-in user, submits EN and FR, and reads the items back. Same-titled lists also exist on the dev site, on purpose: they reproduce the pnp entity-type cache collision (see below). |
 | `dev/live/` | Dev-tenant live smoke for the two GSI forms: `live-crosssite.js` (the list's twin on the tenant root site), `live-setup.ps1` (upload both configs, with `siteUrl` swapped to the dev root), `live-page.ps1` (test page per `-Config`), `live-submit.js` (initiatives form), `live-creative.js` (creative form, clock pinned), `live-classic-lists.ps1` + `live-classic.js` (classic-link form) — end-to-end + REST read-back. Needs the sp-env skill; never deployed, never run on prod. |
 
 ## Paid-for gotchas (don't relearn these)
@@ -149,6 +151,53 @@ contract. Read both before changing behavior.
 - The people API can't reliably filter disabled/room accounts; the adapter
   drops non-`User` principals and entries without an email. Best-effort by
   design — don't promise more in UI copy.
+- **Bilingual = `localize()` before `normalizeConfig`.** Every `{en, fr}`
+  pair in the raw config collapses to a string for the active language, so
+  nothing downstream knows about languages. A language switch re-normalizes
+  `def.raw` and re-renders, carrying state over through `def.carry` (plain
+  JSON copies). It waits while a submit is busy. Keep new state that must
+  survive a switch in `snapshotState`'s list.
+- **Choice `value` is data, `label` is display.** Translate labels, never
+  values: the zone attestation must save "Green" whatever the language.
+- **The form root's `lang` carries `lang-keep`.** Without it, the bilingual
+  library's `lang-blocks.css` would hide the form, and `intl.apply()` would
+  disable its inputs during a switch (apply runs before onChange listeners).
+- **Assignment rows stack.** Each row is a stacking context (`position` plus
+  the rise animation), so an open menu sits under the next rows unless its
+  row gets `is-open` (z-index). Don't drop that class.
+- **`row.saved` is the per-row "never twice" guard**, like `store.itemId`
+  for attachments. A retry after a partial save sends only unsaved rows. It
+  isn't enough alone: an add can land while its reply is lost. So any failed
+  save sets `store.rowsUncertain`, and the next submit runs
+  `reconcileRows()` first. It asks about exactly the unsaved rows
+  (`getRowKeysFor`: number keys unquoted, chunks of 20), so the 5,000-key
+  read cap can't hide a landed row. Don't swap it back to the capped
+  `getRowKeys`, and don't skip it to save a request.
+- **The dropzone is a div**, so the disabled fieldset doesn't stop a drop.
+  `addFiles`/`removeFile` carry their own `busy` guard. Keep it: the GSI
+  forms have attachments.
+- **Rows are saved from `store.snap`**, a copy of `values` taken when the
+  confirmed submit starts. `buildPayload` and `{field:}` tokens read the
+  snapshot. The `fieldset.bspf__lock` (disabled while busy) and the pickers'
+  `busy` guards only keep the UI honest. Note that `input.disabled` stays
+  false under a disabled fieldset; test with `:disabled`.
+- **Reads that can be cut off say so.** `getAssignments` and `getRowKeys`
+  ask for one row past their cap and return `{ …, more }`. The form shows a
+  warning (`asg.warn`), never a silent short list. A cut-off source with
+  every shown row done shows an error, not "already submitted".
+- **Escape means opposite things in the two dialogs.** A date prompt's
+  Escape is OK (keep the date). A `submitConfirm`'s Escape is Go back.
+  `dlg.mode` tells them apart.
+- **Never let pnp guess the item type on `items.add`.** pnp v2 caches
+  `ListItemEntityTypeFullName` in localStorage for 5 days, keyed by the
+  list's *relative* URL (`_api/web/lists/getByTitle('X')`, since this bundle
+  has no `pnp.Web`). Same-titled lists on two webs collide tenant-wide, and
+  the save 400s with "type … could not be resolved". `addItem` passes the
+  type it read from the target list itself (`listEntityType`). Found live on
+  dev (0.5.0): the zone lists existed on both the dev site and the root.
+- **Assignments filter ≠ security.** It's a browser-side `$filter`. Privacy
+  needs item permissions on the source list (README, *Caveats*). Don't
+  describe the filter as protecting anything.
 
 ## Verifying a change
 
@@ -158,7 +207,8 @@ open the harness (mock SP, vendored Alpine, writes logged to
 
 ```
 python -m http.server 8000       # from the parent of both clones
-http://localhost:8000/various/bsp-forms/dev/index.html      (?validate → doctor)
+http://localhost:8000/bsp-sp-parts/bsp-forms/dev/index.html      (?validate → doctor)
+   …?form=ps-zone-attestation    (any forms/<name>.json; &lang=fr; EN/FR buttons in the bar)
 ```
 
 Then run the regression suite — it covers the lifecycle and payload

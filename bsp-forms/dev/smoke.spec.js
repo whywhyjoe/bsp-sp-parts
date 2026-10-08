@@ -8,16 +8,16 @@
  * Run:
  *   npm i playwright            (once, anywhere on the dev machine)
  *   python -m http.server 8000  (from the folder containing BOTH
- *                                various/ and bsp-design-system/)
- *   node various/bsp-forms/dev/smoke.spec.js [baseUrl]
+ *                                bsp-sp-parts/ and bsp-design-system/)
+ *   node bsp-sp-parts/bsp-forms/dev/smoke.spec.js [baseUrl]
  *
- * baseUrl defaults to http://localhost:8000/various/bsp-forms/dev/index.html
+ * baseUrl defaults to http://localhost:8000/bsp-sp-parts/bsp-forms/dev/index.html
  * Set CHROMIUM=/path/to/chrome to pin the browser executable.
  */
 'use strict';
 const { chromium } = require('playwright');
 
-const BASE = process.argv[2] || 'http://localhost:8000/various/bsp-forms/dev/index.html';
+const BASE = process.argv[2] || 'http://localhost:8000/bsp-sp-parts/bsp-forms/dev/index.html';
 
 let failures = 0;
 function check(name, ok, detail) {
@@ -361,6 +361,354 @@ async function testCreativeCallout(browser) {
   await ctx.close();
 }
 
+/* Zone attestation: assignments rows from the mock source list, per-row
+   save, submit confirmation, header card, current user, EN/FR. */
+const ZONE = '?form=ps-zone-attestation';
+const JOB_AID = 'https://example.com/job-aid';
+async function openZone(browser, opts) {
+  opts = opts || {};
+  const ctx = await browser.newContext({ viewport: { width: 1100, height: 1600 } });
+  const page = await ctx.newPage();
+  page.__errors = [];
+  page.on('pageerror', e => page.__errors.push(e.message));
+  await page.route('**/ps-zone-attestation.json', async route => {
+    const cfg = await (await route.fetch()).json();
+    if (opts.jobAid !== undefined) cfg.form.vars.jobAidUrl = opts.jobAid;
+    if (opts.mutate) opts.mutate(cfg);
+    await route.fulfill({ json: cfg });
+  });
+  await page.addInitScript(o => {
+    if (o.fail) window.BSPF_MOCK_FAIL = o.fail;
+    if (o.done) window.BSPF_MOCK_DONE = o.done;
+    if (o.rows) window.BSPF_MOCK_ASSIGNMENTS = o.rows;
+    if (o.addMs != null) window.BSPF_MOCK_ADD_MS = o.addMs;
+    if (o.keysCap != null) window.BSPF_MOCK_KEYS_CAP = o.keysCap;
+  }, { fail: opts.fail || null, done: opts.done || null, rows: opts.rows || null, addMs: opts.addMs == null ? null : opts.addMs,
+    keysCap: opts.keysCap == null ? null : opts.keysCap });
+  await page.goto(BASE + ZONE + (opts.query || ''));
+  await page.waitForTimeout(1200);
+  return { ctx, page };
+}
+async function zonePick(page, row, label) {
+  await page.evaluate(async ({ row, label }) => {
+    const r = document.querySelectorAll('.bspf-asg__row')[row];
+    r.querySelector('[role="combobox"]').click();
+    await new Promise(x => setTimeout(x, 60));
+    [...r.querySelectorAll('.bspf-combo__option')].find(b => b.innerText.trim() === label).click();
+  }, { row, label });
+  await page.waitForTimeout(80);
+}
+const zoneAdds = page => page.evaluate(() => window.__BSPF_MOCK_WRITES__.filter(w => w.op === 'addItem').map(w => w.payload));
+
+async function testZoneAttestation(browser) {
+  console.log('zone attestation (assignments):');
+  let { ctx, page } = await openZone(browser, { jobAid: JOB_AID, query: '&validate' });
+
+  // load: the user's rows only (case-insensitive email), sorted by area
+  const labels = await page.$$eval('.bspf-asg__label', els => els.map(e => e.textContent));
+  check('3 rows, the other user\'s row filtered out, sorted',
+    JSON.stringify(labels) === JSON.stringify(['Floor 1 — Lobby & vault', 'Floor 3 — East wing', 'Parking level P2']), JSON.stringify(labels));
+  check('current user card shows name + email',
+    (await page.locator('.bspf-who__name').textContent()) === 'Dev Tester' &&
+    (await page.locator('.bspf-who__mail').textContent()) === 'dev.tester@example.com');
+  const card = page.locator('a.bspf-tipcard');
+  check('job aid card opens the configured URL in a new tab',
+    (await card.getAttribute('href')) === JOB_AID && (await card.getAttribute('target')) === '_blank' &&
+    /noopener/.test(await card.getAttribute('rel')));
+  await page.waitForFunction(() => document.querySelector('.bspf-doctor tbody tr'), null, { timeout: 5000 });
+  const doctor = await page.$$eval('.bspf-doctor tbody tr', trs => trs.map(tr => [...tr.children].map(td => td.innerText.trim())));
+  check('doctor: every target + source column OK', doctor.length >= 12 && doctor.every(r => r[4] === 'OK'),
+    doctor.filter(r => r[4] !== 'OK').map(r => r.join('|')).join('; '));
+
+  // empty submit: every row + the checkbox flagged, no dialog, nothing saved
+  await navClick(page, 'Submit attestation');
+  await page.waitForTimeout(200);
+  check('empty submit → an error on every row', (await page.locator('.bspf-asg__row.is-error').count()) === 3);
+  check('empty submit → checkbox error', await page.locator('[data-bspf-field="attestation"] .field__error').isVisible());
+  check('empty submit → no dialog, nothing saved', !(await page.locator('.bspf-dialog').isVisible()) && (await zoneAdds(page)).length === 0);
+
+  // pick, clear, re-pick; the progress meter follows
+  await zonePick(page, 0, 'Yellow');
+  check('a pick clears that row\'s error', (await page.locator('.bspf-asg__row.is-error').count()) === 2);
+  await page.locator('.bspf-asg__row').nth(0).locator('.bspf-combo__clear').click();
+  await page.waitForTimeout(80);
+  check('the × clears the selection', (await page.locator('.bspf-asg__row').nth(0).locator('.bspf-combo__placeholder').isVisible()));
+  await zonePick(page, 0, 'Orange');
+  await page.evaluate(async () => {
+    const r = document.querySelectorAll('.bspf-asg__row')[0];
+    r.querySelector('[role="combobox"]').click();
+    await new Promise(x => setTimeout(x, 60));
+    r.querySelector('.bspf-combo__option--clear').click();
+  });
+  await page.waitForTimeout(80);
+  check('the menu\'s "Clear selection" clears it too',
+    await page.evaluate(() => { const d = Object.values(BSPForms._defs).pop(); return d.store.state.values.zones[0].value === ''; }));
+  await zonePick(page, 0, 'Orange');
+  await zonePick(page, 1, 'Green');
+  await zonePick(page, 2, 'Red');
+  check('progress reads 3 of 3', /3 of 3/.test(await page.locator('.bspf-asg__progress').textContent()));
+  await page.locator('[data-bspf-field="attestation"] input').check();
+
+  // confirmation: Escape goes back; Confirm saves one item per row
+  await navClick(page, 'Submit attestation');
+  await page.waitForTimeout(250);
+  check('submit → confirmation dialog with the warning text',
+    await page.locator('.bspf-dialog').isVisible() && /will not be able to return and change them/.test(await page.locator('.bspf-dialog').textContent()));
+  check('focus starts on "Go back"', (await page.evaluate(() => document.activeElement && document.activeElement.textContent.trim())) === 'Go back');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  check('Escape → dialog closed, nothing saved', !(await page.locator('.bspf-dialog').isVisible()) && (await zoneAdds(page)).length === 0);
+  await navClick(page, 'Submit attestation');
+  await page.waitForTimeout(250);
+  await navClick(page, 'Confirm');
+  await page.waitForSelector('.bspf-done:not(.bspf-done--empty):not(.bspf-done--allDone)', { state: 'visible', timeout: 5000 });
+  const adds = await zoneAdds(page);
+  const byId = Object.fromEntries(adds.map(p => [p.LookupID, p]));
+  check('one item per row', adds.length === 3, adds.length);
+  check('row columns copied (LookupID / AreaName / UserDescription)',
+    byId[12] && byId[12].AreaName === 'Floor 1 — Lobby & vault' && byId[12].UserDescription === 'Branch manager' && typeof byId[12].LookupID === 'number');
+  check('each row saves its own zone', byId[12].ZoneSelection === 'Orange' && byId[11].ZoneSelection === 'Green' && byId[13].ZoneSelection === 'Red');
+  check('UserName / UserEmail / Attestation set on every row',
+    adds.every(p => p.UserName === 'Dev Tester' && p.UserEmail === 'dev.tester@example.com' && p.Attestation === 'Confirmed'));
+  check('AttestationTime: one ISO instant shared by the rows',
+    /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(adds[0].AttestationTime) && adds.every(p => p.AttestationTime === adds[0].AttestationTime));
+  check('Title per row from {row:AreaName}', byId[13].Title === 'Parking level P2 — dev.tester@example.com', byId[13].Title);
+  check('no "submit another" button', (await page.locator('.bspf-done button').count()) === 0);
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+
+  // the job aid card stays hidden while its URL is empty or unsafe
+  ({ ctx, page } = await openZone(browser, { jobAid: '' }));
+  check('no job aid URL → no card', (await page.locator('.bspf-tipcard').count()) === 0);
+  await ctx.close();
+  ({ ctx, page } = await openZone(browser, { jobAid: 'javascript:alert(1)' }));
+  check('javascript: job aid URL → no card', (await page.locator('.bspf-tipcard').count()) === 0);
+  await ctx.close();
+
+  // a failure mid-save: saved rows are kept and never saved twice
+  ({ ctx, page } = await openZone(browser, { fail: { addItemAfter: 1 } }));
+  await zonePick(page, 0, 'Green'); await zonePick(page, 1, 'Green'); await zonePick(page, 2, 'Yellow');
+  await page.locator('[data-bspf-field="attestation"] input').check();
+  await navClick(page, 'Submit attestation'); await page.waitForTimeout(200);
+  await navClick(page, 'Confirm');
+  await page.waitForSelector('.bspf__pageerror', { state: 'visible', timeout: 5000 });
+  check('partial save → "1 of 3 areas are confirmed saved" message', /1 of 3 areas are confirmed saved/.test(await page.locator('.bspf__pageerror').textContent()));
+  check('the saved row is locked', (await page.locator('.bspf-asg__row.is-saved').count()) === 1 &&
+    (await page.locator('.bspf-asg__row.is-saved .bspf-combo__clear').isHidden()));
+  await page.evaluate(() => { window.BSPF_MOCK_FAIL = {}; });
+  await navClick(page, 'Submit attestation'); await page.waitForTimeout(200);
+  await navClick(page, 'Confirm');
+  await page.waitForSelector('.bspf-done:not(.bspf-done--empty):not(.bspf-done--allDone)', { state: 'visible', timeout: 5000 });
+  const ids = (await zoneAdds(page)).map(p => p.LookupID).sort();
+  check('retry saves only the rest — 3 items, no duplicates', JSON.stringify(ids) === '[11,12,13]', JSON.stringify(ids));
+  await ctx.close();
+
+  // rows already answered (responses list) aren't shown again
+  ({ ctx, page } = await openZone(browser, { done: ['12'] }));
+  check('one row already submitted → 2 rows + a note', (await page.locator('.bspf-asg__row').count()) === 2 &&
+    /1 of your areas were already attested/.test(await page.locator('[data-bspf-field="zones"]').textContent()));
+  await ctx.close();
+  ({ ctx, page } = await openZone(browser, { done: ['11', '12', '13'] }));
+  check('everything submitted → "already submitted" screen, no form',
+    await page.locator('.bspf-done--allDone').isVisible() && !(await page.locator('form.bspf__body').isVisible()));
+  await ctx.close();
+  ({ ctx, page } = await openZone(browser, { rows: [] }));
+  check('nothing assigned → "No areas assigned" screen', await page.locator('.bspf-done--empty:has-text("No areas assigned")').isVisible());
+  await ctx.close();
+
+  // load failure: a message + Try again, and submit is blocked meanwhile
+  ({ ctx, page } = await openZone(browser, { fail: { getAssignments: true } }));
+  check('load failure → message + Try again', await page.locator('[data-bspf-field="zones"] .msgbar--danger:has-text("couldn\'t be loaded")').isVisible());
+  await page.evaluate(() => { window.BSPF_MOCK_FAIL = {}; });
+  await page.locator('[data-bspf-field="zones"] .msgbar button').click();
+  await page.waitForTimeout(800);
+  check('Try again → rows load', (await page.locator('.bspf-asg__row').count()) === 3);
+  await ctx.close();
+
+  // French: config pairs + engine strings; switching keeps answers; values stay English
+  ({ ctx, page } = await openZone(browser, { query: '&lang=fr' }));
+  check('?lang=fr → French title, labels, button',
+    (await page.locator('.bspf__title').textContent()) === 'Attestation des zones de sécurité physique' &&
+    /ÉTAGE\/ZONE|Étage\/zone/i.test(await page.locator('.bspf-asg__head').textContent()) &&
+    await page.locator('button[type="submit"]:has-text("Soumettre l\'attestation")').isVisible());
+  check('form root lang="fr" (lang-keep)', (await page.getAttribute('.bspf', 'lang')) === 'fr' &&
+    (await page.getAttribute('.bspf', 'class')).includes('lang-keep'));
+  await zonePick(page, 0, 'Vert');
+  await page.evaluate(() => window.intl.setLang('en'));
+  await page.waitForTimeout(500);
+  check('switch to EN keeps the pick (Vert → Green)', (await page.locator('.bspf-asg__row').nth(0).locator('.bspf-zone:visible').textContent()).trim() === 'Green' &&
+    (await page.locator('.bspf__title').textContent()) === 'Physical Security Zones Attestation');
+  await page.evaluate(() => window.intl.setLang('fr'));
+  await page.waitForTimeout(500);
+  await zonePick(page, 1, 'Jaune'); await zonePick(page, 2, 'Rouge');
+  await page.locator('[data-bspf-field="attestation"] input').check();
+  await navClick(page, 'Soumettre'); await page.waitForTimeout(200);
+  check('French confirmation dialog', /Une fois soumises/.test(await page.locator('.bspf-dialog').textContent()));
+  await navClick(page, 'Confirmer');
+  await page.waitForSelector('.bspf-done:not(.bspf-done--empty):not(.bspf-done--allDone)', { state: 'visible', timeout: 5000 });
+  const frZones = (await zoneAdds(page)).map(p => p.ZoneSelection).sort();
+  check('French submit saves English zone values', JSON.stringify(frZones) === '["Green","Red","Yellow"]', JSON.stringify(frZones));
+  check('no page errors (French)', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+
+  // answers are frozen once confirmed: a slow save, edits attempted mid-save
+  ({ ctx, page } = await openZone(browser, { addMs: 900 }));
+  await zonePick(page, 0, 'Orange'); await zonePick(page, 1, 'Green'); await zonePick(page, 2, 'Red');
+  await page.locator('[data-bspf-field="attestation"] input').check();
+  await navClick(page, 'Submit attestation'); await page.waitForTimeout(200);
+  await navClick(page, 'Confirm');
+  await page.waitForTimeout(250); // row 1 is saving
+  const mid = await page.evaluate(() => {
+    const st = Object.values(BSPForms._defs).pop().store.state;
+    const r3 = document.querySelectorAll('.bspf-asg__row')[2];
+    const clear = r3.querySelector('.bspf-combo__clear');
+    if (clear) clear.click();                       // UI path: guarded
+    st.rowPick('zones', st.values.zones[2], '');    // method path: guarded
+    const cb = document.querySelector('[data-bspf-field="attestation"] input');
+    const cbDisabled = cb.matches(':disabled'); cb.click(); // disabled via the fieldset: ignores the click
+    const busy = st.busy;
+    st.values.zones[1].value = '';                  // bypass every guard: the snapshot must win
+    st.values.attestation = false;
+    return { busy, cbDisabled, fieldset: document.querySelector('fieldset.bspf__lock').disabled, r3: st.values.zones[2].value };
+  });
+  check('mid-save: busy, fieldset + checkbox disabled', mid.busy && mid.fieldset && mid.cbDisabled, JSON.stringify(mid));
+  check('mid-save: clearing a row is refused', mid.r3 === 'Red', mid.r3);
+  await page.waitForSelector('.bspf-done:not(.bspf-done--empty):not(.bspf-done--allDone)', { state: 'visible', timeout: 8000 });
+  let saved = await zoneAdds(page);
+  const zb = Object.fromEntries(saved.map(p => [p.LookupID, p]));
+  check('saved what was confirmed, not what changed mid-save',
+    saved.length === 3 && zb[12].ZoneSelection === 'Orange' && zb[11].ZoneSelection === 'Green' && zb[13].ZoneSelection === 'Red' &&
+    saved.every(p => p.Attestation === 'Confirmed'), JSON.stringify(saved.map(p => [p.LookupID, p.ZoneSelection, p.Attestation])));
+  await ctx.close();
+
+  // an add that LANDS but whose reply is lost: the retry checks the list first
+  ({ ctx, page } = await openZone(browser, { fail: { addItemLostAfter: 1 } }));
+  await zonePick(page, 0, 'Green'); await zonePick(page, 1, 'Yellow'); await zonePick(page, 2, 'Red');
+  await page.locator('[data-bspf-field="attestation"] input').check();
+  await navClick(page, 'Submit attestation'); await page.waitForTimeout(200);
+  await navClick(page, 'Confirm');
+  await page.waitForSelector('.bspf__pageerror', { state: 'visible', timeout: 5000 });
+  check('lost reply → "1 of 3 areas are confirmed saved" (the rest only "may not be")',
+    /1 of 3 areas are confirmed saved; the rest may not be/.test(await page.locator('.bspf__pageerror').textContent()));
+  await page.evaluate(() => { window.BSPF_MOCK_FAIL = {}; });
+  await navClick(page, 'Submit attestation'); await page.waitForTimeout(200);
+  await navClick(page, 'Confirm');
+  await page.waitForSelector('.bspf-done:not(.bspf-done--empty):not(.bspf-done--allDone)', { state: 'visible', timeout: 5000 });
+  const lostWrites = await page.evaluate(() => window.__BSPF_MOCK_WRITES__);
+  const lostIds = lostWrites.filter(w => w.op === 'addItem').map(w => w.payload.LookupID).sort();
+  check('retry asked the list about exactly the unsaved rows first',
+    JSON.stringify((lostWrites.find(w => w.op === 'getRowKeysFor') || {}).values) === '[11,13]',
+    JSON.stringify(lostWrites.filter(w => w.op === 'getRowKeysFor')));
+  check('the landed-but-lost row is not saved again — 3 items, no duplicates', JSON.stringify(lostIds) === '[11,12,13]', JSON.stringify(lostIds));
+  await ctx.close();
+  // the same, with the earlier-responses read capped at 0: the retry's exact
+  // check must still find the landed row (the cap doesn't apply to it)
+  ({ ctx, page } = await openZone(browser, { fail: { addItemLostAfter: 1 }, keysCap: 0 }));
+  await zonePick(page, 0, 'Green'); await zonePick(page, 1, 'Yellow'); await zonePick(page, 2, 'Red');
+  await page.locator('[data-bspf-field="attestation"] input').check();
+  await navClick(page, 'Submit attestation'); await page.waitForTimeout(200);
+  await navClick(page, 'Confirm');
+  await page.waitForSelector('.bspf__pageerror', { state: 'visible', timeout: 5000 });
+  await page.evaluate(() => { window.BSPF_MOCK_FAIL = {}; });
+  await navClick(page, 'Submit attestation'); await page.waitForTimeout(200);
+  await navClick(page, 'Confirm');
+  await page.waitForSelector('.bspf-done:not(.bspf-done--empty):not(.bspf-done--allDone)', { state: 'visible', timeout: 5000 });
+  const capIds = (await zoneAdds(page)).map(p => p.LookupID).sort();
+  check('capped earlier-responses read: retry still saves no duplicate', JSON.stringify(capIds) === '[11,12,13]', JSON.stringify(capIds));
+  await ctx.close();
+  // lost on the very first add: no "nothing was saved" promise
+  ({ ctx, page } = await openZone(browser, { fail: { addItemLostAfter: 0 } }));
+  await zonePick(page, 0, 'Green'); await zonePick(page, 1, 'Green'); await zonePick(page, 2, 'Green');
+  await page.locator('[data-bspf-field="attestation"] input').check();
+  await navClick(page, 'Submit attestation'); await page.waitForTimeout(200);
+  await navClick(page, 'Confirm');
+  await page.waitForSelector('.bspf__pageerror', { state: 'visible', timeout: 5000 });
+  const firstLost = await page.locator('.bspf__pageerror').textContent();
+  check('first add lost → "Not every area could be saved", never "nothing was saved"',
+    /Not every area could be saved/.test(firstLost) && !/nothing was saved/.test(firstLost), firstLost);
+  await ctx.close();
+
+  // hostile text in list data and in a choice: shown literally, saved exactly, never run
+  const EVIL_AREA = '<img src=x onerror="window.__xss=1">Lobby & "vault"';
+  const EVIL_ZONE = 'O"Brien\'s <b>zone</b> {{x}}';
+  ({ ctx, page } = await openZone(browser, {
+    rows: [{ ID: 21, UserEmail: 'dev.tester@example.com', UserDescription: '<script>window.__xss=2</script>', AreaName: EVIL_AREA }],
+    mutate: cfg => { cfg.pages[0].sections[1].fields[0].choices.push({ value: EVIL_ZONE, label: EVIL_ZONE, color: 'blue' }); }
+  }));
+  check('hostile area name shown as text', (await page.locator('.bspf-asg__label').textContent()) === EVIL_AREA);
+  await zonePick(page, 0, EVIL_ZONE);
+  check('hostile choice shown as text in the control', (await page.locator('.bspf-asg__row .bspf-zone:visible').textContent()).trim() === EVIL_ZONE);
+  await page.locator('[data-bspf-field="attestation"] input').check();
+  await navClick(page, 'Submit attestation'); await page.waitForTimeout(200);
+  await navClick(page, 'Confirm');
+  await page.waitForSelector('.bspf-done:not(.bspf-done--empty):not(.bspf-done--allDone)', { state: 'visible', timeout: 5000 });
+  saved = await zoneAdds(page);
+  check('hostile values saved exactly', saved.length === 1 && saved[0].ZoneSelection === EVIL_ZONE && saved[0].AreaName === EVIL_AREA &&
+    saved[0].UserDescription === '<script>window.__xss=2</script>');
+  check('no script ran, no page errors', (await page.evaluate(() => window.__xss)) === undefined && page.__errors.length === 0,
+    page.__errors.join(' | '));
+  await ctx.close();
+
+  // cut-off reads are said out loud
+  ({ ctx, page } = await openZone(browser, { mutate: cfg => { cfg.pages[0].sections[1].fields[0].source.top = 2; } }));
+  check('more rows than source.top → 2 rows + "Only the first 2" warning',
+    (await page.locator('.bspf-asg__row').count()) === 2 && await page.locator('.bspf-asg__warn:has-text("Only the first 2")').isVisible());
+  await ctx.close();
+  ({ ctx, page } = await openZone(browser, { done: ['12', '11'], mutate: cfg => { cfg.pages[0].sections[1].fields[0].source.top = 2; } }));
+  check('first page all done but more exist → a warning, not "already submitted"',
+    !(await page.locator('.bspf-done--allDone').isVisible()) &&
+    await page.locator('[data-bspf-field="zones"] .msgbar--danger:has-text("Only the first 2")').isVisible());
+  await ctx.close();
+  ({ ctx, page } = await openZone(browser, { done: ['12'], keysCap: 0 }));
+  check('earlier-responses read cut off → warning; unconfirmed rows still shown',
+    (await page.locator('.bspf-asg__row').count()) === 3 && await page.locator('.bspf-asg__warn:has-text("More than 5000 earlier responses")').isVisible());
+  await ctx.close();
+  ({ ctx, page } = await openZone(browser, { done: ['11', '12', '13', '99'], keysCap: 3 }));
+  check('every row done but the responses read was cut off → a warning, not "already submitted"',
+    !(await page.locator('.bspf-done--allDone').isVisible()) &&
+    await page.locator('[data-bspf-field="zones"] .msgbar--danger:has-text("More than 5000 earlier responses")').isVisible());
+  await ctx.close();
+
+  // the file set is frozen during a save (reference form: attachments)
+  {
+    const p2 = await browser.newPage();
+    await p2.goto(BASE);
+    await p2.waitForTimeout(1000);
+    const frozen = await p2.evaluate(() => {
+      const st = Object.values(BSPForms._defs).pop().store.state;
+      const f = new File(['x'], 'late.pdf', { type: 'application/pdf' });
+      st.addFiles([f]);
+      const before = st.filesMeta.length;
+      st.busy = true;
+      st.addFiles([new File(['y'], 'during.pdf')]);
+      st.dropFiles({ dataTransfer: { files: [new File(['z'], 'dropped.pdf')] } });
+      st.removeFile(0);
+      const during = st.filesMeta.map(m => m.name);
+      st.busy = false;
+      return { before, during };
+    });
+    check('while saving, files cannot be added, dropped or removed',
+      frozen.before === 1 && JSON.stringify(frozen.during) === '["late.pdf"]', JSON.stringify(frozen));
+    await p2.close();
+  }
+
+  // config errors
+  for (const [name, mutate] of [
+    ['assignments without source.userColumn → error card', cfg => { delete cfg.pages[0].sections[1].fields[0].source.userColumn; }],
+    ['responses.keyColumn not in rowColumns → error card', cfg => { cfg.pages[0].sections[1].fields[0].responses.keyColumn = 'Nope'; }],
+    ['two assignments fields → error card', cfg => {
+      const f = JSON.parse(JSON.stringify(cfg.pages[0].sections[1].fields[0])); f.id = 'zones2';
+      cfg.pages[0].sections[1].fields.push(f);
+    }],
+    ['form.languages ["de"] → error card', cfg => { cfg.form.languages = ['de']; }]
+  ]) {
+    ({ ctx, page } = await openZone(browser, { mutate }));
+    const state = await page.getAttribute('[data-bsp-form]', 'data-bspf-state');
+    check(name, state === 'error' && await page.locator('[data-bspf-fatal]').isVisible(), 'state=' + state);
+    await ctx.close();
+  }
+}
+
 async function testFullFlow(browser) {
   console.log('full submit flow:');
   const page = await browser.newPage({ viewport: { width: 1100, height: 2600 } });
@@ -474,6 +822,7 @@ async function testFullFlow(browser) {
     await testClassic(browser);
     await testCreativeCallout(browser);
     await testDoctorRichText(browser);
+    await testZoneAttestation(browser);
     await testFullFlow(browser);
   } finally {
     await browser.close();

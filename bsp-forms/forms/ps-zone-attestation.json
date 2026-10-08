@@ -1,0 +1,151 @@
+{
+  "$comment": "Physical Security Zones Attestation. Rows come from PS_Zone-Attestation-Assignments (filtered to the signed-in user's email); each row saves one item to PS_Zone-Attestation-Responses. Both lists live on /teams/FCUWebDatastores (target.siteUrl and source.siteUrl); the page runs on /sites/FCUPortal. Users need read on the Assignments list and Add + View (own items only) on Responses. Set form.vars.jobAidUrl to show the job aid card. Bilingual: every { en, fr } pair follows the language from bilingual/intl.js. Zone VALUES are saved in English whatever the language; only the labels are translated.",
+  "form": {
+    "title": { "en": "Physical Security Zones Attestation", "fr": "Attestation des zones de sécurité physique" },
+    "intro": {
+      "en": "[Placeholder] A short description of this attestation goes here: what it is, why it matters, and when it's due.",
+      "fr": "[Texte provisoire] Une brève description de cette attestation : de quoi il s'agit, pourquoi c'est important et la date limite."
+    },
+    "languages": ["en", "fr"],
+    "appearance": { "frame": "card", "header": "band", "tint": "sky" },
+    "vars": { "jobAidUrl": "" },
+    "headerCard": {
+      "title": { "en": "Security Zone Job Aid", "fr": "Aide-mémoire sur les zones de sécurité" },
+      "text": {
+        "en": "Click to view a job aid and classification tool to help you make the right choices.",
+        "fr": "Cliquez pour consulter un aide-mémoire et un outil de classification qui vous aideront à faire les bons choix."
+      },
+      "url": "{var:jobAidUrl}",
+      "icon": "abacus-icons/light-bulb-48.svg"
+    }
+  },
+  "target": {
+    "siteUrl": "/teams/FCUWebDatastores",
+    "listTitle": "PS_Zone-Attestation-Responses",
+    "titleTemplate": "{row:AreaName} — {user:email}",
+    "set": {
+      "UserName": "{user:name}",
+      "UserEmail": "{user:email}",
+      "AttestationTime": "{now}"
+    }
+  },
+  "submitConfirm": {
+    "title": { "en": "Submit your attestation?", "fr": "Soumettre votre attestation?" },
+    "message": {
+      "en": "You are about to submit your security zone attestations. Once submitted you will not be able to return and change them. Please be sure they are correct.",
+      "fr": "Vous êtes sur le point de soumettre vos attestations de zones de sécurité. Une fois soumises, vous ne pourrez plus revenir les modifier. Assurez-vous qu'elles sont exactes."
+    },
+    "confirm": { "en": "Confirm", "fr": "Confirmer" },
+    "cancel": { "en": "Go back", "fr": "Revenir" }
+  },
+  "confirmation": {
+    "title": { "en": "Thank you — your attestation was submitted.", "fr": "Merci — votre attestation a été soumise." },
+    "message": {
+      "en": "Your security zone selections have been recorded.",
+      "fr": "Vos choix de zones de sécurité ont été enregistrés."
+    },
+    "allowAnother": false,
+    "illustration": "spot-illustrations/shield-checkmark-xs.svg"
+  },
+  "strings": {
+    "submit": { "en": "Submit attestation", "fr": "Soumettre l'attestation" },
+    "assignLoading": { "en": "Loading your assigned areas…", "fr": "Chargement des zones qui vous sont attribuées…" },
+    "assignLoadError": {
+      "en": "Your assigned areas couldn't be loaded. Try again in a moment.",
+      "fr": "Impossible de charger les zones qui vous sont attribuées. Réessayez dans un moment."
+    },
+    "assignRowRequired": { "en": "Choose a zone for this area.", "fr": "Choisissez une zone pour cet emplacement." },
+    "assignAllRequired": { "en": "Choose a zone for every area.", "fr": "Choisissez une zone pour chaque emplacement." },
+    "assignProgress": { "en": "{n} of {total} areas complete", "fr": "{n} emplacement(s) sur {total} rempli(s)" },
+    "assignSomeDone": {
+      "en": "{n} of your areas were already attested and aren't shown.",
+      "fr": "{n} de vos emplacements ont déjà fait l'objet d'une attestation et ne sont pas affichés."
+    },
+    "rowsPartial": {
+      "en": "{n} of {total} areas are confirmed saved; the rest may not be. Select {submit} to finish — areas already saved are checked first and skipped.",
+      "fr": "L'enregistrement de {n} emplacement(s) sur {total} est confirmé; les autres ne le sont peut-être pas. Sélectionnez {submit} pour terminer — les emplacements déjà enregistrés sont vérifiés, puis ignorés."
+    },
+    "rowsFailed": {
+      "en": "Not every area could be saved. Select {submit} to try again — areas that did save are checked first and skipped.",
+      "fr": "Certains emplacements n'ont pas pu être enregistrés. Sélectionnez {submit} pour réessayer — les emplacements déjà enregistrés sont vérifiés, puis ignorés."
+    },
+    "requiredField": { "en": "Check the box to confirm before you submit.", "fr": "Cochez la case pour confirmer avant de soumettre." }
+  },
+  "pages": [
+    {
+      "sections": [
+        {
+          "id": "who",
+          "fields": [
+            { "id": "attestedBy", "type": "currentUser", "label": { "en": "Attestation by:", "fr": "Attestation faite par :" } }
+          ]
+        },
+        {
+          "id": "zonesSection",
+          "fields": [
+            {
+              "id": "zones",
+              "type": "assignments",
+              "required": true,
+              "rowLabel": { "en": "Floor/Area", "fr": "Étage/zone" },
+              "choiceLabel": { "en": "Physical Security Zone", "fr": "Zone de sécurité physique" },
+              "placeholder": { "en": "Select a zone", "fr": "Sélectionnez une zone" },
+              "source": {
+                "siteUrl": "/teams/FCUWebDatastores",
+                "listTitle": "PS_Zone-Attestation-Assignments",
+                "userColumn": "UserEmail",
+                "labelColumn": "AreaName",
+                "orderBy": "AreaName"
+              },
+              "responses": { "userColumn": "UserEmail", "keyColumn": "LookupID" },
+              "column": "ZoneSelection",
+              "rowColumns": {
+                "LookupID": "ID",
+                "UserDescription": "UserDescription",
+                "AreaName": "AreaName"
+              },
+              "choices": [
+                { "value": "Green", "label": { "en": "Green", "fr": "Vert" }, "color": "green" },
+                { "value": "Yellow", "label": { "en": "Yellow", "fr": "Jaune" }, "color": "yellow" },
+                { "value": "Orange", "label": { "en": "Orange", "fr": "Orange" }, "color": "orange" },
+                { "value": "Red", "label": { "en": "Red", "fr": "Rouge" }, "color": "red" }
+              ],
+              "empty": {
+                "title": { "en": "No areas assigned", "fr": "Aucun emplacement attribué" },
+                "message": {
+                  "en": "There are no areas assigned to you for this attestation. If you think that's wrong, contact your Physical Security team.",
+                  "fr": "Aucun emplacement ne vous est attribué pour cette attestation. Si vous pensez qu'il s'agit d'une erreur, communiquez avec votre équipe de la sécurité physique."
+                }
+              },
+              "allDone": {
+                "title": { "en": "Attestation already submitted", "fr": "Attestation déjà soumise" },
+                "message": {
+                  "en": "You've already submitted your attestation for every area assigned to you. Thank you.",
+                  "fr": "Vous avez déjà soumis votre attestation pour tous les emplacements qui vous sont attribués. Merci."
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "attestSection",
+          "tint": "blue",
+          "fields": [
+            {
+              "id": "attestation",
+              "type": "boolean",
+              "control": "checkbox",
+              "required": true,
+              "label": {
+                "en": "[Placeholder] I confirm that the security zones above are correct to the best of my knowledge.",
+                "fr": "[Texte provisoire] Je confirme qu'à ma connaissance, les zones de sécurité ci-dessus sont exactes."
+              },
+              "values": { "on": "Confirmed", "off": "" },
+              "column": "Attestation"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

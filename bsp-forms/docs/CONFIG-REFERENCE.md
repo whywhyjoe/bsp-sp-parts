@@ -5,14 +5,46 @@ below in use.
 
 ```
 {
-  "form":         { … title / intro boilerplate … },
-  "target":       { … which list, which site, Title template … },
-  "confirmation": { … post-submit screen … },
-  "attachments":  { … file rules … },
-  "strings":      { … any UX/error string override … },
-  "pages":        [ { sections: [ { fields: [ … ] } ] } ]
+  "form":          { … title / intro boilerplate … },
+  "target":        { … which list, which site, Title template … },
+  "submitConfirm": { … optional "are you sure?" before saving … },
+  "confirmation":  { … post-submit screen … },
+  "attachments":   { … file rules … },
+  "strings":       { … any UX/error string override … },
+  "pages":         [ { sections: [ { fields: [ … ] } ] } ]
 }
 ```
+
+`forms/example-it-request.json` is the reference for the single-item form;
+`forms/ps-zone-attestation.json` is the reference for bilingual text,
+`assignments`, `currentUser`, `headerCard`, `submitConfirm`, `target.set` and
+section `tint`.
+
+## Bilingual forms (`form.languages`)
+
+`"languages": ["en", "fr"]` makes a form bilingual. Then **any** text value in
+the config, anywhere, may be a pair instead of a string:
+
+```json
+"title": { "en": "Physical Security Zones Attestation", "fr": "Attestation des zones de sécurité physique" }
+```
+
+- The language comes from the repo's bilingual library (`bilingual/intl.js`,
+  `window.intl`). If the page doesn't load it already, the engine loads it from
+  the shared `lib/` folder beside `bsp-design/` (`intlUrl` in
+  `BSP_FORMS_SETTINGS` overrides that). Its language detection is whatever
+  `intl.getLang()` returns. Today that's the `?lang=fr` placeholder; see the
+  bilingual README.
+- A missing or empty `fr` falls back to `en`, as in the intl library.
+- Every engine message has a built-in French version (`DEFAULT_STRINGS_FR` in
+  `bsp-forms.js`); `strings` overrides take pairs too.
+- `intl.setLang()` re-renders the form in place. Answers, loaded rows, the
+  page and the screen carry over.
+- The form root gets `lang="en|fr"` and the `lang-keep` class, so screen
+  readers use the right voice and the library's dual-DOM CSS never hides it.
+- **Saved values never change with the language.** Give a choice a bilingual
+  `label` and keep its `value` in one language (see `choices`).
+- Without `languages`, pairs still resolve, to English.
 
 ## `form`
 
@@ -24,6 +56,8 @@ below in use.
 | `appearance` | see below | How the form sits on the page. |
 | `vars` | — | A bucket of named values for this form — `{ "converterUrl": "https://…", "redirectSeconds": 5 }` — used anywhere tokens work as `{var:name}`. For settings that change rarely; nothing in the page URL can override them. |
 | `businessHours` | — | The business calendar for `withinBusinessDays` rules and date `prompt`s — see *Business time*. Required if either is used. |
+| `languages` | — | `["en", "fr"]` — see *Bilingual forms*. |
+| `headerCard` | — | A link tile beside the intro: `{ "title", "text", "url", "icon" }`. `url` takes `{var:…}` (keep the address in `vars`), opens in a new tab, and must be http(s) or server-relative. While it's empty or unsafe the card isn't shown. `icon` is an asset path (`"abacus-icons/light-bulb-48.svg"`) or a sprite name (`"shield"`). |
 
 ### `form.appearance`
 
@@ -42,7 +76,28 @@ below in use.
 | `listUrl` | — | The list's URL, server-relative (`/sites/x/Lists/My List`) or relative to `siteUrl` (`Lists/My List`). Survives a rename of the list's display name, so prefer it when the title is unstable. Wins over `listTitle`. |
 | `listId` | — | List GUID; wins over `listUrl` and `listTitle`. |
 | `siteUrl` | current site | Absolute or server-relative URL of the target web, e.g. `/sites/FCUPortal`. |
-| `titleTemplate` | — | Fills the list's `Title` column when no field maps to `Title`. Tokens: `{form:title}` `{user:name}` `{user:email}` `{date}` `{time}` `{field:<id>}` `{var:<name>}` (and `{lookup}` on `afterSubmit` screens). |
+| `titleTemplate` | — | Fills the list's `Title` column when no field maps to `Title`. Tokens: `{form:title}` `{user:name}` `{user:email}` `{date}` `{time}` `{now}` `{field:<id>}` `{var:<name>}` (and `{lookup}` on `afterSubmit` screens, `{row:<column>}` on an assignments form). |
+| `set` | — | Columns filled from templates, not fields: `{ "UserName": "{user:name}", "UserEmail": "{user:email}", "AttestationTime": "{now}" }`. Same tokens as `titleTemplate`. An empty result is left out; a field mapped to the same column wins. |
+
+**Tokens.** `{user:name}` and `{user:email}` are the signed-in user from
+SharePoint (the email falls back to the account's UPN). `{now}` is the moment of
+the submit as ISO 8601 UTC, which a Date and Time column takes as-is.
+SharePoint shows it in the site's regional time zone, so an Eastern site shows
+Eastern time. Every item from one submit shares the same `{now}`.
+
+## `submitConfirm`
+
+A last look before saving, for submits that can't be undone. After the form
+validates, a dialog shows; nothing is saved until the user confirms.
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `message` | — (required) | The dialog text (supports links). |
+| `title` | strings.submitConfirmTitle | Dialog heading. |
+| `confirm` / `cancel` | `"Confirm"` / `"Go back"` | Button labels. |
+
+Focus starts on the cancel button, and **Escape goes back**. That's the
+opposite of a date `prompt`, whose Escape keeps the date.
 
 ## `confirmation`
 
@@ -75,8 +130,9 @@ a dropzone at the bottom of the last page unless `page` says otherwise.
 Any key here overrides the engine default of the same name — button labels,
 validation messages, people-picker text, attachment errors, confirmation
 defaults, the edit-mode note, everything. The full catalog is the
-`DEFAULT_STRINGS` object at the top of `bsp-forms.js`. Messages support the
-placeholders shown there (`{min}`, `{max}`, `{name}`, `{other}`, …).
+`DEFAULT_STRINGS` object at the top of `bsp-forms.js` (French:
+`DEFAULT_STRINGS_FR`). Messages support the placeholders shown there (`{min}`,
+`{max}`, `{name}`, `{other}`, …). Values may be `{ "en", "fr" }` pairs.
 
 ## `pages`
 
@@ -90,6 +146,7 @@ optional title/description and can carry their own `visibleWhen`.
 | `title`, `description` | Optional headings. `description` supports links. |
 | `icon` (sections only) | A Fluent sprite name (`person`, `edit`, `document`, `calendar-ltr`, … — the `fluent-basic-icons.svg` set, without the `ic-fluent-`/`-24-regular` wrapper). Shows the section head with an icon tile. A name the sprite doesn't have renders blank. |
 | `columns` (sections only) | `1` (default) or `2`. Two columns once the **form** is at least 600px wide, one below — keyed to the form's own width, so a narrow web-part column stays single. Headings, notes and `span: "full"` fields take the whole row; a hidden field gives its cell to the next one. |
+| `tint` (sections only) | `sky` · `blue` · `neutral`: the section becomes a soft tinted panel, e.g. to set an attestation checkbox apart. |
 | `visibleWhen` (sections only) | Rule — a hidden section's fields are neither validated nor submitted. |
 
 ## Fields
@@ -134,10 +191,74 @@ Common keys:
 | `lookup` | pill dropdown from a list | Lookup (single) | `lookup: { listTitle, displayField: "Title", siteUrl?, top? }`, `color` |
 | `heading` | section-style heading | — | `text`, `description` |
 | `note` | message bar / paragraph | — | `text`, `style`: `info` `warning` `success` `danger` `plain` |
+| `currentUser` | identity card: photo (initials fallback), name, email | — | `label`. Display only. |
+| `assignments` | a table of the user's rows, a color-dot dropdown per row | Text or Choice (`column`, per row) | See *Assignments*. One per form. |
 
-`choices` entries are strings or `{ "value": "…", "color": "…" }`. Colors:
-`blue green yellow red gray sky teal berry lavender orange` — auto-assigned in
-a cycle when omitted, so configs can stay plain arrays.
+`choices` entries are strings or `{ "value": "…", "label": "…", "color": "…" }`.
+`value` is what's saved; `label` (optional, may be bilingual) is what's shown.
+Colors: `blue green yellow red gray sky teal berry lavender orange`,
+auto-assigned in a cycle when omitted, so configs can stay plain arrays.
+
+### Assignments
+
+For "confirm something about each item assigned to you". The rows come from a
+**source list**, filtered to the signed-in user. Each row gets one dropdown.
+Submit saves **one item per row** to the target list.
+
+```json
+{
+  "id": "zones", "type": "assignments", "required": true,
+  "rowLabel": "Floor/Area", "choiceLabel": "Physical Security Zone", "placeholder": "Select a zone",
+  "source": { "listTitle": "PS_Zone-Attestation-Assignments", "userColumn": "UserEmail",
+              "labelColumn": "AreaName", "orderBy": "AreaName" },
+  "responses": { "userColumn": "UserEmail", "keyColumn": "LookupID" },
+  "column": "ZoneSelection",
+  "rowColumns": { "LookupID": "ID", "UserDescription": "UserDescription", "AreaName": "AreaName" },
+  "choices": [ { "value": "Green", "label": { "en": "Green", "fr": "Vert" }, "color": "green" } ],
+  "empty":   { "title": "…", "message": "…" },
+  "allDone": { "title": "…", "message": "…" }
+}
+```
+
+| Key | Notes |
+| --- | --- |
+| `source` | The list (`listTitle` / `listUrl`, optional `siteUrl`). `userColumn` (required) holds an email. A row belongs to the user when it equals their profile email **or** UPN, ignoring case. `labelColumn` (required) names the row; `detailColumn` (optional) adds a second line; `orderBy` (default: the label) and `top` (default 500). If more rows match than `top`, the first `top` show with a warning ("submit these, then reload"); nothing is dropped silently. **Limit:** if every row in that first `top` is already answered, the form can't reach the rest — it says so instead of "already submitted". Raise `top` if one person can have that many. |
+| `column` | The **target** column each row's choice is saved to. Required. |
+| `rowColumns` | Target column → source column, copied into each row's item. `"ID"` is the source item's id (saved as a number). |
+| `responses` | Optional. The rows this user already saved are found in the target list (`userColumn` = their email) and not shown again. They're matched on `keyColumn`, which must be a `rowColumns` target (normally the copied ID). A note says how many were skipped. If every row is done, the `allDone` screen shows instead of the form. One read covers up to 5,000 earlier responses per user; past that a warning says answered rows may show again, and "already submitted" is never claimed on a cut-off read. |
+| `required` | Every row needs a choice; each empty row shows its own error. |
+| `empty` / `allDone` | The screens for "nothing assigned" and "all already submitted". Engine defaults exist. |
+| `rowLabel` / `choiceLabel` | The table's two column headers. |
+
+- Every dropdown can be cleared: the **×** in the control, or **Clear
+  selection** at the top of its menu.
+- Once the user confirms, the answers are frozen: every input is disabled
+  while saving, and the items are built from a copy of the answers taken at
+  that moment.
+- The rows save one at a time, in order. If one fails, the rows known to be
+  saved lock with a check mark and the message says how many. Submitting
+  again sends only the rest. A save can also land in SharePoint while the
+  browser never hears back (a dropped connection). So, with `responses` set,
+  a retry first re-reads the user's responses and skips any row already
+  there. That check asks about exactly the unsaved rows, so the 5,000 cap
+  doesn't apply. Without `responses`, a retry can only trust what the
+  browser saw, and that case can save a row twice. So can the same person
+  submitting from two tabs at the same moment; only a uniqueness rule on the
+  list would stop that, and it would also block re-running the attestation.
+- File attachments are frozen too: nothing can be added, dropped or removed
+  while a submit runs.
+- Can't be combined with `attachments`, or with `visibleWhen` on the field.
+- Other fields (e.g. a confirm checkbox) and `target.set` are written into
+  **every** row's item. `titleTemplate` can use `{row:<column>}`.
+- **Permissions.** Users need read access to their rows in the source list,
+  and add access to the target list. With `responses`, they also need read
+  access to their own target items. "Read items that were created by the user"
+  covers that. **The filter is not security.** Anyone who can read the source
+  list can read every row in it over REST. If people mustn't see other
+  people's assignments, give each source item its own permissions (see the
+  form's README notes).
+- **Lists over 5,000 items:** index `userColumn` in both lists, or the
+  filtered reads fail at the list view threshold.
 
 ### Conditional variants (shared columns)
 
@@ -318,8 +439,11 @@ skipped and this screen shows instead. It's the same shape as the
 ## Submit behavior
 
 1. All pages validate; on failure the user is taken to the first page with an
-   error.
+   error. With `submitConfirm`, the dialog then asks; nothing below happens
+   until the user confirms.
 2. Person fields resolve directory entries to user ids (`ensureUser`).
+   *(An assignments form instead saves one item per row, in order, and skips
+   rows already saved; see* Assignments*.)*
 3. The item is created (`items.add`) with the coerced values — later fields
    win on duplicate columns; `titleTemplate` fills `Title` if unmapped.
 4. Attachments upload one at a time. If any fail, the item is **kept** and the
