@@ -135,6 +135,9 @@ are fetched with `cache: 'no-cache'`, so JSON edits go live on refresh.
 The div fills its container (100% width, no margin/padding) — the web part
 supplies the page spacing, so place and size it however the page needs.
 
+Microsoft 365 Copilot Chat can draft steps 1–3 for you from a short guide.
+For setup and the starter prompt, see [docs/COPILOT.md](docs/COPILOT.md).
+
 ## Local development
 
 `dev/index.html` runs the whole app with **zero SharePoint and zero network**:
@@ -218,6 +221,7 @@ re-scan, re-attempts it.
 | `forms/ps-zone-attestation.json` | Physical Security Zones Attestation (bilingual): the user's assigned areas, a zone per area, attest + confirm; one response item per area. |
 | `webpart/bsp-forms.webpart.html` | The web part insert snippet. |
 | `docs/CONFIG-REFERENCE.md` | Full JSON reference — every key, type, and rule. |
+| `copilot/BSP-FORMS-COPILOT-GUIDE.md` | The guide Microsoft 365 Copilot Chat follows to draft a new form. Setup and starter prompt: `docs/COPILOT.md`. |
 | `dev/` | Local harness + mock adapter + vendored Alpine + `smoke.spec.js` regression suite (never deployed). |
 
 Deploy only `bsp-forms.js`, `bsp-forms.css`, and your `forms/*.json`.

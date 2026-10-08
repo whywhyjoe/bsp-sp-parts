@@ -3,7 +3,9 @@
 The prod deploy is done by hand on the prod machine: `git pull` this repo, then
 put files into the portal's `Code` library, either by uploading in the browser
 or by copying into the OneDrive-synced folder for that library. Nothing under
-`dev/`, `docs/`, `state/` or `webpart/` is ever deployed.
+`dev/`, `docs/`, `state/` or `webpart/` is ever deployed. (`copilot/` goes to a
+separate reference folder for Copilot Chat, not to `Code`; see
+[COPILOT.md](COPILOT.md).)
 
 Paths below use the standard layout, `/sites/FCUPortal/Code/`. The engine finds
 `bsp-design/` and `lib/` as siblings of its own folder, so `bsp-forms/` must sit
