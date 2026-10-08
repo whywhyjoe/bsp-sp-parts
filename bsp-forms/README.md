@@ -90,6 +90,9 @@ two-line web part insert.
 
 ## Deployment layout
 
+Step-by-step prod deploys (engine updates, and installing the zone
+attestation) are in [docs/PROD-DEPLOY.md](docs/PROD-DEPLOY.md).
+
 The engine assumes the standard `/sites/FCUPortal/Code/` layout and derives
 every path from its own script URL — deploy elsewhere and it still works, as
 long as the siblings hold:
