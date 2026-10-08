@@ -2,134 +2,90 @@
 
 Last touched: 2026-10-07
 Mode: Joe
-Branch: `bsp-forms-zone-attestation`, merged to main 2026-10-07 and pushed
-State: engine 0.5.0 + `forms/ps-zone-attestation.json`; two Codex review rounds (xo turns 5, 6)
-addressed; harness suite 139/139; dev-deployed **cross-site** (`?v=53`) and verified live 20/20
-(EN + FR); GSI 35/35 and classic 15/15 live regressions pass; prod untouched
+Branch: `bsp-forms-zone-attestation`, merged to main 2026-10-07 and pushed (main is the branch now)
+State: engine 0.5.0 + `forms/ps-zone-attestation.json` on main; harness 139/139; live on
+dev cross-site (`?v=53`): 20/20 admin, 24/24 as a non-admin; **prod untouched**
 
 ## What this is
 
-A bilingual (EN/FR) form. Users confirm a physical security zone for each
-area assigned to them, attest, and confirm.
-
-- **Prod layout (user, 2026-10-07):** both lists on
-  `bmo.sharepoint.com/teams/FCUWebDatastores`. The page runs on
-  `/sites/FCUPortal`. The config sets `siteUrl: "/teams/FCUWebDatastores"` on
-  `target` and `source`, and addresses both lists by title.
-- **Lookup:** `PS_Zone-Attestation-Assignments` (ID, UserEmail, UserDescription,
-  AreaName — unique). Filtered to the signed-in user's email or UPN, ignoring case.
-- **Save-back:** `PS_Zone-Attestation-Responses`, one item per area: LookupID
-  (= assignment ID), UserName, UserEmail, UserDescription, AreaName,
-  ZoneSelection, Attestation (`Confirmed`), AttestationTime (`{now}`, one ISO
-  instant per submit).
-- UI follows the user's spec. Job aid URL in `form.vars.jobAidUrl` (the card
-  is hidden while it's empty). The confirm dialog uses the user's wording.
-- Zone **values** are saved in English whatever the language; only the labels
-  are translated.
+A bilingual (EN/FR) bsp-forms form. Each user sees the areas assigned to them
+(list `PS_Zone-Attestation-Assignments`, filtered by their email or UPN). They
+pick a physical security zone per area from a clearable color-dot dropdown,
+tick an attestation checkbox and confirm in a warning dialog. The form saves
+one item per area to `PS_Zone-Attestation-Responses`. In prod both lists live
+on `/teams/FCUWebDatastores`; the page runs on `/sites/FCUPortal`. Every piece
+is a generic engine feature switched on by the JSON; none of it is
+form-specific code (docs/CONFIG-REFERENCE.md has the options;
+`forms/ps-zone-attestation.json` is the reference config for them).
 
 ## Decisions (user, 2026-10-07)
 
-- **Assignments list:** everyone gets read. Seeing other people's
-  assignments is acceptable. No per-item permissions and no flow.
-- **Responses list:** a custom **Add + View** permission level, no Edit (the
-  fallback is Contribute without delete), plus "read only their own items".
-  The form needs only those: it adds items, and reads the user's own items to
-  skip areas already done.
+- Everyone gets read on Assignments. Seeing others' assignments is
+  acceptable, so there are no per-item permissions and no flow.
+- Responses: a custom Add + View level, no Edit (fallback: Contribute
+  without delete), plus "read own items". The form needs no more.
+- **No list manifest for this form.** The user creates both prod lists by
+  hand from docs/PROD-DEPLOY.md. Don't add an `env.json`-style manifest unless
+  asked.
 - Placeholder copy (description, confirm-checkbox text) stays for now.
+- Accepted limits, documented and not built: rows past the first
+  `source.top` can't be reached if those are all answered (raise `top`), and
+  the same person submitting from two tabs at once can duplicate (only a
+  uniqueness rule would stop that, and it would block re-running the
+  attestation).
+- Adding `pnp.Web(url)` to the pnp2 rollup is optional. Do it at the next
+  rebuild for another reason; the engine already prefers it when present. If
+  it lands, re-run the live tests (that code path has never run against a
+  real bundle).
 
 ## Done
 
-- Engine 0.5.0 adds these, all generic and documented in
-  docs/CONFIG-REFERENCE.md: `form.languages` with `{en, fr}` pairs and
-  `DEFAULT_STRINGS_FR`; live re-render on `intl.setLang()` that keeps state;
-  `assignments` (source filter, `responses` skip, per-row save, partial-save
-  retry, empty and allDone screens); `currentUser`; `form.headerCard`;
-  `submitConfirm`; `target.set`; `{now}` and `{row:Col}`; choice `label`;
-  section `tint`; doctor checks for all of these.
-- **Bug fixed on the way (affects every form):** `addItem` now passes the
-  list's item type to `items.add`. pnp v2's 5-day localStorage cache is keyed
-  by relative URL, so same-titled lists on two webs collided tenant-wide, and
-  the cross-site save 400'd. Recorded in CLAUDE.md.
-- **Codex review (xo turns 5 → 6), fixed:**
-  - Answers freeze at Confirm. Payloads come from `store.snap`, a
-    `fieldset.bspf__lock` is disabled while busy, and the pickers and file
-    add/drop/remove have `busy` guards. That last one also protects the GSI
-    forms' attachments.
-  - A failed save marks the rows uncertain. The retry first asks the list
-    about exactly the unsaved rows (`getRowKeysFor`, no read cap) and skips
-    any already there. Verified live against the real list.
-  - The 500-row source and 5,000-key reads report a cut-off (warning) instead
-    of failing silently, and never claim "already submitted" on a cut-off read.
-  - Error copy says "confirmed saved" and never promises "nothing was saved"
-    for rows.
-- **Accepted limits (documented, not built):** if the first `source.top`
-  rows are all answered, later rows can't be reached (raise `top`). The same
-  person submitting from two tabs at the same moment can duplicate; only a
-  uniqueness rule would stop it, and that would block re-running the
-  attestation.
-- Fixed a time-of-day bug in `dev/live/live-submit.js` (`ymd()` used the UTC
-  date, so it failed after 8pm Eastern).
-- Dev fixtures: twin lists on the tenant **root** site
-  (`dev/live/live-zone-lists.js`). The page is on the dev site,
-  `SitePages/bsp-forms-zone-attestation-test.aspx` (`?v=53`, `data-validate`).
-  `live-setup.ps1` swaps both `/teams/FCUWebDatastores` lines to `/` and fills
-  in a stand-in job aid URL. The earlier same-titled lists on the dev site are
-  kept **on purpose** as the regression fixture for the cache collision. Don't
-  delete them.
-
-## Non-admin testing on dev (2026-10-07)
-
-- Test account: the user's non-admin dev account (in PSZoneTestGroup, along
-  with Benay Yocum). It has three assignment rows on the root twin
-  (`live-zone-lists.js --user <email>`).
-- The user set up permissions by hand on the dev site's first copies of the
-  lists. `live-zone-perms.js` copies them onto the root twin. Verified
-  effective rights for the test account: Assignments view; Responses
-  view+add, no edit; nothing else on the root site; view on the page's site.
-- **Verified as that account: `live-zone.js --as pw-profile-nonadmin` passes
-  24/24.** The full EN + FR flow runs on its real rights, plus three checks:
-  it sees only its own responses, an edit of its own response gets 403, and
-  an add to the lookup list gets 403. So the prod permission plan holds.
-- The profile lives at `<sp-env>/auth/pw-profile-nonadmin`. The sign-in must
-  answer **"Stay signed in?" = Yes**, or SharePoint keeps only session
-  cookies and every headless run stops at "Pick an account". If it goes
-  stale, the user signs in again (a visible window). The agent never picks
-  the account.
+- Engine 0.5.0 on main: features in docs/CONFIG-REFERENCE.md, review fixes
+  and gotchas in bsp-forms/CLAUDE.md. Two Codex review rounds (xo turns 5, 6)
+  are resolved; the last round's leftovers are the accepted limits above.
+- Dev fixtures:
+  - The twin lists are on the tenant **root** site
+    (`dev/live/live-zone-lists.js`), with permissions copied from the user's
+    hand setup on the dev site (`live-zone-perms.js`).
+  - The page is `SitePages/bsp-forms-zone-attestation-test.aspx` on the dev
+    site, with `data-validate`.
+  - The non-admin test account is in PSZoneTestGroup and has three rows
+    (`live-zone-lists.js --user <email>`).
+  - Its Playwright profile is `<sp-env>/auth/pw-profile-nonadmin`, run with
+    `live-zone.js --as pw-profile-nonadmin`.
 
 ## Next
 
-- [ ] Prod, done by a human:
-  1. On `/teams/FCUWebDatastores`, create both lists. Columns are named
-     exactly as above (create each column with that name first so the
-     internal name matches). Index `UserEmail` on both; `LookupID` is Number;
-     `AttestationTime` is Date and Time.
-  2. Permissions: Assignments → read for all form users. Responses → break
-     inheritance, give users the Add + View level, and in Advanced settings set
-     Read access to "Read items that were created by the user".
-  3. Upload `bsp-forms.js` and `bsp-forms.css` to `/sites/FCUPortal/Code/bsp-forms/`
-     (bump `?v=`), the config to `…/bsp-forms/forms/`, and
-     `bilingual/intl.js` to `/sites/FCUPortal/Code/lib/`.
-  4. Set `form.vars.jobAidUrl` when the job aid exists (a JSON edit, live on
-     refresh).
-  5. Make the page from the web part snippet with `data-validate` for the
-     first load. Every doctor row should read OK, both lists included. Then
-     remove `data-validate`.
-  6. Test with an ordinary (non-owner) account. On dev this passed as a
-     non-admin (24/24), but prod's groups are its own, so do one real submit
-     there too. The form should load, submit, and on reload show "already
-     submitted".
-- [ ] Language detection: `intl.js` still uses the `?lang=fr` placeholder (see
-      bilingual README). French users get French only via `?lang=fr` until the
-      real SharePoint detection lands there.
+- [ ] **Prod, by the user, following docs/PROD-DEPLOY.md.** bsp-forms has
+      never been deployed to prod, so its section 1 is a first install. That
+      also unblocks the GSI and classic-link forms' pending prod steps (their
+      own state files). Then section 2: lists, config, page, doctor, and one
+      submit as an ordinary attester.
+- [ ] Set `form.vars.jobAidUrl` once the job aid exists. A JSON edit, live on
+      refresh. Then update `dev/live/live-setup.ps1`'s swap (see Landmines).
+- [ ] Language detection: `bilingual/intl.js` still uses the `?lang=fr`
+      placeholder (bilingual README). French users get French only via
+      `?lang=fr` until real SharePoint detection lands there.
+
+## Companion documents
+
+- `docs/PROD-DEPLOY.md`: **live**. The prod runbook for engine updates and
+  this form's install. Keep it current with every engine release.
 
 ## Landmines
 
+- **Keep the same-titled lists on the dev site.** They are the regression
+  fixture for the pnp entity-type cache collision (CLAUDE.md). Don't delete
+  them.
+- The non-admin profile must be signed in with **"Stay signed in?" = Yes**.
+  Otherwise SharePoint keeps only session cookies, and headless runs stop at
+  "Pick an account". The user signs in again in a visible window; the agent
+  never picks the account.
 - `live-setup.ps1` swaps the empty `"jobAidUrl": ""` and the two
-  `/teams/FCUWebDatastores` lines. Once the real URL is in the repo config,
-  or the site path changes, the script throws. Update it then.
+  `/teams/FCUWebDatastores` lines on upload. It throws once either changes in
+  the repo config.
 - REST-created lists drop hyphens from the URL
-  (`/Lists/PS_ZoneAttestationAssignments`). The form uses titles, so it
-  doesn't care. Don't switch the config to `listUrl` without checking the
-  real prod URLs.
-- Responses on the dev root keep the live test's items (the user's own
-  account). `live-zone.js` recycles them at the start of every run.
+  (`/Lists/PS_ZoneAttestationAssignments`). The form uses titles; don't
+  switch it to `listUrl` without checking the real prod URLs.
+- Dev Responses keep the live tests' items. `live-zone.js` recycles the test
+  user's items (as admin) at the start of every run.
