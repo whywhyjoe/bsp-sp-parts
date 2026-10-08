@@ -2,8 +2,7 @@
 
 Last touched: 2026-10-07
 Mode: Joe
-Branch: `bsp-forms-zone-attestation`, merged to main 2026-10-07 (not pushed; the user asked
-for commit + merge only)
+Branch: `bsp-forms-zone-attestation`, merged to main 2026-10-07 and pushed
 State: engine 0.5.0 + `forms/ps-zone-attestation.json`; two Codex review rounds (xo turns 5, 6)
 addressed; harness suite 139/139; dev-deployed **cross-site** (`?v=53`) and verified live 20/20
 (EN + FR); GSI 35/35 and classic 15/15 live regressions pass; prod untouched
@@ -80,7 +79,6 @@ area assigned to them, attest, and confirm.
 
 ## Next
 
-- [ ] Push main when the user says so.
 - [ ] Prod, done by a human:
   1. On `/teams/FCUWebDatastores`, create both lists. Columns are named
      exactly as above (create each column with that name first so the
