@@ -7,7 +7,12 @@
 //   PS_Zone-Attestation-Responses    LookupID · UserName · UserEmail (indexed) · UserDescription ·
 //                                    AreaName · ZoneSelection · Attestation · AttestationTime
 // Responses gets the prod item-level setting: users see only their own items. (Prod also gives
-// users Add + View without Edit there; dev runs as an admin, so that part isn't simulated.)
+// users Add + View without Edit there.)
+//
+//   node live-zone-lists.js --user <email>
+// also gives that account three assignment rows (idempotent) and reports what it can do on the
+// two lists and the test page's site — for testing as a non-admin. Which account is passed on the
+// command line, never written here.
 'use strict';
 const path = require('path');
 const os = require('os');
@@ -39,13 +44,18 @@ const LISTS = {
   }
 };
 
+const ui = process.argv.indexOf('--user');
+const SEED_USER = ui > -1 ? process.argv[ui + 1] : null;
+if (ui > -1 && !/^[^\s@]+@[^\s@]+$/.test(SEED_USER || '')) { console.error('--user needs an email'); process.exit(1); }
+const SEED_AREAS = ['Floor 4 — Client lounge (test user)', 'Floor 9 — Records room (test user)', 'Loading dock — North (test user)'];
+
 (async () => {
   const root = tenants.dev.tenantRoot.replace(/\/$/, '');
   const ctx = await chromium.launchPersistentContext(path.join(SPENV, 'auth', 'pw-profile'), { headless: true });
   const page = ctx.pages()[0] || await ctx.newPage();
   await page.goto(root + '/_layouts/15/viewlsts.aspx', { waitUntil: 'domcontentloaded' });
   if (/login\./.test(page.url())) { console.log('auth_stale'); process.exit(3); }
-  const out = await page.evaluate(async ({ root, LISTS }) => {
+  const out = await page.evaluate(async ({ root, LISTS, SEED_USER, SEED_AREAS, pageWeb }) => {
     const log = [];
     const J = 'application/json;odata=nometadata';
     const digest = (await (await fetch(root + '/_api/contextinfo', { method: 'POST', headers: { accept: J } })).json()).FormDigestValue;
@@ -79,8 +89,37 @@ const LISTS = {
       log.push(name + ' (ReadSecurity=' + l.ReadSecurity + '): ' + fs.filter(x => x.InternalName !== 'ContentType')
         .map(x => x.InternalName + '=' + x.TypeAsString + (x.Indexed ? '(idx)' : '') + (x.EnforceUniqueValues ? '(unique)' : '')).join(' '));
     }
+    if (SEED_USER) {
+      // assignment rows for the test account (by unique AreaName)
+      const A = root + "/_api/web/lists/getbytitle('" + encodeURIComponent('PS_Zone-Attestation-Assignments') + "')";
+      const have = (await (await fetch(A + '/items?$select=AreaName,UserEmail&$top=500', { headers: { accept: J } })).json()).value;
+      for (const area of SEED_AREAS) {
+        const hit = have.find(x => x.AreaName === area);
+        if (hit) { log.push('seed row exists: ' + area + ' → ' + hit.UserEmail); continue; }
+        const r = await fetch(A + '/items', { method: 'POST', headers: H,
+          body: JSON.stringify({ Title: area, AreaName: area, UserEmail: SEED_USER, UserDescription: 'Dev test user (non-admin)' }) });
+        if (!r.ok) throw new Error('seed ' + area + ' ' + r.status + ' ' + await r.text());
+        log.push('seeded: ' + area + ' → ' + SEED_USER);
+      }
+      // what the account can do: its effective rights where the form needs them
+      async function rights(web, listTitle) {
+        const u = (await (await fetch(web + "/_api/web/siteusers?$select=LoginName&$filter=Email eq '" + SEED_USER.replace(/'/g, "''") + "'",
+          { headers: { accept: J } })).json()).value || [];
+        if (!u.length) return 'not a user of ' + web + ' (it has never been granted access or visited)';
+        const at = listTitle ? web + "/_api/web/lists/getbytitle('" + encodeURIComponent(listTitle) + "')" : web + '/_api/web';
+        const p = await (await fetch(at + "/GetUserEffectivePermissions(@u)?@u='" + encodeURIComponent(u[0].LoginName) + "'", { headers: { accept: J } })).json();
+        const low = Number(p.Low || 0);
+        const bits = [[1, 'view'], [2, 'add'], [4, 'edit'], [8, 'delete']].filter(b => low & b[0]).map(b => b[1]);
+        return bits.length ? bits.join('+') : 'no item rights';
+      }
+      log.push('access for ' + SEED_USER + ':');
+      log.push('  root web: ' + await rights(root));
+      log.push('  Assignments: ' + await rights(root, 'PS_Zone-Attestation-Assignments') + '   (form needs: view)');
+      log.push('  Responses:   ' + await rights(root, 'PS_Zone-Attestation-Responses') + '   (prod plan: view+add, own items)');
+      log.push('  page site:   ' + await rights(pageWeb) + '   (needs: view — the page, engine and lib files live here)');
+    }
     return log;
-  }, { root, LISTS });
+  }, { root, LISTS, SEED_USER, SEED_AREAS, pageWeb: tenants.dev.siteUrl.replace(/\/$/, '') });
   console.log(out.join('\n'));
   await ctx.close();
 })().catch(e => { console.error(e); process.exit(2); });

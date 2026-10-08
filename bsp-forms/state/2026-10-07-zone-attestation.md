@@ -77,6 +77,25 @@ area assigned to them, attest, and confirm.
   kept **on purpose** as the regression fixture for the cache collision. Don't
   delete them.
 
+## Non-admin testing on dev (2026-10-07)
+
+- Test account: the user's non-admin dev account (in PSZoneTestGroup, along
+  with Benay Yocum). It has three assignment rows on the root twin
+  (`live-zone-lists.js --user <email>`).
+- The user set up permissions by hand on the dev site's first copies of the
+  lists. `live-zone-perms.js` copies them onto the root twin. Verified
+  effective rights for the test account: Assignments view; Responses
+  view+add, no edit; nothing else on the root site; view on the page's site.
+- **Verified as that account: `live-zone.js --as pw-profile-nonadmin` passes
+  24/24.** The full EN + FR flow runs on its real rights, plus three checks:
+  it sees only its own responses, an edit of its own response gets 403, and
+  an add to the lookup list gets 403. So the prod permission plan holds.
+- The profile lives at `<sp-env>/auth/pw-profile-nonadmin`. The sign-in must
+  answer **"Stay signed in?" = Yes**, or SharePoint keeps only session
+  cookies and every headless run stops at "Pick an account". If it goes
+  stale, the user signs in again (a visible window). The agent never picks
+  the account.
+
 ## Next
 
 - [ ] Prod, done by a human:
@@ -95,8 +114,10 @@ area assigned to them, attest, and confirm.
   5. Make the page from the web part snippet with `data-validate` for the
      first load. Every doctor row should read OK, both lists included. Then
      remove `data-validate`.
-  6. Test with an ordinary (non-owner) account, which dev can't simulate. The
-     form should load, submit, and on reload show "already submitted".
+  6. Test with an ordinary (non-owner) account. On dev this passed as a
+     non-admin (24/24), but prod's groups are its own, so do one real submit
+     there too. The form should load, submit, and on reload show "already
+     submitted".
 - [ ] Language detection: `intl.js` still uses the `?lang=fr` placeholder (see
       bilingual README). French users get French only via `?lang=fr` until the
       real SharePoint detection lands there.
