@@ -1681,6 +1681,7 @@
     if (f.fillIn) {
       h += '<div class="bspf-combo__fillin" @click.stop>' +
         '<input class="input" type="text" placeholder="' + esc(S.fillInPlaceholder) + '" x-model.trim="fill.' + K + '"' +
+        (f.validation.maxLength ? ' maxlength="' + (+f.validation.maxLength) + '"' : '') +
         ' @keydown.enter.prevent="pickFill(' + kq + ')">' +
         '<button type="button" class="btn btn--sm" @click="pickFill(' + kq + ')">' + esc(S.fillInAdd) + '</button></div>';
     }
@@ -1723,6 +1724,7 @@
     if (f.fillIn) {
       h += '<div class="bspf-combo__fillin" @click.stop>' +
         '<input class="input" type="text" placeholder="' + esc(S.fillInPlaceholder) + '" x-model.trim="fill.' + K + '"' +
+        (f.validation.maxLength ? ' maxlength="' + (+f.validation.maxLength) + '"' : '') +
         ' @keydown.enter.prevent="pickFillMulti(' + kq + ')">' +
         '<button type="button" class="btn btn--sm" @click="pickFillMulti(' + kq + ')">' + esc(S.fillInAdd) + '</button></div>';
     }
@@ -3062,9 +3064,15 @@
               else if (val.min != null && v < val.min) msg = fmtStr(S.numberMin, { min: val.min });
               else if (val.max != null && v > val.max) msg = fmtStr(S.numberMax, { max: val.max });
               break;
+            case 'choice':
+              // a choice saved to a Text column: a typed "Other" can't run
+              // past the column (validation.maxLength, set by the builder)
+              if (val.maxLength && String(v).length > val.maxLength) msg = fmtStr(S.textMaxLength, { max: val.maxLength });
+              break;
             case 'multichoice':
               if (val.minChoices && v.length < val.minChoices) msg = fmtStr(S.multiMin, { min: val.minChoices });
               else if (val.maxChoices && v.length > val.maxChoices) msg = fmtStr(S.multiMax, { max: val.maxChoices });
+              else if (val.maxLength && v.some(function (x) { return String(x).length > val.maxLength; })) msg = fmtStr(S.textMaxLength, { max: val.maxLength });
               break;
             case 'person':
               if (val.maxPeople && v.length > val.maxPeople) msg = fmtStr(S.personMax, { max: val.maxPeople });

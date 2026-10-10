@@ -67,7 +67,14 @@ async function openBuilder(browser, opts) {
   page.__errors = [];
   page.__console = [];
   page.on('pageerror', e => { page.__errors.push(e.message); if (process.env.DEBUG) console.log('    PAGEERROR ' + e.message); });
-  page.on('console', m => { if (m.type() === 'error' && !/favicon/.test(m.text())) page.__console.push(m.text()); });
+  page.__warns = [];
+  page.on('console', m => {
+    if (m.type() === 'error' && !/favicon/.test(m.text())) page.__console.push(m.text());
+    if (m.type() === 'warning') page.__warns.push(m.text());
+  });
+  // BUILDER_JS=<file>: serve another builder build (e.g. an older commit's) to
+  // check the suite still catches what it should
+  if (process.env.BUILDER_JS) await page.route('**/builder/bsp-forms-builder.js*', r => r.fulfill({ contentType: 'text/javascript', body: fs.readFileSync(process.env.BUILDER_JS, 'utf8') }));
   await gotoBuilder(page, opts.fresh !== false);
   return { ctx, page };
 }
@@ -441,7 +448,7 @@ async function testControls(browser) {
   await settle(page);
   iss = await issuesOf(page);
   const urlIss = iss.filter(i => i.sel && i.sel.id === ids.url && i.level === 'error');
-  // BUG (see the report): mapping a URL control to a Text column never caps
+  // Regression (fixed in 2a50087): mapping a URL control to a Text column never caps
   // maxLength, and the URL card has no "Max length" input — so the error
   // below can't be fixed from the UI and the form can't be downloaded
   check('fixed: url → Text column: no unfixable "holds at most N characters" error', !urlIss.length, issueLine(urlIss));
@@ -842,7 +849,10 @@ async function testIds(browser) {
   const got = [...new Set(w.before)];
   const missing = wantWhere.filter(x => !got.includes(x));
   check('refsTo finds every site (' + wantWhere.length + ' places)', !missing.length, 'missing: ' + missing.join(', ') + ' · got: ' + got.join(', '));
-  check('…nested all/any/not: 3 hits in c\'s show-when (field ×2 + a compareTo)', w.before.filter(x => x === 'field "c" show-when').length === 3, w.before.filter(x => x === 'field "c" show-when').length);
+  // refsTo lists each PLACE once (Codex xo 10: duplicate x-for keys); the
+  // three occurrences in c's nested rule are one place
+  check('…nested all/any/not: c\'s show-when listed once (3 occurrences, one place)', w.before.filter(x => x === 'field "c" show-when').length === 1, w.before.filter(x => x === 'field "c" show-when').length);
+  check('…and rename rewrote all 3 occurrences in it', (JSON.stringify(w.doc.pages.map(p => p.sections.map(s => s.fields.find(f => f.id === 'c'))).flat().filter(Boolean)[0].visibleWhen).match(/"z"/g) || []).length === 3);
   check('…no false hits: target.set.Other, the @today compareTo', !got.includes('target.set.Other') && w.before.filter(x => x === 'field "b" date rule').length === 1);
   check('…{field:ab} is not a hit for "a"; refsTo("ab") = titleTemplate only', same(w.beforeAb, ['target.titleTemplate']), w.beforeAb);
   check('renameRefs a→z: no "a" references left', w.afterA.length === 0, w.afterA);
@@ -864,7 +874,7 @@ async function testIds(browser) {
     D.afterSubmit.found.copy === '{field:z}' && D.afterSubmit.found.link.text === 'Open {field:z}' && D.afterSubmit.found.redirect.url === '/x?q={field:z}' &&
     D.afterSubmit.notFound.title.en === 'No {field:z}' && D.afterSubmit.notFound.title.fr === 'Pas de {field:z}' && D.queryError.message === 'Error for {field:z}');
   check('…ids themselves untouched (the caller renames the field)', D.pages[0].sections[0].fields[0].id === 'a');
-  check('danglingRefs then reports "z" (no control has it)', w.dang.length === w.afterZ.length && w.dang.every(x => /^z@/.test(x)), w.dang);
+  check('danglingRefs then reports "z" (no control has it), at every place refsTo lists', new Set(w.dang).size === w.afterZ.length && w.dang.every(x => /^z@/.test(x)), w.dang);
   const cam = await page.evaluate(() => ['Contact email', '2nd phone', '  ', 'Café — déjà vu!', 'A'.repeat(60)].map(BSPFormsBuilder.core.camelId));
   check('camelId: "Contact email"→contactEmail, digit-led → field…, blank → field', cam[0] === 'contactEmail' && cam[1] === 'field2ndPhone' && cam[2] === 'field' &&
     /^[A-Za-z][A-Za-z0-9]*$/.test(cam[3]) && cam[4].length <= 40, cam);
@@ -914,7 +924,7 @@ async function testOrdering(browser) {
   await mapCol(page, d, 'DateTimeCol');
   const L0 = await layout(page);
   check('setup: page1[section1(t1,t2) ' + s2 + '(n)] ' + p2 + '[' + s3 + '(d)]', L0 === `page1[section1(${t1},${t2}) ${s2}(${n})] ${p2}[${s3}(${d})]`, L0);
-  // BUG (see the report): addPage builds 'section' + n + 1 by string concatenation
+  // Regression (fixed in 2a50087): addPage builds 'section' + n + 1 by string concatenation
   check('fixed: new page\'s section id is sequential (section2 / page2 / section3, not section21)', s2 === 'section2' && p2 === 'page2' && s3 === 'section3', [s2, p2, s3]);
   await settle(page);
   await mapCol(page, t1, 'TxtShort');
@@ -989,7 +999,7 @@ async function testOrdering(browser) {
   await clickText(page, '.bfb-props .bfb-seg__opt', /^One column$/);
   check('"One column" removes the key', await ev(page, (s, id) => !('columns' in s.loc('section', id).sec), s4));
   check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
-  // BUG (see the report): with a MAPPED control selected, a page drag & drop
+  // Regression (fixed in 2a50087): with a MAPPED control selected, a page drag & drop
   // (doc change + select('page') in one tick) re-runs the field pane's
   // "cur.column && …" x-if after cur went null
   await ev(page, (s, a) => { const l = s.loc('field', a.d); l.sec.fields.splice(l.fi, 1); s.loc('section', a.s4).sec.fields.push(l.f); }, { d, s4 });
@@ -1018,7 +1028,7 @@ async function testUndoAndDraft(browser) {
   await ev(page, s => s.addPage());
   await settle(page);
   check('3 edits made (title, title, page); canUndo()', (await docOf(page)).pages.length === 2 && await ev(page, s => s.canUndo()));
-  // BUG (see the report): canUndo()/canRedo() read a non-reactive closure
+  // Regression (fixed in 2a50087): canUndo()/canRedo() read a non-reactive closure
   // (hist), so the toolbar buttons' :disabled never re-evaluates
   check('fixed: Undo button enabled after an edit', await page.evaluate(() => !document.querySelector('[aria-label="Undo"]').disabled));
   await ev(page, s => s.undo());
@@ -1225,6 +1235,382 @@ async function testDownload(browser) {
   await ctx.close();
 }
 
+/* ------------------------------------------------------------------
+   Codex review fixes (xo turn 10)
+   ------------------------------------------------------------------ */
+const LIST_A = 'c279b324-0000-4000-8000-000000000001'; // BSPF Builder Test
+const LIST_B = 'c279b324-0000-4000-8000-000000000002'; // IT Requests
+const LIST_C = 'c279b324-0000-4000-8000-000000000003'; // No Attachments
+// per-list delay / failure for the mock's getListSchema (the lists facade
+// calls the mock object's method at call time, so patching it is enough)
+async function schemaControl(page) {
+  await page.evaluate(() => {
+    if (window.__schemaCtl) return;
+    const M = window.BSPF_MOCK_SP, orig = M.getListSchema;
+    window.__schemaCtl = { delay: {}, fail: {} };
+    M.getListSchema = function (spec) {
+      const c = window.__schemaCtl, id = spec.listId;
+      if (c.fail[id]) return new Promise((res, rej) => setTimeout(() => rej(new Error('mock: read failed')), 50));
+      const p = orig.call(M, spec);
+      const ms = c.delay[id] || 0;
+      return ms ? p.then(v => new Promise(r => setTimeout(() => r(v), ms))) : p;
+    };
+  });
+}
+const schemaReads = page => page.evaluate(() => window.__BSPF_MOCK_WRITES__.filter(w => w.op === 'getListSchema').length);
+const waitSchema = (page, state, listId) => page.waitForFunction(new Function('a', 'const s = ' + ST + '; return s.schema.state === a.state && (!a.listId || s.schema.listId === a.listId);'),
+  { state, listId: listId || null }, { timeout: 6000 });
+
+async function testReviewFixes(browser) {
+  console.log('xo 10 · 1. download can\'t outrun the checks:');
+  let { ctx, page } = await openBuilder(browser);
+  await schemaControl(page);
+  await pickList(page, 'BSPF Builder Test');
+  await propInput(page, 'Item title').fill('{form:title}');
+  const r = await addControl(page, 'section1', 'Single line text');
+  await mapCol(page, r, 'TxtReq');
+  const t = await addControl(page, 'section1', 'Single line text');
+  await mapCol(page, t, 'TxtShort');
+  await settle(page);
+  check('baseline: 0 errors', (await ev(page, s => s.nErr)) === 0, issueLine(await issuesOf(page)));
+  const dls = [];
+  page.on('download', d => dls.push(d.suggestedFilename()));
+  let o = await ev(page, (s, id) => { s.loc('field', id).f.validation.maxLength = 80; s.openDownload(); return { dl: s.dl.open, show: s.showIssues, nErr: s.nErr }; }, t);
+  check('maxLength 80 + openDownload() inside the debounce → no dialog, the issues drawer opens', !o.dl && o.show && o.nErr >= 1, o);
+  await ev(page, (s, id) => { s.loc('field', id).f.validation.maxLength = 50; s.showIssues = false; }, t);
+  await settle(page);
+  o = await ev(page, (s, id) => { delete s.loc('field', id).f.column; s.openDownload(); return { dl: s.dl.open, show: s.showIssues, msgs: s.issues.map(i => i.msg) }; }, r);
+  check('clearing the required mapping + openDownload() at once → blocked', !o.dl && o.show && o.msgs.some(m => /requires “TxtReq”/.test(m)), o);
+  await ev(page, (s, id) => { s.select('field', id); s.setColumn('TxtReq'); s.showIssues = false; }, r);
+  await settle(page);
+  await ev(page, s => s.openDownload());
+  check('valid again → openDownload() opens the dialog', await ev(page, s => s.dl.open && s.nErr === 0));
+  o = await ev(page, (s, id) => { s.loc('field', id).f.validation.maxLength = 80; s.doDownload('json'); return { dl: s.dl.open, show: s.showIssues }; }, t);
+  await page.waitForTimeout(800);
+  check('doDownload(\'json\') right after an error-creating edit → no download, drawer opens', dls.length === 0 && o.show && !o.dl, { dls, o });
+  await ev(page, (s, id) => { s.loc('field', id).f.validation.maxLength = 50; s.showIssues = false; }, t);
+  await settle(page);
+  await ev(page, s => { s.dl.open = true; s.doDownload('json'); });
+  for (let i = 0; i < 20 && !dls.length; i++) await page.waitForTimeout(100);
+  check('…and a valid form still downloads through doDownload()', dls.length === 1, dls);
+
+  console.log('xo 10 · 2. a loading schema blocks:');
+  await settle(page, 600); // the valid form is the saved draft
+  await gotoBuilder(page, false);
+  await schemaControl(page);
+  await page.evaluate(id => { window.__schemaCtl.delay[id] = 1500; }, LIST_A);
+  await clickText(page, '.bfb-draft .btn', /^Restore it$/);
+  await page.waitForTimeout(80);
+  o = await ev(page, s => ({ state: s.schema.state, nErr: s.nErr, iss: s.issues.map(i => i.level + ':' + i.msg) }));
+  check('restore → schema loading; "Reading the list’s columns…" is an ERROR', o.state === 'loading' && o.iss.some(x => /^error:Reading the list’s columns/.test(x)) && o.nErr >= 1, o);
+  check('…Download disabled while loading', await downloadDisabled(page));
+  o = await ev(page, s => { s.openDownload(); return { dl: s.dl.open }; });
+  check('…openDownload() while loading → no dialog', !o.dl);
+  await waitSchema(page, 'ready', LIST_A);
+  await page.waitForTimeout(80);
+  check('read done → 0 errors, Download enabled', (await ev(page, s => s.nErr)) === 0 && !(await downloadDisabled(page)), issueLine(await issuesOf(page)));
+  await ctx.close();
+
+  console.log('xo 10 · 3. the schema belongs to the doc\'s list:');
+  ({ ctx, page } = await openBuilder(browser));
+  await schemaControl(page);
+  await pickList(page, 'BSPF Builder Test');
+  const m = await addControl(page, 'section1', 'Single line text');
+  await mapCol(page, m, 'TxtShort');
+  await settle(page);
+  await pickList(page, 'IT Requests', { confirm: true });
+  await settle(page);
+  check('switched to IT Requests (schema + doc)', await ev(page, (s, b) => s.schema.listId === b && s.currentListId() === b, LIST_B));
+  let n0 = await schemaReads(page);
+  await ev(page, s => s.undo());
+  await waitSchema(page, 'ready', LIST_A).catch(() => {});
+  o = await ev(page, s => ({ sl: s.schema.listId, st: s.schema.state, dl: s.currentListId(), col: s.loc('field', s.doc.pages[0].sections[0].fields[0].id).f.column,
+    iss: (s.recheck(), s.issues.map(i => i.msg)) }));
+  check('undo across the switch → schema re-read for the doc\'s list (A)', o.sl === LIST_A && o.dl === LIST_A && o.st === 'ready' && (await schemaReads(page)) === n0 + 1, o);
+  check('…issues computed against A (mapping valid, nothing "loading"/"missing")', o.col === 'TxtShort' && !o.iss.some(x => /Reading the list|which the list doesn’t have|can’t save/.test(x)), o.iss);
+  n0 = await schemaReads(page);
+  await ev(page, s => s.redo());
+  await waitSchema(page, 'ready', LIST_B).catch(() => {});
+  check('redo → back on B, re-read', await ev(page, (s, b) => s.schema.listId === b && s.currentListId() === b, LIST_B) && (await schemaReads(page)) === n0 + 1);
+  await ctx.close();
+  ({ ctx, page } = await openBuilder(browser));
+  await schemaControl(page);
+  await page.evaluate(id => { window.__schemaCtl.delay[id] = 1200; }, LIST_A);
+  await clickIn(page, '.bfb-listchip');
+  await page.waitForFunction(() => document.querySelectorAll('.bfb-pick .bfb-listrow').length === 3, null, { timeout: 5000 });
+  await clickText(page, '.bfb-pick .bfb-listrow', /^BSPF Builder Test/);
+  await clickIn(page, '.bfb-listchip');
+  await clickText(page, '.bfb-pick .bfb-listrow', /^No Attachments/);
+  await page.waitForTimeout(1800);
+  const d3 = await docOf(page);
+  o = await ev(page, s => ({ sl: s.schema.listId, st: s.schema.state }));
+  check('A picked, then B before A\'s slow reply → target + $builder.list are B', d3.$builder.list && d3.$builder.list.listId === LIST_C &&
+    d3.target.listUrl === '/sites/FCUPortal/Lists/NoAttachments', d3.$builder.list);
+  check('…schema is B\'s (A\'s late reply dropped)', o.sl === LIST_C && o.st === 'ready', o);
+  await ctx.close();
+
+  console.log('xo 10 · 4. a failed list switch changes nothing:');
+  ({ ctx, page } = await openBuilder(browser));
+  await schemaControl(page);
+  await pickList(page, 'BSPF Builder Test');
+  const f1 = await addControl(page, 'section1', 'Single line text');
+  await mapCol(page, f1, 'TxtShort');
+  const f2 = await addControl(page, 'section1', 'Choice');
+  await mapCol(page, f2, 'ChoiceA');
+  await settle(page);
+  await page.evaluate(id => { window.__schemaCtl.fail[id] = true; }, LIST_B);
+  n0 = await schemaReads(page);
+  await pickList(page, 'IT Requests', { expectAsk: true });
+  await clickIn(page, '.bfb-ask .btn--primary');
+  await page.waitForTimeout(150);
+  await waitSchema(page, 'ready', LIST_A).catch(() => {});
+  await page.waitForTimeout(80);
+  let d4 = await docOf(page);
+  o = await ev(page, s => ({ sl: s.schema.listId, st: s.schema.state, note: s.note }));
+  check('B unreadable → mappings intact', d4.pages[0].sections[0].fields.map(f => f.column).join() === 'TxtShort,ChoiceA', d4.pages[0].sections[0].fields.map(f => f.column));
+  check('…target and $builder.list still A', d4.target.listUrl === '/sites/FCUPortal/Lists/BSPFBuilderTest' && d4.$builder.list.listId === LIST_A, d4.target);
+  check('…a note: couldn’t read “IT Requests”, still saves to A', /Couldn’t read “IT Requests”/.test(o.note) && /still saves to “BSPF Builder Test”/.test(o.note) && await isVisible(page, '.bfb-note'), o.note);
+  check('…A\'s schema re-read (ready, listId A)', o.st === 'ready' && o.sl === LIST_A && (await schemaReads(page)) >= n0 + 1, o);
+  await page.evaluate(id => { window.__schemaCtl.fail[id] = true; }, LIST_A);
+  await ev(page, s => s.ensureSchema(true));
+  await waitSchema(page, 'error', LIST_A).catch(() => {});
+  check('A\'s read fails → schema error, "couldn’t be read" problem', await ev(page, s => s.schema.state === 'error' && (s.recheck(), s.issues.some(i => /columns couldn’t be read/.test(i.msg)))));
+  await page.evaluate(id => { window.__schemaCtl.fail[id] = false; }, LIST_A);
+  n0 = await schemaReads(page);
+  await clickIn(page, '.bfb-listchip');
+  await page.waitForFunction(() => document.querySelectorAll('.bfb-pick .bfb-listrow').length === 3, null, { timeout: 5000 });
+  await clickText(page, '.bfb-pick .bfb-listrow', /^BSPF Builder Test/);
+  check('re-choosing A (its schema in error) → no switch dialog', !(await ev(page, s => s.ask.open)));
+  await waitSchema(page, 'ready', LIST_A).catch(() => {});
+  check('…A re-read: ready, mappings kept', (await ev(page, s => s.schema.state)) === 'ready' && (await schemaReads(page)) === n0 + 1 &&
+    (await docOf(page)).pages[0].sections[0].fields[0].column === 'TxtShort');
+  // a failed FIRST pick leaves the form list-less
+  await ctx.close();
+  ({ ctx, page } = await openBuilder(browser));
+  await schemaControl(page);
+  await page.evaluate(id => { window.__schemaCtl.fail[id] = true; }, LIST_C);
+  await pickList(page, 'No Attachments', { expectAsk: true });
+  await page.waitForTimeout(300);
+  o = await ev(page, s => ({ st: s.schema.state, l: s.currentListId(), url: s.doc.target.listUrl || null, note: s.note }));
+  check('a failed first pick → no list, schema "none", a note', o.st === 'none' && !o.l && !o.url && /Couldn’t read “No Attachments”/.test(o.note), o);
+  check('no page errors (sections 1–4)', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+
+  console.log('xo 10 · 5. length limits on Text columns:');
+  ({ ctx, page } = await openBuilder(browser));
+  await pickList(page, 'BSPF Builder Test');
+  await propInput(page, 'Item title').fill('{form:title}');
+  const req = await addControl(page, 'section1', 'Single line text');
+  await mapCol(page, req, 'TxtReq');
+  const ch = await addControl(page, 'section1', 'Choice');
+  await mapCol(page, ch, 'TxtShort');
+  let f = await fieldOf(page, ch);
+  check('choice → TxtShort (Text, max 50): validation.maxLength 50', f.validation && f.validation.maxLength === 50, f.validation);
+  const L60 = 'x'.repeat(60);
+  let iss = await ev(page, (s, a) => { s.loc('field', a.id).f.choices[0].value = a.v; s.recheck(); return JSON.parse(JSON.stringify(s.issues)); }, { id: ch, v: L60 });
+  check('a 60-char choice value on TxtShort → error', has(iss, /is longer than “TxtShort” holds \(50 characters\)/, 'error'), issueLine(iss));
+  await ev(page, (s, id) => { s.loc('field', id).f.choices[0].value = 'Short one'; }, ch);
+  const yn = await addControl(page, 'section1', 'Yes / No');
+  await mapCol(page, yn, 'TxtShort');
+  iss = await ev(page, (s, a) => { s.loc('field', a.id).f.values.on = a.v; s.recheck(); return JSON.parse(JSON.stringify(s.issues)); }, { id: yn, v: L60 });
+  check('a Yes/No on TxtShort with a 60-char "on" word → error', iss.some(i => i.level === 'error' && i.sel.id === yn && /is longer than “TxtShort” holds/.test(i.msg)), issueLine(iss));
+  await ev(page, (s, id) => { s.select('form'); s.loc('field', id).f.values.on = 'Yes'; }, yn);
+  await ev(page, (s, id) => { const l = s.loc('field', id); l.sec.fields.splice(l.fi, 1); }, yn);
+  await selectNode(page, 'field', ch);
+  const swf = await switchOf(page, 'Offer “Other” (type your own)');
+  check('choice on a Text column: "Other" allowed', swf && !swf.disabled, swf);
+  await toggleSwitch(page, 'Offer “Other” (type your own)');
+  iss = await issuesOf(page);
+  check('…fillIn with maxLength 50 → no "typed Other" error', (await fieldOf(page, ch)).fillIn === true && !has(iss, /typed “Other”/), issueLine(iss));
+  iss = await ev(page, (s, id) => { delete s.loc('field', id).f.validation.maxLength; s.recheck(); return JSON.parse(JSON.stringify(s.issues)); }, ch);
+  check('…fillIn without maxLength → error "a typed “Other” could run past"', has(iss, /a typed “Other” could run past “TxtShort” \(50 characters\)/, 'error'), issueLine(iss));
+  await ev(page, (s, id) => { s.loc('field', id).f.validation.maxLength = 50; }, ch);
+  await settle(page);
+  check('form valid again', (await ev(page, s => s.nErr)) === 0, issueLine(await issuesOf(page)));
+  const cfg5 = await ev(page, s => JSON.parse(s.jsonText()));
+  await ctx.close();
+  // the engine holds a typed "Other" to the column
+  {
+    const ectx = await browser.newContext({ viewport: { width: 1100, height: 1400 } });
+    const ep = await ectx.newPage();
+    const errs = [];
+    ep.on('pageerror', e => errs.push(e.message));
+    await ep.addInitScript(() => { window.BSPF_MOCK_ADD_MS = 50; });
+    await ep.route('**/forms/example-it-request.json', rt => rt.fulfill({ json: cfg5 }));
+    await ep.goto(ENGINE);
+    await ep.waitForFunction(() => /ready|error/.test((document.querySelector('[data-bsp-form]') || {}).getAttribute && document.querySelector('[data-bsp-form]').getAttribute('data-bspf-state') || ''), null, { timeout: 8000 });
+    await ep.waitForTimeout(250);
+    check('engine loads the config (Choice → Text, fillIn, maxLength 50)', (await ep.getAttribute('[data-bsp-form]', 'data-bspf-state')) === 'ready');
+    const ml = await ep.evaluate(k => { const i = document.querySelector('[data-bspf-field="' + k + '"] .bspf-combo__fillin input'); return i && i.getAttribute('maxlength'); }, ch);
+    check('engine: the fill-in input has maxlength="50"', ml === '50', ml);
+    await ep.evaluate(k => document.querySelector('[data-bspf-field="' + k + '"] .bspf-combo__control').click(), ch);
+    await ep.waitForTimeout(120);
+    const fin = ep.locator('[data-bspf-field="' + ch + '"] .bspf-combo__fillin input');
+    let typed = null;
+    if (await fin.isVisible()) { await fin.fill(L60); typed = (await fin.inputValue()).length; }
+    check('…typing 60 characters into it keeps 50 (browser maxlength)', typed === 50, typed);
+    const ev5 = await ep.evaluate(({ k, req, v }) => {
+      const s = document.querySelector('.bspf')._x_dataStack[0];
+      s.values[req] = 'Needed';
+      s.fill[k] = v; s.pickFill(k);
+      s.submitForm();
+      return new Promise(res => setTimeout(() => res({ val: s.values[k].length, err: s.errors[k] || '', adds: window.__BSPF_MOCK_WRITES__.filter(w => w.op === 'addItem').length }), 600));
+    }, { k: ch, req, v: L60 });
+    check('…a 60-char "Other" set in state can\'t be saved (engine check message, no addItem)', ev5.val === 60 && /50 characters or fewer/.test(ev5.err) && ev5.adds === 0, ev5);
+    check('no engine page errors', errs.length === 0, errs.join(' | '));
+    await ectx.close();
+  }
+
+  console.log('xo 10 · 6. number remap:');
+  ({ ctx, page } = await openBuilder(browser));
+  const core6 = await page.evaluate(() => {
+    const C = BSPFormsBuilder.core;
+    const col = (name, min, max, type) => ({ name, title: name, type: type || 'Number', ok: true, fd: { InternalName: name, TypeAsString: type || 'Number', MinimumValue: min, MaximumValue: max } });
+    const v = f => JSON.parse(JSON.stringify(f.validation || {}));
+    const f = C.newField('number', C.newDoc());
+    C.applyColumn(f, col('A', 0, 10), 'number'); const a1 = v(f);
+    C.applyColumn(f, col('B', 20, 30), 'number'); const a2 = v(f);
+    C.applyColumn(f, col('A', 0, 10), 'number'); const a3 = v(f);
+    const g = C.newField('number', C.newDoc());
+    C.applyColumn(g, col('A', 0, 10), 'number'); g.validation.min = 3;
+    C.applyColumn(g, col('W', -50, 50), 'number'); const g2 = v(g);
+    const h = C.newField('number', C.newDoc());
+    h.validation = { min: 5 };
+    C.applyColumn(h, col('A', 0, 10), 'number'); const h1 = v(h);
+    C.applyColumn(h, col('U', null, null), 'number'); const h2 = v(h);
+    const doc = C.newDoc(); doc.pages[0].sections[0].fields.push(f);
+    return { a1, a2, a3, g2, h1, h2, ser: JSON.stringify(C.serialize(doc)) };
+  });
+  check('core: 0..10 then 20..30 → min 20 / max 30 (not 20 / 10)', same(core6.a1, { min: 0, max: 10 }) && core6.a2.min === 20 && core6.a2.max === 30, core6);
+  check('core: …and back to 0..10 → 0 / 10', core6.a3.min === 0 && core6.a3.max === 10, core6.a3);
+  check('core: an author-typed min (3) survives a remap; the old column\'s max goes', core6.g2.min === 3 && core6.g2.max === 50, core6.g2);
+  check('core: an author min set before mapping (5) is kept; remap to an unbounded column keeps 5, drops max 10', core6.h1.min === 5 && core6.h1.max === 10 && core6.h2.min === 5 && !('max' in core6.h2), core6);
+  check('core: colBounds / intFromDisplay never serialized', !/colBounds|intFromDisplay/.test(core6.ser));
+  await pickList(page, 'BSPF Builder Test');
+  const nm = await addControl(page, 'section1', 'Number');
+  await mapCol(page, nm, 'NumPlain');
+  await mapCol(page, nm, 'NumDefault');
+  f = await fieldOf(page, nm);
+  check('UI: NumPlain (0..100) → NumDefault (unbounded): the column bounds go', !(f.validation && ('min' in f.validation || 'max' in f.validation)), f.validation);
+  iss = await ev(page, (s, id) => { const x = s.loc('field', id).f; x.validation = { min: 50, max: 10 }; s.recheck(); return JSON.parse(JSON.stringify(s.issues)); }, nm);
+  check('min 50 > max 10 by hand → error "the minimum … is above the maximum"', has(iss, /the minimum \(50\) is above the maximum \(10\)/, 'error'), issueLine(iss));
+
+  console.log('xo 10 · 7. currency + display:');
+  const seg = async (label) => { await clickText(page, '.bfb-props .bfb-seg__opt', new RegExp('^' + label + '$')); await page.waitForTimeout(60); };
+  const n1 = await addControl(page, 'section1', 'Number');
+  await ev(page, (s, id) => { s.loc('field', id).f.validation = { min: 1, max: 5 }; }, n1);
+  await page.waitForTimeout(80);
+  await seg('Slider');
+  f = await fieldOf(page, n1);
+  check('slider → display set, integer imposed (intFromDisplay)', f.display === 'slider' && f.validation.integer === true && f.$builder.intFromDisplay === true, f);
+  await mapCol(page, n1, 'Money');
+  f = await fieldOf(page, n1);
+  check('remap to Money (Currency) → display and the imposed integer gone', f.type === 'currency' && !('display' in f) && !f.validation.integer && !f.$builder.intFromDisplay, f);
+  const n2 = await addControl(page, 'section1', 'Number');
+  await toggleSwitch(page, 'Whole numbers only');
+  await ev(page, (s, id) => { const x = s.loc('field', id).f; x.validation.min = 1; x.validation.max = 5; }, n2);
+  await page.waitForTimeout(80);
+  await seg('Slider');
+  f = await fieldOf(page, n2);
+  check('author integer, then slider → not marked as imposed', f.display === 'slider' && f.validation.integer === true && !f.$builder.intFromDisplay, f);
+  await mapCol(page, n2, 'Money');
+  f = await fieldOf(page, n2);
+  check('…remap to Money → display gone, the author\'s integer stays', !('display' in f) && f.validation.integer === true, f);
+  const n3 = await addControl(page, 'section1', 'Number');
+  await ev(page, (s, id) => { s.loc('field', id).f.validation = { min: 1, max: 5 }; }, n3);
+  await page.waitForTimeout(80);
+  await seg('Slider');
+  await seg('Free entry');
+  f = await fieldOf(page, n3);
+  check('slider → Free entry removes the imposed integer', !('display' in f) && !f.validation.integer && !f.$builder.intFromDisplay, f);
+  const n4 = await addControl(page, 'section1', 'Number');
+  await toggleSwitch(page, 'Whole numbers only');
+  await ev(page, (s, id) => { const x = s.loc('field', id).f; x.validation.min = 1; x.validation.max = 5; }, n4);
+  await page.waitForTimeout(80);
+  await seg('Dropdown');
+  await seg('Free entry');
+  f = await fieldOf(page, n4);
+  check('…but keeps an author-chosen integer', !('display' in f) && f.validation.integer === true, f);
+  check('downloaded JSON has no colBounds / intFromDisplay', await ev(page, s => !/colBounds|intFromDisplay/.test(s.jsonText())));
+
+  console.log('xo 10 · 8. target.set templates:');
+  const base8 = await docOf(page);
+  const opt = { id: 'optional', type: 'text', label: 'Opt', column: 'TxtShort', validation: { maxLength: 50 }, $builder: { kind: 'text' } };
+  for (const [tpl, ok] of [['{field:optional}', false], ['', false], ['Fixed', true], ['{user:name}', true], ['{field:optional} by {user:email}', true]]) {
+    iss = await runDoc(page, craft(base8, [opt], d => { d.pages[0].sections[0].fields.shift(); d.target.set = { TxtReq: tpl }; }));
+    check('target.set.TxtReq = "' + tpl + '" → ' + (ok ? 'satisfies the required column' : 'error remains'), has(iss, /requires “TxtReq”/, 'error') === !ok, issueLine(iss));
+  }
+  await ctx.close();
+
+  console.log('xo 10 · 9. a control referenced twice in one rule:');
+  ({ ctx, page } = await openBuilder(browser));
+  await pickList(page, 'BSPF Builder Test');
+  const drv = await addControl(page, 'section1', 'Yes / No');
+  await toggleSwitch(page, 'Not saved (logic only)');
+  const tx = await addControl(page, 'section1', 'Single line text');
+  await ev(page, (s, a) => { s.loc('field', a.tx).f.visibleWhen = { all: [{ field: a.drv, op: 'equals', value: true }, { any: [{ field: a.drv, op: 'notEmpty' }, { not: { field: a.drv, op: 'isEmpty' } }] }] }; }, { tx, drv });
+  await selectNode(page, 'field', drv);
+  await page.waitForTimeout(150);
+  const used = await page.evaluate(() => [...document.querySelectorAll('.bfb-refs .bfb-flag')].map(e => e.textContent));
+  check('"Used by" renders the rule once', same(used, ['field "' + tx + '" show-when']), used);
+  const dupWarn = page.__warns.filter(w => /duplicate key/i.test(w));
+  check('…no Alpine duplicate-key warning', dupWarn.length === 0, dupWarn.join(' | '));
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+
+  console.log('xo 10 · 10. nested key order is deterministic:');
+  const build = async (order) => {
+    const c = await openBuilder(browser);
+    await pickList(c.page, 'BSPF Builder Test');
+    const out = await ev(c.page, (s, order) => {
+      const L = ['Low', 'Medium', 'High'], LBL = ['L', 'M', 'H'], CLR = ['teal', 'berry', 'sky'];
+      const t = s.doc.target, fm = s.doc.form;
+      if (order === 'A') { fm.title = 'Order'; fm.showTitle = false; fm.intro = 'Hi'; t.titleTemplate = '{form:title}'; }
+      else { t.titleTemplate = '{form:title}'; delete t.sendEmpty; t.sendEmpty = true; fm.intro = 'Hi'; fm.showTitle = false; fm.title = 'Order'; }
+      s.addField('section1', 'choice');
+      let f = s.curField();
+      if (order === 'A') {
+        f.label = 'Pick'; f.hint = 'Help'; f.required = true; s.setColumn('ChoiceA');
+        f.choices.forEach((c, i) => { c.color = CLR[i]; c.label = LBL[i]; });
+        f.span = 'full';
+      } else {
+        f.span = 'full'; s.setColumn('ChoiceA'); f.required = true; f.hint = 'Help'; f.label = 'Pick';
+        f.choices = L.map((v, i) => ({ label: LBL[i], color: CLR[i], value: v }));
+      }
+      s.addField('section1', 'text');
+      f = s.curField();
+      if (order === 'A') { f.label = 'Req'; f.placeholder = 'ex'; s.setColumn('TxtReq'); f.validation.minLength = 2; }
+      else { f.validation = { minLength: 2 }; s.setColumn('TxtReq'); f.placeholder = 'ex'; f.label = 'Req'; }
+      s.addField('section1', 'number');
+      f = s.curField();
+      if (order === 'A') { f.validation = { min: 1, max: 5 }; s.setDisplay('slider'); s.setColumn('NumPlain'); }
+      else { f.validation = { max: 5 }; f.validation.min = 1; s.setDisplay('slider'); s.setColumn('NumPlain'); }
+      return s.jsonText();
+    }, order);
+    await c.ctx.close();
+    return out;
+  };
+  const ja = await build('A'), jb = await build('B');
+  check('two edit orders → byte-identical jsonText()', ja === jb, ja === jb ? '' : firstDiff(ja, jb));
+  const J = JSON.parse(ja);
+  const FIELD_ORDER = ['id', 'type', 'label', 'text', 'description', 'hint', 'placeholder', 'required', 'span', 'column', 'default', 'control', 'toggleText', 'values',
+    'display', 'multiple', 'includeTime', 'richText', 'rows', 'withDescription', 'style', 'fillIn', 'choices', 'choicesWhen', 'validation', 'rules', 'visibleWhen'];
+  const fl = J.pages[0].sections[0].fields;
+  const inOrder = fl.every(x => {
+    const k = Object.keys(x), known = k.filter(y => FIELD_ORDER.includes(y));
+    return k.slice(0, 3).join() === 'id,type,label' && k[k.length - 1] === '$builder' && same(known, FIELD_ORDER.filter(y => known.includes(y)));
+  });
+  check('field keys: id, type, label, … in the fixed order, $builder last', inOrder, fl.map(x => Object.keys(x).join(',')));
+  check('choice keys: value, label, color', fl[0].choices.every(c => Object.keys(c).join() === 'value,label,color'), fl[0].choices);
+  check('form + target keys in the fixed order', Object.keys(J.form).join() === 'title,showTitle,intro,appearance' &&
+    Object.keys(J.target).join() === 'siteUrl,listUrl,titleTemplate,sendEmpty', [Object.keys(J.form), Object.keys(J.target)]);
+}
+function firstDiff(a, b) {
+  let i = 0;
+  while (i < a.length && a[i] === b[i]) i++;
+  return 'at ' + i + ': A …' + a.slice(Math.max(0, i - 60), i + 60) + '… / B …' + b.slice(Math.max(0, i - 60), i + 60) + '…';
+}
+
 async function testEndToEnd(browser) {
   console.log('end-to-end (engine harness):');
   if (!downloaded || !downloaded.json || !downloaded.json.pages) { check('downloaded JSON available', false, 'testDownload did not produce one'); return; }
@@ -1280,7 +1666,7 @@ async function testEndToEnd(browser) {
 (async () => {
   const browser = await launch();
   const only = process.env.ONLY ? process.env.ONLY.split(',') : null;
-  const suite = [testBootAndCatalog, testControls, testSwitchAndLogicOnly, testChecks, testIds, testOrdering, testUndoAndDraft, testDownload, testEndToEnd];
+  const suite = [testBootAndCatalog, testControls, testSwitchAndLogicOnly, testChecks, testIds, testOrdering, testUndoAndDraft, testDownload, testEndToEnd, testReviewFixes];
   try {
     for (const t of suite) {
       if (only && !only.includes(t.name)) continue;

@@ -266,9 +266,20 @@
         break;
       case 'number':
         f.type = t === 'Currency' ? 'currency' : 'number';
-        if (f.type === 'currency') delete f.display;
-        if (fd.MinimumValue != null && (f.validation.min == null || f.validation.min < fd.MinimumValue)) f.validation.min = fd.MinimumValue;
-        if (fd.MaximumValue != null && (f.validation.max == null || f.validation.max > fd.MaximumValue)) f.validation.max = fd.MaximumValue;
+        if (f.type === 'currency') {
+          delete f.display;
+          // a whole-number rule the dropdown/slider imposed goes with them
+          if (f.$builder && f.$builder.intFromDisplay) { delete f.validation.integer; delete f.$builder.intFromDisplay; }
+        }
+        // bounds a previous column set are that column's, not the author's
+        // (Codex xo 10: 0–10 then 20–30 left min 20 / max 10)
+        var cb = (f.$builder && f.$builder.colBounds) || {};
+        if (cb.min != null && f.validation.min === cb.min) delete f.validation.min;
+        if (cb.max != null && f.validation.max === cb.max) delete f.validation.max;
+        f.$builder = f.$builder || { kind: kind };
+        f.$builder.colBounds = {};
+        if (fd.MinimumValue != null && (f.validation.min == null || f.validation.min < fd.MinimumValue)) f.validation.min = f.$builder.colBounds.min = fd.MinimumValue;
+        if (fd.MaximumValue != null && (f.validation.max == null || f.validation.max > fd.MaximumValue)) f.validation.max = f.$builder.colBounds.max = fd.MaximumValue;
         break;
       case 'boolean':
         if (t === 'Boolean') delete f.values;
@@ -285,6 +296,10 @@
             f.choices = allowed.map(function (v, i) { return had[v] || { value: v, color: COLORS[i % COLORS.length] }; });
           }
           if (!fd.FillInChoice) delete f.fillIn;
+          delete f.validation.maxLength;
+        } else if (t === 'Text' && fd.MaxLength) {
+          // a typed "Other" is held to the column (the engine checks it)
+          f.validation.maxLength = fd.MaxLength;
         }
         break;
       case 'date':
@@ -393,7 +408,8 @@
       else if (s.token) { if (tokenRe(id).test(s.obj[s.key])) hits.push(s.where); }
       else if (s.obj[s.key] === id) hits.push(s.where);
     });
-    return hits;
+    // one entry per place (a rule naming the field twice is one use)
+    return hits.filter(function (w, i) { return hits.indexOf(w) === i; });
   }
   function renameRefs(doc, from, to) {
     refSites(doc).forEach(function (s) {
@@ -455,11 +471,15 @@
   function computeIssues(doc, schema) {
     var out = [];
     function add(level, source, msg, sel) { out.push({ level: level, source: source, msg: msg, sel: sel || { t: 'form', id: null } }); }
-    var cat = schema && schema.state === 'ready' ? schema.catalog : null;
+    // the catalog only counts if it's THIS document's list (undo across a
+    // list switch, a slow reply for an earlier pick — Codex xo 10), and
+    // until it's read nothing can be called ready
+    var listId = doc.$builder && doc.$builder.list && doc.$builder.list.listId;
+    var cat = schema && schema.state === 'ready' && schema.listId === listId ? schema.catalog : null;
     var hasList = !!(doc.target && (doc.target.listUrl || doc.target.listTitle || doc.target.listId));
     if (!hasList) add('error', 'schema', 'Pick the SharePoint list this form saves to.');
     else if (schema && schema.state === 'error') add('error', 'schema', 'The list’s columns couldn’t be read: ' + schema.err);
-    else if (!cat) add('warn', 'schema', 'Loading the list’s columns…');
+    else if (!cat) add('error', 'schema', 'Reading the list’s columns — the checks wait for them.');
 
     var endAt = endIndex(doc);
     var maps = Object.create(null); // column -> [{ f, uncond }]
@@ -502,6 +522,18 @@
       if (col.type === 'Text' && fd.MaxLength && (kind === 'text' || kind === 'textarea' || kind === 'url') && (!v2.maxLength || v2.maxLength > fd.MaxLength)) {
         add('error', 'schema', name + ': “' + col.title + '” holds at most ' + fd.MaxLength + ' characters — set the maximum length to ' + fd.MaxLength + ' or less.', sel);
       }
+      // every other string a control can save to a Text column: its choice
+      // values and yes/no words (a typed "Other" is held by validation.maxLength)
+      if (col.type === 'Text' && fd.MaxLength) {
+        var long = [];
+        if (kind === 'choice') (f.choices || []).forEach(function (c) { var s = typeof c === 'string' ? c : c.value; if (String(s).length > fd.MaxLength) long.push(s); });
+        if (kind === 'boolean' && f.values) ['on', 'off'].forEach(function (k) { if (String(f.values[k] || '').length > fd.MaxLength) long.push(f.values[k]); });
+        if (long.length) add('error', 'schema', name + ': “' + long.join('”, “') + '” is longer than “' + col.title + '” holds (' + fd.MaxLength + ' characters).', sel);
+        if (kind === 'choice' && f.fillIn && (!v2.maxLength || v2.maxLength > fd.MaxLength)) add('error', 'schema', name + ': a typed “Other” could run past “' + col.title + '” (' + fd.MaxLength + ' characters) — remap the column to set the limit.', sel);
+      }
+      if (kind === 'number' && typeof v2.min === 'number' && typeof v2.max === 'number' && v2.min > v2.max) {
+        add('error', 'schema', name + ': the minimum (' + v2.min + ') is above the maximum (' + v2.max + '), so no number fits.', sel);
+      }
       if (kind === 'number') {
         if (fd.MinimumValue != null && (v2.min == null || v2.min < fd.MinimumValue)) add('error', 'schema', name + ': “' + col.title + '” accepts nothing below ' + fd.MinimumValue + ' — set the minimum to at least that.', sel);
         if (fd.MaximumValue != null && (v2.max == null || v2.max > fd.MaximumValue)) add('error', 'schema', name + ': “' + col.title + '” accepts nothing above ' + fd.MaximumValue + ' — set the maximum to at most that.', sel);
@@ -533,7 +565,9 @@
         if (!col.ok || !col.fd.Required) return;
         var m = maps[col.name] || [];
         if (m.some(function (x) { return x.uncond && x.f.required; })) return;
-        if (t.set && typeof t.set[col.name] === 'string' && t.set[col.name].trim()) return;
+        // a template counts only if it can't come out empty (an empty result
+        // is left out of the save — Codex xo 10)
+        if (t.set && templateAlwaysFilled(t.set[col.name])) return;
         if (col.name === 'Title' && !m.length && templateAlwaysFilled(t.titleTemplate)) return;
         var dv = col.fd.DefaultValue;
         if (dv != null && dv !== '' && m.every(function (x) { return x.f.required; })) return; // left out -> default applies
@@ -581,7 +615,8 @@
       if (v === undefined) return;
       if (v === '' && DROP_EMPTY.indexOf(k) > -1) return;
       if (k === '$builder' && v && typeof v === 'object') {
-        v = clone(v); delete v.autoId;
+        // session bookkeeping stays out of the download
+        v = clone(v); delete v.autoId; delete v.colBounds; delete v.intFromDisplay;
         if (!Object.keys(v).length) return;
       }
       v = tidy(v);
@@ -592,8 +627,52 @@
     if (out.$builder) { var b = out.$builder; delete out.$builder; out.$builder = b; }
     return out;
   }
+  // a fixed key order for every object the builder models, so the same form
+  // downloads byte-identically however it was edited (Codex xo 10); keys it
+  // doesn't model keep their order after these, "$builder" goes last
+  var ORDERS = {
+    form: ['title', 'showTitle', 'intro', 'appearance', 'businessHours', 'languages', 'vars', 'headerCard'],
+    appearance: ['frame', 'header', 'tint', 'icon'],
+    target: ['siteUrl', 'listUrl', 'listTitle', 'listId', 'titleTemplate', 'sendEmpty', 'set'],
+    confirmation: ['title', 'message', 'allowAnother', 'anotherLabel', 'illustration', 'redirect'],
+    page: ['id', 'title', 'description', 'visibleWhen', 'endWhen', 'sections'],
+    section: ['id', 'title', 'description', 'icon', 'columns', 'tint', 'visibleWhen', 'fields'],
+    field: ['id', 'type', 'label', 'text', 'description', 'hint', 'placeholder', 'required', 'span', 'column', 'default',
+      'control', 'toggleText', 'values', 'display', 'multiple', 'includeTime', 'richText', 'rows', 'withDescription', 'style',
+      'fillIn', 'choices', 'choicesWhen', 'validation', 'rules', 'visibleWhen'],
+    choice: ['value', 'label', 'color'],
+    validation: ['minLength', 'maxLength', 'min', 'max', 'integer', 'url', 'pattern', 'patternMessage', 'minChoices', 'maxChoices', 'maxPeople']
+  };
+  function ordered(o, keys) {
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return o;
+    var out = {};
+    keys.forEach(function (k) { if (k in o) out[k] = o[k]; });
+    Object.keys(o).forEach(function (k) { if (!(k in out) && k !== '$builder') out[k] = o[k]; });
+    if ('$builder' in o) out.$builder = o.$builder;
+    return out;
+  }
+  function orderDoc(d) {
+    if (d.form) { d.form = ordered(d.form, ORDERS.form); if (d.form.appearance) d.form.appearance = ordered(d.form.appearance, ORDERS.appearance); }
+    if (d.target) d.target = ordered(d.target, ORDERS.target);
+    if (d.confirmation) d.confirmation = ordered(d.confirmation, ORDERS.confirmation);
+    d.pages = (d.pages || []).map(function (pg) {
+      pg = ordered(pg, ORDERS.page);
+      pg.sections = (pg.sections || []).map(function (sec) {
+        sec = ordered(sec, ORDERS.section);
+        sec.fields = (sec.fields || []).map(function (f) {
+          f = ordered(f, ORDERS.field);
+          if (Array.isArray(f.choices)) f.choices = f.choices.map(function (c) { return typeof c === 'string' ? c : ordered(c, ORDERS.choice); });
+          if (f.validation) f.validation = ordered(f.validation, ORDERS.validation);
+          return f;
+        });
+        return sec;
+      });
+      return pg;
+    });
+    return d;
+  }
   function serialize(doc) {
-    var d = tidy(clone(doc));
+    var d = orderDoc(tidy(clone(doc)));
     var shared = sharedOf(d);
     if (shared.length) d.sharedColumns = shared; else delete d.sharedColumns;
     var out = {};
@@ -643,7 +722,7 @@
   var BLANK_FIELD = { id: '', type: 'heading', $builder: { kind: 'locked' } };
   window.bspFormsBuilder = function () {
     var hist = { past: [], future: [], last: null };
-    var timers = { change: null };
+    var timers = { change: null, schemaGen: 0 };
     var lists = window.BSPForms.lists();
     return {
       doc: newDoc(),
@@ -672,18 +751,22 @@
       changed: function () {
         var self = this;
         clearTimeout(timers.change);
-        timers.change = setTimeout(function () {
-          var snap = JSON.stringify(self.doc);
-          if (snap !== hist.last) {
-            hist.past.push(hist.last);
-            if (hist.past.length > 50) hist.past.shift();
-            hist.future = [];
-            hist.last = snap;
-            self.nPast = hist.past.length; self.nFuture = 0;
-            writeDraft(JSON.parse(snap));
-          }
-          self.recheck();
-        }, 300);
+        timers.change = setTimeout(function () { self.flush(); }, 300);
+      },
+      // settle now: history, draft and checks for the document as it is
+      // (download calls this — a check result 300 ms old can't be trusted)
+      flush: function () {
+        clearTimeout(timers.change);
+        var snap = JSON.stringify(this.doc);
+        if (snap !== hist.last) {
+          hist.past.push(hist.last);
+          if (hist.past.length > 50) hist.past.shift();
+          hist.future = [];
+          hist.last = snap;
+          this.nPast = hist.past.length; this.nFuture = 0;
+          writeDraft(JSON.parse(snap));
+        }
+        this.recheck();
       },
       recheck: function () {
         this.issues = computeIssues(this.doc, this.schema);
@@ -709,6 +792,8 @@
         writeDraft(this.doc);
         if (!this.findSel()) this.select('form');
         this.syncIdDraft();
+        // undo can cross a list switch: the columns must be that list's
+        this.ensureSchema();
         var self = this;
         this.$nextTick(function () { self.recheck(); });
       },
@@ -728,8 +813,8 @@
         if (!d) return;
         this.doc = d.doc;
         this.select('form');
-        var l = this.doc.$builder && this.doc.$builder.list;
-        if (l && l.listId) this.loadSchema({ siteUrl: l.siteUrl, listId: l.listId });
+        this.ensureSchema(true);
+        this.recheck();
       },
       discardDraft: function () { this.draft = null; dropDraft(); },
       draftWhen: function () {
@@ -739,7 +824,8 @@
         var self = this;
         this.confirm('Start a new form?', 'The current form is replaced. Download it first if you want to keep it — undo can bring it back in this session.', 'Start new', function () {
           self.doc = newDoc();
-          self.schema = { state: 'none', err: '', catalog: null };
+          timers.schemaGen++; // a read still in flight is for the old form
+          self.schema = { state: 'none', err: '', catalog: null, listId: null };
           self.select('form');
         });
       },
@@ -991,7 +1077,13 @@
       currentListId: function () { var l = this.doc.$builder && this.doc.$builder.list; return l ? l.listId : null; },
       chooseList: function (l) {
         var self = this, curId = this.currentListId();
-        if (curId === l.id) { this.pick.open = false; return; }
+        if (curId === l.id) {
+          // the current list: nothing to switch — but re-read it if its
+          // columns aren't loaded (after an error, say)
+          this.pick.open = false;
+          if (!(this.schema.state === 'ready' && this.schema.listId === curId)) this.ensureSchema(true);
+          return;
+        }
         var mapped = 0;
         eachField(this.doc, function (f) { if (f.column) mapped++; });
         var go = function () { self.useList(l); };
@@ -999,12 +1091,14 @@
           this.confirm('Switch lists?', 'Every control’s column mapping (' + mapped + ') is cleared — the controls, their choices and rules stay. Undo can bring the mappings back.', 'Switch and clear', go);
         } else go();
       },
+      // the switch is staged: mappings clear and the target changes only once
+      // the new list's columns are read; a failed read changes nothing
       useList: function (l) {
         var self = this;
         this.pick.open = false;
-        eachField(this.doc, function (f) { unmap(f); });
-        delete this.doc.sharedColumns;
         this.loadSchema({ siteUrl: this.pick.site || undefined, listId: l.id }, function (res) {
+          eachField(self.doc, function (f) { unmap(f); });
+          delete self.doc.sharedColumns;
           var web = pathOf(res.list.webUrl || '');
           self.doc.target = self.doc.target || {};
           delete self.doc.target.listTitle; delete self.doc.target.listId;
@@ -1013,17 +1107,35 @@
           if (self.doc.target.sendEmpty == null) self.doc.target.sendEmpty = true;
           self.doc.$builder = self.doc.$builder || { version: 1 };
           self.doc.$builder.list = { siteUrl: web || '/', listId: res.list.id, listTitle: res.list.title, listUrl: res.list.url };
+        }, function (msg) {
+          self.note = 'Couldn’t read “' + l.title + '”: ' + msg + (self.currentListId() ? ' — the form still saves to “' + self.listTitle() + '”.' : '');
+          if (self.currentListId()) self.ensureSchema(true);
+          else { self.schema = { state: 'none', err: '', catalog: null, listId: null }; self.recheck(); }
         });
       },
-      loadSchema: function (spec, then) {
-        var self = this;
-        this.schema = { state: 'loading', err: '', catalog: null };
+      // the document's own list's columns, unless they're already loaded
+      ensureSchema: function (force) {
+        var l = this.doc.$builder && this.doc.$builder.list;
+        if (!l || !l.listId) { this.schema = { state: 'none', err: '', catalog: null, listId: null }; return; }
+        if (!force && this.schema.listId === l.listId && this.schema.state !== 'error') return;
+        this.loadSchema({ siteUrl: l.siteUrl, listId: l.listId });
+      },
+      // one generation per request: a slower reply for an earlier pick is
+      // dropped, so the catalog always belongs to the latest request
+      loadSchema: function (spec, then, onFail) {
+        var self = this, gen = ++timers.schemaGen;
+        this.schema = { state: 'loading', err: '', catalog: null, listId: spec.listId };
         lists.ready().then(function () { return lists.getListSchema(spec); }).then(function (res) {
-          self.schema = { state: 'ready', err: '', catalog: buildCatalog(res) };
+          if (gen !== timers.schemaGen) return;
+          var cat = buildCatalog(res);
           if (then) then(res);
+          self.schema = { state: 'ready', err: '', catalog: cat, listId: res.list.id };
           self.recheck();
         }).catch(function (e) {
-          self.schema = { state: 'error', err: (e && e.message) || String(e), catalog: null };
+          if (gen !== timers.schemaGen) return;
+          var msg = (e && e.message) || String(e);
+          if (onFail) { onFail(msg); return; }
+          self.schema = { state: 'error', err: msg, catalog: null, listId: spec.listId };
           self.recheck();
         });
       },
@@ -1123,7 +1235,16 @@
       setDisplay: function (d) {
         var f = this.curField();
         if (!f) return;
-        if (d === 'input') delete f.display; else { f.display = d; this.v().integer = true; }
+        f.$builder = f.$builder || { kind: kindOf(f) };
+        if (d === 'input') {
+          delete f.display;
+          // the whole-number rule the dropdown/slider imposed goes with them;
+          // one the author chose stays (Codex xo 10)
+          if (f.$builder.intFromDisplay) { delete this.v().integer; delete f.$builder.intFromDisplay; }
+        } else {
+          if (!this.v().integer) { this.v().integer = true; f.$builder.intFromDisplay = true; }
+          f.display = d;
+        }
       },
       numberBounded: function () {
         var v = (this.curField() && this.curField().validation) || {};
@@ -1182,7 +1303,10 @@
       },
 
       /* ---- download (B7) ---- */
+      // both entry points re-check the document as it is right now — the
+      // button's state can lag an edit by the 300 ms debounce (Codex xo 10)
       openDownload: function () {
+        this.flush();
         if (this.nErr) { this.showIssues = true; return; }
         this.dl.open = true;
         this.dl.done = false;
@@ -1197,6 +1321,8 @@
         return (NS.engineBase || '') + 'bsp-forms.js' + (NS.assetVersion ? '?v=' + NS.assetVersion : '');
       },
       doDownload: function (what) {
+        this.flush();
+        if (this.nErr) { this.dl.open = false; this.showIssues = true; return; }
         var slug = slugify(this.dl.slug);
         this.dl.slug = slug;
         if (what !== 'stub') {
