@@ -295,7 +295,12 @@
         break;
       case 'url':
         if (t === 'URL') { f.type = 'link'; if (f.validation) delete f.validation.url; }
-        else { f.type = 'text'; f.validation.url = true; delete f.withDescription; }
+        else {
+          f.type = 'text'; f.validation.url = true; delete f.withDescription;
+          // a Text column's limit, like the text control (found by the suite:
+          // the URL card has no max-length box, so the error was unfixable)
+          if (fd.MaxLength && (!f.validation.maxLength || f.validation.maxLength > fd.MaxLength)) f.validation.maxLength = fd.MaxLength;
+        }
         break;
     }
     if (fd.Required) f.required = true;
@@ -554,6 +559,7 @@
     // the engine's own load check (E9a) — exactly what a page would reject
     var eng = window.BSPForms && window.BSPForms.normalize ? window.BSPForms.normalize(serialize(doc)).errors : [];
     eng.forEach(function (e) {
+      if (!hasList && /^target\.listTitle, target\.listUrl or target\.listId is required/.test(e)) return; // said above
       var m = /field "([^"]+)"/.exec(e);
       add('error', 'engine', e, m ? { t: 'field', id: m[1] } : null);
     });
@@ -634,6 +640,7 @@
      shape (no Alpine.data()). Selection is by id; the document is
      replaced wholesale on undo/redo/restore.
      ------------------------------------------------------------------ */
+  var BLANK_FIELD = { id: '', type: 'heading', $builder: { kind: 'locked' } };
   window.bspFormsBuilder = function () {
     var hist = { past: [], future: [], last: null };
     var timers = { change: null };
@@ -672,6 +679,7 @@
             if (hist.past.length > 50) hist.past.shift();
             hist.future = [];
             hist.last = snap;
+            self.nPast = hist.past.length; self.nFuture = 0;
             writeDraft(JSON.parse(snap));
           }
           self.recheck();
@@ -682,8 +690,11 @@
         this.nErr = this.issues.filter(function (i) { return i.level === 'error'; }).length;
         this.nWarn = this.issues.length - this.nErr;
       },
-      canUndo: function () { return hist.past.length > 0; },
-      canRedo: function () { return hist.future.length > 0; },
+      // hist lives in the closure (not reactive), so the buttons read these
+      // mirrors (found by the builder suite: they never enabled)
+      nPast: 0, nFuture: 0,
+      canUndo: function () { return this.nPast > 0; },
+      canRedo: function () { return this.nFuture > 0; },
       undo: function () { this.travel(hist.past, hist.future); },
       redo: function () { this.travel(hist.future, hist.past); },
       travel: function (from, to) {
@@ -693,6 +704,7 @@
         if (!from.length) return;
         to.push(hist.last);
         hist.last = from.pop();
+        this.nPast = hist.past.length; this.nFuture = hist.future.length;
         this.doc = JSON.parse(hist.last);
         writeDraft(this.doc);
         if (!this.findSel()) this.select('form');
@@ -758,9 +770,16 @@
         return null;
       },
       findSel: function () { return this.sel.t === 'form' ? true : this.loc(this.sel.t, this.sel.id); },
-      get cur() { var l = this.sel.t === 'field' && this.loc('field', this.sel.id); return l ? l.f : null; },
-      get curPage() { var l = this.sel.t === 'page' && this.loc('page', this.sel.id); return l ? l.pg : null; },
-      get curSection() { var l = this.sel.t === 'section' && this.loc('section', this.sel.id); return l ? l.sec : null; },
+      // the selected control, or null. Methods use curField(); bindings use
+      // `cur`, which is a blank stand-in instead of null — a doc change can
+      // re-run the field pane's inner bindings in the same flush that clears
+      // the selection, before the pane's x-if tears it down (found by the
+      // builder suite: dragging a page while a mapped control was selected)
+      curField: function () { var l = this.sel.t === 'field' && this.loc('field', this.sel.id); return l ? l.f : null; },
+      get cur() { return this.curField() || BLANK_FIELD; },
+      // blank stand-ins for the same reason as `cur`
+      get curPage() { var l = this.sel.t === 'page' && this.loc('page', this.sel.id); return l ? l.pg : { sections: [] }; },
+      get curSection() { var l = this.sel.t === 'section' && this.loc('section', this.sel.id); return l ? l.sec : { fields: [] }; },
       kindOf: function (f) { return kindOf(f); },
       kindLabel: function (f) { return KINDS[kindOf(f)].label; },
       kindIcon: function (f) { return KINDS[kindOf(f)].icon; },
@@ -791,7 +810,7 @@
       addPage: function () {
         var ids = allIds(this.doc);
         var n = this.doc.pages.length + 1;
-        var pid = uniqueId('page' + n, ids.page), sid = uniqueId('section' + Object.keys(ids.section).length + 1, ids.section);
+        var pid = uniqueId('page' + n, ids.page), sid = uniqueId('section' + (Object.keys(ids.section).length + 1), ids.section);
         this.doc.pages.push({ id: pid, title: 'Page ' + n, sections: [{ id: sid, title: '', fields: [] }] });
         this.select('page', pid);
       },
@@ -930,7 +949,7 @@
 
       /* ---- ids + labels ---- */
       labelInput: function () {
-        var f = this.cur;
+        var f = this.curField();
         if (!f || !(f.$builder && f.$builder.autoId)) return;
         var taken = allIds(this.doc).field;
         delete taken[f.id];
@@ -938,7 +957,7 @@
         if (next !== f.id) { renameRefs(this.doc, f.id, next); f.id = next; this.sel.id = next; this.idDraft = next; }
       },
       commitId: function () {
-        var f = this.cur, v = String(this.idDraft || '').trim();
+        var f = this.curField(), v = String(this.idDraft || '').trim();
         if (!f || v === f.id) { this.idErr = ''; return; }
         if (!ID_RE.test(v)) { this.idErr = 'Letters, digits and _ only, starting with a letter.'; return; }
         if (allIds(this.doc).field[v]) { this.idErr = 'Another control already has that id.'; return; }
@@ -949,7 +968,7 @@
         this.sel.id = v;
         this.idErr = '';
       },
-      refsHere: function () { var f = this.cur; return f ? refsTo(this.doc, f.id) : []; },
+      refsHere: function () { var f = this.curField(); return f ? refsTo(this.doc, f.id) : []; },
 
       /* ---- list + schema (B3) ---- */
       openPicker: function () {
@@ -1056,11 +1075,11 @@
         });
       },
       curCol: function () {
-        var f = this.cur;
+        var f = this.curField();
         return f && f.column && this.schema.catalog ? this.schema.catalog.byName[f.column] || null : null;
       },
       setColumn: function (name) {
-        var f = this.cur;
+        var f = this.curField();
         if (!f) return;
         if (!name) { unmap(f); return; }
         var col = this.schema.catalog && this.schema.catalog.byName[name];
@@ -1069,12 +1088,12 @@
         applyColumn(f, col, kindOf(f));
       },
       setLogicOnly: function (on) {
-        var f = this.cur;
+        var f = this.curField();
         if (!f) return;
         f.$builder = f.$builder || { kind: kindOf(f) };
         if (on) { unmap(f); f.$builder.logicOnly = true; } else delete f.$builder.logicOnly;
       },
-      isLogicOnly: function () { var f = this.cur; return !!(f && f.$builder && f.$builder.logicOnly); },
+      isLogicOnly: function () { var f = this.curField(); return !!(f && f.$builder && f.$builder.logicOnly); },
       colRequired: function () { var c = this.curCol(); return !!(c && c.fd.Required); },
       colDateOnly: function () { var c = this.curCol(); return !!(c && c.type === 'DateTime' && c.fd.DisplayFormat === 0); },
       colIs: function (types) { var c = this.curCol(); return !!(c && types.split(',').indexOf(c.type) > -1); },
@@ -1082,13 +1101,13 @@
 
       /* ---- type-specific setters ---- */
       validateAs: function () {
-        var f = this.cur;
+        var f = this.curField();
         if (!f) return '';
         if (f.type === 'email' || f.type === 'phone') return f.type;
         return f.validation && f.validation.url ? 'url' : '';
       },
       setValidateAs: function (v) {
-        var f = this.cur;
+        var f = this.curField();
         if (!f) return;
         f.validation = f.validation || {};
         delete f.validation.url;
@@ -1100,29 +1119,29 @@
         if (raw === '' || raw == null) delete obj[key];
         else if (!isNaN(Number(raw))) obj[key] = Number(raw);
       },
-      v: function () { var f = this.cur; if (f && !f.validation) f.validation = {}; return f ? f.validation : {}; },
+      v: function () { var f = this.curField(); if (f && !f.validation) f.validation = {}; return f ? f.validation : {}; },
       setDisplay: function (d) {
-        var f = this.cur;
+        var f = this.curField();
         if (!f) return;
         if (d === 'input') delete f.display; else { f.display = d; this.v().integer = true; }
       },
       numberBounded: function () {
-        var v = (this.cur && this.cur.validation) || {};
+        var v = (this.curField() && this.curField().validation) || {};
         return typeof v.min === 'number' && typeof v.max === 'number' && v.min % 1 === 0 && v.max % 1 === 0 && v.max > v.min;
       },
       setWords: function (on) {
-        var f = this.cur;
+        var f = this.curField();
         if (!f) return;
         if (on) f.values = f.values || { on: 'Yes', off: 'No' }; else delete f.values;
       },
-      setMe: function (on) { var f = this.cur; if (!f) return; if (on) f.default = '@me'; else delete f.default; },
-      setOpt: function (key, on) { var f = this.cur; if (!f) return; if (on) f[key] = true; else delete f[key]; },
+      setMe: function (on) { var f = this.curField(); if (!f) return; if (on) f.default = '@me'; else delete f.default; },
+      setOpt: function (key, on) { var f = this.curField(); if (!f) return; if (on) f[key] = true; else delete f[key]; },
 
       /* ---- choices editor ---- */
       choiceRows: function () {
         // a Choice/MultiChoice column: every column choice, included ones
         // first in the control's order; otherwise the control's own list
-        var f = this.cur, col = this.curCol();
+        var f = this.curField(), col = this.curCol();
         if (!f) return [];
         normChoicesQuiet(f);
         if (!col || (col.type !== 'Choice' && col.type !== 'MultiChoice')) {
@@ -1136,23 +1155,23 @@
       },
       choiceFixed: function () { var c = this.curCol(); return !!(c && (c.type === 'Choice' || c.type === 'MultiChoice')); },
       toggleChoice: function (row) {
-        var f = this.cur;
+        var f = this.curField();
         if (row.on) { if (f.choices.length > 1) f.choices.splice(row.i, 1); else this.note = 'Keep at least one choice.'; }
         else f.choices.push({ value: row.c.value, color: COLORS[f.choices.length % COLORS.length] });
         if (f.default != null && !f.choices.some(function (c) { return c.value === f.default; })) delete f.default;
       },
       moveChoice: function (i, dir) {
-        var a = this.cur.choices, j = i + dir;
+        var a = this.curField().choices, j = i + dir;
         if (j < 0 || j >= a.length) return;
         a.splice(j, 0, a.splice(i, 1)[0]);
       },
       addChoice: function () {
-        var a = this.cur.choices, n = a.length + 1, v = 'Option ' + n;
+        var a = this.curField().choices, n = a.length + 1, v = 'Option ' + n;
         while (a.some(function (c) { return c.value === v; })) v = 'Option ' + ++n;
         a.push({ value: v, color: COLORS[a.length % COLORS.length] });
       },
       dropChoice: function (i) {
-        var a = this.cur.choices;
+        var a = this.curField().choices;
         if (a.length < 2) { this.note = 'Keep at least one choice.'; return; }
         a.splice(i, 1);
       },
@@ -1393,7 +1412,7 @@
       '<div class="msgbar__body">This control uses features the builder doesn’t edit (type “<span x-text="cur.type"></span>”). It’s kept exactly as it is — move or delete it here, edit it in the JSON.</div></div></template>';
 
     // basics
-    h += '<template x-if="kindOf(cur)!==\'locked\'"><div>';
+    h += '<template x-if="kindOf(cur)!==\'locked\'"><div class="bfb-props__stack">';
     h += '<template x-if="isValue(cur)">' + card('Basics', 'edit',
       fieldRow('Label', '<input class="input" type="text" x-model="cur.label" @input="labelInput()">') +
       fieldRow('Description', '<textarea class="textarea" rows="2" x-model="cur.hint"></textarea>', 'Help text under the control. [text](url) makes a link.') +
@@ -1557,9 +1576,9 @@
     h += '<div class="msgbar msgbar--warning bfb-note" x-show="note" x-cloak role="status">' + icon('warning', 20).replace('class="icon', 'class="msgbar__icon icon') +
       '<div class="msgbar__body" x-text="note"></div><button type="button" class="icon-btn" aria-label="Dismiss" @click="note=\'\'">' + icon('dismiss') + '</button></div>';
     h += '<template x-if="sel.t===\'form\'"><div class="bfb-props__in">' + renderFormProps() + '</div></template>';
-    h += '<template x-if="sel.t===\'page\' && curPage"><div class="bfb-props__in">' + renderPageProps() + '</div></template>';
-    h += '<template x-if="sel.t===\'section\' && curSection"><div class="bfb-props__in">' + renderSectionProps() + '</div></template>';
-    h += '<template x-if="sel.t===\'field\' && cur"><div class="bfb-props__in">' + renderFieldProps() + '</div></template>';
+    h += '<template x-if="sel.t===\'page\' && loc(\'page\', sel.id)"><div class="bfb-props__in">' + renderPageProps() + '</div></template>';
+    h += '<template x-if="sel.t===\'section\' && loc(\'section\', sel.id)"><div class="bfb-props__in">' + renderSectionProps() + '</div></template>';
+    h += '<template x-if="sel.t===\'field\' && curField()"><div class="bfb-props__in">' + renderFieldProps() + '</div></template>';
     h += '</main></div>';
 
     // list picker dialog

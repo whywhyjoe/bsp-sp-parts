@@ -111,7 +111,7 @@
 }
 .bfb-outline__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-120); }
 .bfb-props { min-height: 0; overflow: auto; padding: var(--space-200) var(--space-240); }
-.bfb-props__in, .bfb-props__in > div { max-width: 760px; display: flex; flex-direction: column; gap: var(--space-160); }
+.bfb-props__in, .bfb-props__stack { max-width: 760px; display: flex; flex-direction: column; gap: var(--space-160); }
 .bfb-props__head { display: flex; align-items: center; gap: var(--space-120); margin-bottom: var(--space-40); }
 .bfb-props__title { margin: 0; font: var(--type-title3); overflow-wrap: anywhere; }
 @container bfb (max-width: 860px) {
@@ -319,6 +319,7 @@
 .bfb-dialog { z-index: 1100; }
 .bfb-dialog .dialog { width: min(620px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; }
 .bfb-dialog .dialog__body { overflow: auto; display: flex; flex-direction: column; gap: var(--space-120); }
+.bfb-dialog .dialog__head { flex-direction: column; align-items: flex-start; gap: var(--space-40); }
 .bfb-pick__site { display: flex; align-items: flex-end; gap: var(--space-80); }
 .bfb-pick__site .field { flex: 1; margin: 0; }
 .bfb-lists { display: flex; flex-direction: column; gap: var(--space-40); }
