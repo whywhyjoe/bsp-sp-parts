@@ -454,10 +454,16 @@
      Checks (B7). Two sources, labelled: "schema" (will a save succeed and
      store what the form shows?) and "engine" (will the page load it?).
      ------------------------------------------------------------------ */
-  var ALWAYS_TOKENS = /\{(form:title|date|time|now|user:name|user:email)\}/;
-  function templateAlwaysFilled(t) {
+  // content the configuration itself guarantees: literal text, the submit's
+  // date/time, and the form title when the form has one. {user:*} and
+  // {field:*} can render empty (no user info, an empty answer), and the
+  // engine then leaves the write out (Codex xo 11).
+  var ALWAYS_TOKENS = /\{(date|time|now)\}/;
+  function templateAlwaysFilled(t, doc) {
     if (typeof t !== 'string' || !t.trim()) return false;
     if (ALWAYS_TOKENS.test(t)) return true;
+    var title = doc && doc.form && typeof doc.form.title === 'string' ? doc.form.title.trim() : '';
+    if (title && /\{form:title\}/.test(t)) return true;
     return /\S/.test(t.replace(/\{[^}]*\}/g, ''));
   }
   function endIndex(doc) {
@@ -567,12 +573,12 @@
         if (m.some(function (x) { return x.uncond && x.f.required; })) return;
         // a template counts only if it can't come out empty (an empty result
         // is left out of the save — Codex xo 10)
-        if (t.set && templateAlwaysFilled(t.set[col.name])) return;
-        if (col.name === 'Title' && !m.length && templateAlwaysFilled(t.titleTemplate)) return;
+        if (t.set && templateAlwaysFilled(t.set[col.name], doc)) return;
+        if (col.name === 'Title' && !m.length && templateAlwaysFilled(t.titleTemplate, doc)) return;
         var dv = col.fd.DefaultValue;
         if (dv != null && dv !== '' && m.every(function (x) { return x.f.required; })) return; // left out -> default applies
         if (col.name === 'Title' && !m.length) {
-          add('error', 'schema', 'The list requires a Title. Map a required control to it, or set a title template with fixed text or a token like {form:title}.');
+          add('error', 'schema', 'The list requires a Title. Map a required control to it, or set an item title with fixed text, {date}, or {form:title} (once the form has a title) — {user:…} and {field:…} can come out empty.');
         } else if (m.length) {
           add('error', 'schema', 'The list requires “' + col.title + '”, but not every path through the form fills it in — the control that saves it must always show.', { t: 'field', id: m[0].f.id });
         } else {
@@ -653,7 +659,11 @@
   }
   function orderDoc(d) {
     if (d.form) { d.form = ordered(d.form, ORDERS.form); if (d.form.appearance) d.form.appearance = ordered(d.form.appearance, ORDERS.appearance); }
-    if (d.target) d.target = ordered(d.target, ORDERS.target);
+    if (d.target) {
+      d.target = ordered(d.target, ORDERS.target);
+      // a column → template map: alphabetical, so insertion order can't show
+      if (d.target.set && typeof d.target.set === 'object') d.target.set = ordered(d.target.set, Object.keys(d.target.set).sort());
+    }
     if (d.confirmation) d.confirmation = ordered(d.confirmation, ORDERS.confirmation);
     d.pages = (d.pages || []).map(function (pg) {
       pg = ordered(pg, ORDERS.page);
@@ -792,8 +802,12 @@
         writeDraft(this.doc);
         if (!this.findSel()) this.select('form');
         this.syncIdDraft();
-        // undo can cross a list switch: the columns must be that list's
-        this.ensureSchema();
+        // undo can cross a list switch: the columns must be that list's. A
+        // read still in flight (a staged switch) was started for another
+        // version of the doc — cancel it so its callback can't unmap the
+        // restored one (Codex xo 11), and read this version's list afresh
+        if (this.schema.state === 'loading') { timers.schemaGen++; this.ensureSchema(true); }
+        else this.ensureSchema();
         var self = this;
         this.$nextTick(function () { self.recheck(); });
       },
@@ -1151,7 +1165,7 @@
       hasDefault: function (c) { return c.fd.DefaultValue != null && c.fd.DefaultValue !== ''; },
       reqUnmet: function (c) {
         if (!c.fd.Required || this.hasDefault(c)) return false;
-        return !(c.name === 'Title' && templateAlwaysFilled(this.doc.target && this.doc.target.titleTemplate));
+        return !(c.name === 'Title' && templateAlwaysFilled(this.doc.target && this.doc.target.titleTemplate, this.doc));
       },
       colFree: function (c) {
         if (!c.fd.Required) return 'not mapped';

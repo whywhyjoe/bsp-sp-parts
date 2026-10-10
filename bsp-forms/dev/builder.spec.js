@@ -282,8 +282,11 @@ async function testBootAndCatalog(browser) {
     const r = [...document.querySelectorAll('.bfb-col')].find(x => x.querySelector('.bfb-col__title').textContent === 'Title');
     return /item title fills it/.test(r.querySelector('.bfb-col__state').textContent);
   }));
-  const tf = await page.evaluate(() => ['{field:a}', '{form:title}', 'Req {field:a}', '{date}', '  ', '{field:a}{field:b}', '{now}'].map(BSPFormsBuilder.core.templateAlwaysFilled));
-  check('templateAlwaysFilled: field-only tokens / blank → false; literal text or always tokens → true', same(tf, [false, true, true, true, false, false, true]), tf);
+  // xo 11: {form:title} counts only with a form title; {user:*} never does
+  const tf = await page.evaluate(() => ['{field:a}', '{form:title}', 'Req {field:a}', '{date}', '  ', '{field:a}{field:b}', '{now}', '{user:name}']
+    .map(t => BSPFormsBuilder.core.templateAlwaysFilled(t, { form: { title: 'A form' } })));
+  check('templateAlwaysFilled: field/user-only tokens / blank → false; literal text, {date}/{now}, titled {form:title} → true', same(tf, [false, true, true, true, false, false, true, false]), tf);
+  check('templateAlwaysFilled: {form:title} with no form title → false', await page.evaluate(() => BSPFormsBuilder.core.templateAlwaysFilled('{form:title}', { form: { title: '' } })) === false);
   await propInput(page, 'Item title').fill('');
   await settle(page);
   // mapping Title instead
@@ -667,7 +670,7 @@ async function testChecks(browser) {
   check('…an unconditional copy on page 1 satisfies it (no error)', !has(iss, PATH), issueLine(iss));
   iss = await runDoc(page, craft(base, [], d => {
     d.pages[0].sections[0].fields = [];
-    d.target.set = { TxtReq: '{user:name}' };
+    d.target.set = { TxtReq: 'Fixed {user:name}' };
   }));
   check('…target.set satisfies a required column', !has(iss, /requires “TxtReq”/), issueLine(iss));
   // attachments
@@ -1349,6 +1352,25 @@ async function testReviewFixes(browser) {
   check('…schema is B\'s (A\'s late reply dropped)', o.sl === LIST_C && o.st === 'ready', o);
   await ctx.close();
 
+  // xo 11: an undo during a staged switch must not have the switch's late
+  // callback unmap the restored document
+  ({ ctx, page } = await openBuilder(browser));
+  await schemaControl(page);
+  await pickList(page, 'BSPF Builder Test');
+  const m11 = await addControl(page, 'section1', 'Single line text');
+  await mapCol(page, m11, 'TxtShort');
+  await settle(page);                                   // S1: list A, mapped
+  await pickList(page, 'IT Requests', { confirm: true });
+  await settle(page);                                   // S2: list B, unmapped
+  await page.evaluate(id => { window.__schemaCtl.delay[id] = 1500; }, LIST_A);
+  await ev(page, (s, a) => { s.chooseList(s.pick.lists.find(l => l.id === a) || { id: a, title: 'BSPF Builder Test' }); }, LIST_A); // staged switch back to A, in flight
+  await page.waitForTimeout(100);
+  await ev(page, s => s.undo());                        // back to S1 (A, mapped) before A's reply
+  await page.waitForTimeout(2200);
+  o = await ev(page, (s, id) => ({ col: (s.loc('field', id) || {}).f && s.loc('field', id).f.column, list: s.currentListId(), sl: s.schema.listId, st: s.schema.state }), m11);
+  check('undo during a staged switch → the restored mapping survives the switch\'s late reply', o.col === 'TxtShort' && o.list === LIST_A && o.sl === LIST_A && o.st === 'ready', o);
+  await ctx.close();
+
   console.log('xo 10 · 4. a failed list switch changes nothing:');
   ({ ctx, page } = await openBuilder(browser));
   await schemaControl(page);
@@ -1536,10 +1558,22 @@ async function testReviewFixes(browser) {
   console.log('xo 10 · 8. target.set templates:');
   const base8 = await docOf(page);
   const opt = { id: 'optional', type: 'text', label: 'Opt', column: 'TxtShort', validation: { maxLength: 50 }, $builder: { kind: 'text' } };
-  for (const [tpl, ok] of [['{field:optional}', false], ['', false], ['Fixed', true], ['{user:name}', true], ['{field:optional} by {user:email}', true]]) {
-    iss = await runDoc(page, craft(base8, [opt], d => { d.pages[0].sections[0].fields.shift(); d.target.set = { TxtReq: tpl }; }));
-    check('target.set.TxtReq = "' + tpl + '" → ' + (ok ? 'satisfies the required column' : 'error remains'), has(iss, /requires “TxtReq”/, 'error') === !ok, issueLine(iss));
+  // xo 11: {user:*} can render empty (no user info) → not guaranteed;
+  // {form:title} only when the form has a title; {date}/{time}/{now} always
+  for (const [tpl, ok, title] of [['{field:optional}', false], ['', false], ['Fixed', true], ['{user:name}', false],
+    ['{user:email}', false], ['{field:optional} by {user:email}', true], ['{date}', true],
+    ['{form:title}', true, 'A form'], ['{form:title}', false, '']]) {
+    iss = await runDoc(page, craft(base8, [opt], d => {
+      d.pages[0].sections[0].fields.shift(); d.target.set = { TxtReq: tpl };
+      if (title !== undefined) d.form.title = title;
+    }));
+    check('target.set.TxtReq = "' + tpl + '"' + (title !== undefined ? ' (form title "' + title + '")' : '') + ' → ' + (ok ? 'satisfies the required column' : 'error remains'),
+      has(iss, /requires “TxtReq”/, 'error') === !ok, issueLine(iss));
   }
+  // xo 11: target.set's key order can't depend on insertion order
+  const ordA = await ev(page, (s, d) => JSON.stringify(BSPFormsBuilder.core.serialize(Object.assign(JSON.parse(d), { target: { set: { B: 'b', A: 'a' } } })).target.set), JSON.stringify(base8));
+  const ordB = await ev(page, (s, d) => JSON.stringify(BSPFormsBuilder.core.serialize(Object.assign(JSON.parse(d), { target: { set: { A: 'a', B: 'b' } } })).target.set), JSON.stringify(base8));
+  check('target.set keys serialize alphabetically (insertion order doesn’t show)', ordA === ordB && ordA === '{"A":"a","B":"b"}', ordA + ' vs ' + ordB);
   await ctx.close();
 
   console.log('xo 10 · 9. a control referenced twice in one rule:');

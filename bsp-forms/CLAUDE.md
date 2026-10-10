@@ -238,6 +238,24 @@ contract. Read both before changing behavior.
 - **A date+time picker's `min` is the business day's first instant in the
   viewer's zone** (`bizDayStartMs`), not `T00:00` — Monday in Toronto starts
   Sunday 21:00 in Los Angeles.
+- **Builder: state the UI reads must be reactive.** Undo history lives in a
+  closure, so the buttons read mirrored counts (`nPast`/`nFuture`) — reading
+  the closure directly left them disabled forever.
+- **Builder: bindings can run after the selection is gone.** A doc change
+  re-runs the field pane's inner bindings in the same flush that clears the
+  selection, before its `x-if` tears it down. Methods use `curField()`
+  (null-checked); bindings use `cur`/`curPage`/`curSection`, which return
+  blank stand-ins, never null. The panes' own `x-if`s test the real lookup.
+- **Builder: never trust a check result older than the document.** Checks
+  run 300 ms after an edit; `openDownload`/`doDownload` call `flush()` and
+  re-check first. A catalog counts only for the list it was read for
+  (`schema.listId`), replies carry a generation (stale ones are dropped), a
+  list switch is staged until its read succeeds, and undo cancels an
+  in-flight switch. Each of these was a real bug (Codex xo 10/11).
+- **Builder: "always filled" means guaranteed by the config** — literal
+  text, `{date}`/`{time}`/`{now}`, `{form:title}` only with a title.
+  `{user:*}`/`{field:*}` can render empty, and the engine then leaves the
+  write out (REST doesn't enforce Required).
 - **`BSPForms.lists()` is read-only by construction** — a facade exposing
   four methods over `makeAdapter({ target: {} })`. The builder must never get
   the full adapter (it has `addItem`, `ensureUser`).

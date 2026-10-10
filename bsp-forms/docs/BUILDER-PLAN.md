@@ -708,3 +708,36 @@ the same prune, and driver watchers keep typed defaults while reacting to a
 reset. Regression check added (smoke 320/320). No new issues found. Cost
 0.32M input / 4.3K output. This was the second and last review round for
 Phase 1.
+
+**Phase 2 (builder core), 2026-10-10.** The builder suite (Opus subagent)
+first found 4 bugs: undo/redo buttons never enabled, an unfixable max-length
+error for URL→Text, a null-selection error during a page drag, and a
+`section21` id. All were fixed.
+
+**xo turn 10 — Codex, Phase 2 code (2a50087).** 10 findings, all accepted and
+fixed in c48701c:
+- High:
+  - downloads could outrun the debounced checks;
+  - a loading schema read as ready;
+  - the catalog could belong to another list (undo, out-of-order replies);
+  - choice values and yes/no words weren't length-checked on Text columns
+    (the engine now enforces `validation.maxLength` on choice "Other");
+  - a number remap could leave an impossible range;
+  - a `target.set` template that could render empty counted for a required
+    column.
+- Medium: a currency control kept a display-imposed integer rule; a failed
+  list switch wiped the mappings; duplicate "Used by" keys.
+- Low: nested key order.
+
+63 regression checks added. Cost 1.69M / 14.7K.
+
+**xo turn 11 — Codex re-review.** 7 of 10 resolved, 3 partial, all fixed
+after it:
+- an undo during an in-flight staged switch could be unmapped by its late
+  reply (`travel` now cancels it);
+- `{user:*}` and title-less `{form:title}` no longer count as "always
+  filled";
+- `target.set` keys serialize alphabetically.
+
+Regression checks fail on the pre-fix build. Builder suite 380/380. Cost
+0.49M / 6.2K. This was the second and last review round for Phase 2.
