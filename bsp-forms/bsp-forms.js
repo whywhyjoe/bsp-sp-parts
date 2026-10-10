@@ -911,7 +911,9 @@
         }).then(function (res) {
           var l = res[0] || {};
           return {
-            list: { id: l.Id, title: l.Title, url: l.RootFolder && l.RootFolder.ServerRelativeUrl,
+            // webUrl: the web the list was read from (absolute) — the
+            // builder writes it as target.siteUrl
+            list: { id: l.Id, title: l.Title, url: l.RootFolder && l.RootFolder.ServerRelativeUrl, webUrl: url || targetWeb,
               enableAttachments: !!l.EnableAttachments, validationFormula: l.ValidationFormula || '' },
             fields: (res[1] || []).map(schemaField)
           };
@@ -3694,6 +3696,20 @@
   NS.compat = JSON.parse(JSON.stringify(TYPE_COMPAT));
   // the engine script's ?v= (for generated web part stubs)
   NS.assetVersion = engineVer;
+  // where the engine and the design system live (absolute URLs, with "/"),
+  // and the engine script's own URL — the builder derives the stub from them
+  NS.engineBase = engineBase;
+  NS.designBase = designBase;
+  NS.engineSrc = engineSrc;
+  NS.inEditMode = function () { return inEditMode(); };
+  // the UI a builder page needs, loaded the engine's way (deduped, CSP
+  // nonce, canonical-URL CSS): design-system CSS + bsp-forms.css, any extra
+  // stylesheets, the icon sprite, Alpine
+  NS.loadUi = function (extraCss) {
+    ensureStyles();
+    (extraCss || []).forEach(function (href, i) { ensureCss(href, 'ui' + i); });
+    return Promise.all([ensureSprite(), whenAlpine()]);
+  };
 
   NS.validate = function (mountEl) {
     var uid = mountEl && mountEl.querySelector('[data-bspf-uid]') && mountEl.querySelector('[data-bspf-uid]').getAttribute('data-bspf-uid');

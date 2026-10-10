@@ -197,7 +197,7 @@
         : l.title === 'IT Requests' ? LIST_FIELDS.map(function (f) { return sf(f.InternalName, f.TypeAsString, { Required: f.Required, RichText: f.RichText }); })
           : [sf('Title', 'Text', { Required: true, FromBaseType: true, MaxLength: 255 }), sf('Notes', 'Note', { RichText: false })];
       return delay({
-        list: { id: l.id, title: l.title, url: l.url, enableAttachments: l.enableAttachments, validationFormula: '' },
+        list: { id: l.id, title: l.title, url: l.url, webUrl: 'https://mock.local/sites/FCUPortal', enableAttachments: l.enableAttachments, validationFormula: '' },
         fields: JSON.parse(JSON.stringify(fields))
       }, 250);
     },

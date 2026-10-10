@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BSP Forms builder · dev harness</title>
+  <!-- =================================================================
+    Local dev harness for the form builder — mock SharePoint (three lists,
+    one of them the dev list "BSPF Builder Test" column for column), the
+    vendored Alpine, BSP CSS from the sibling bsp-design-system clone.
+
+    Serve the folder that contains BOTH clones over HTTP:
+        cd <folder containing bsp-sp-parts/ and bsp-design-system/>
+        python -m http.server 8000
+        → http://localhost:8000/bsp-sp-parts/bsp-forms/builder/dev/builder.dev.html
+
+    ?fresh clears the saved draft first (tests use it).
+  ================================================================== -->
+  <style>
+    body { margin: 0; background: #f5f6f7; }
+    .harness-bar { padding: 10px 24px; background: #001928; color: #fff; font: 600 13px/1.4 "Segoe UI", sans-serif; }
+    .harness-bar small { font-weight: 400; opacity: .7; }
+    .harness-canvas { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
+  </style>
+</head>
+<body>
+  <div class="harness-bar">BSP Forms builder · dev harness <small>— mock SharePoint, vendored Alpine</small></div>
+  <div class="harness-canvas">
+    <script>
+      if (/[?&]fresh\b/.test(location.search)) { try { localStorage.removeItem('bspf-builder-draft:' + location.pathname); } catch (e) {} }
+    </script>
+    <script src="../../dev/mock-sp.js"></script>
+    <script>
+      window.BSP_FORMS_SETTINGS = {
+        designBase: '../../../../bsp-design-system/',
+        alpineUrl: '../../dev/vendor/alpine.js',
+        mockSp: window.BSPF_MOCK_SP
+      };
+    </script>
+    <!-- ============ the builder's web part insert, dev-configured ============ -->
+    <div data-bspf-builder></div>
+    <script src="../../bsp-forms.js?v=0.6.0"></script>
+    <script src="../bsp-forms-builder.js"></script>
+  </div>
+</body>
+</html>

@@ -1,0 +1,20 @@
+<!-- =====================================================================
+  BSP Forms builder — web part snippet for the builder page
+  ---------------------------------------------------------------------
+  Put this in a custom-script web part (Modern Script Editor) on a page
+  of its own, e.g. SitePages/bsp-forms-builder.aspx, ideally in a
+  full-width section (the builder also has a Full screen button).
+
+  Bump BOTH ?v= stamps when either file is redeployed: the engine's is
+  the engine version (bsp-forms.js VERSION), the builder's is the
+  builder version (bsp-forms-builder.js VERSION). The engine must load
+  first and be 0.6.0 or later.
+
+  The builder only reads SharePoint (lists and their columns); it never
+  writes. It downloads the form JSON and a web part snippet for you to
+  upload and paste.
+  ===================================================================== -->
+
+<div data-bspf-builder></div>
+<script src="https://TENANT.sharepoint.com/sites/FCUPortal/Code/bsp-forms/bsp-forms.js?v=0.6.0"></script>
+<script src="https://TENANT.sharepoint.com/sites/FCUPortal/Code/bsp-forms/builder/bsp-forms-builder.js?v=0.1.0"></script>
