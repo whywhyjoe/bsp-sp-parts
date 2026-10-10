@@ -1171,6 +1171,12 @@
       },
       configUrl: function () { return pathOf(window.BSPForms.engineBase || '') + '/forms/' + slugify(this.dl.slug) + '.json'; },
       slugOrForm: function () { return slugify(this.dl.slug); },
+      // the engine's URL for the stub: its folder + bsp-forms.js + ?v= only
+      // (the page's script tag can carry extra cache params, e.g. pnp=…)
+      engineUrl: function () {
+        var NS = window.BSPForms;
+        return (NS.engineBase || '') + 'bsp-forms.js' + (NS.assetVersion ? '?v=' + NS.assetVersion : '');
+      },
       doDownload: function (what) {
         var slug = slugify(this.dl.slug);
         this.dl.slug = slug;
@@ -1180,7 +1186,7 @@
           downloadText(slug + '.json', JSON.stringify(serialize(this.doc), null, 2) + '\n', 'application/json');
         }
         if (what !== 'json') {
-          downloadText(slug + '.webpart.html', stubHtml(this.doc.form && this.doc.form.title, this.configUrl(), window.BSPForms.engineSrc || '', this.dl.validate), 'text/html');
+          downloadText(slug + '.webpart.html', stubHtml(this.doc.form && this.doc.form.title, this.configUrl(), this.engineUrl(), this.dl.validate), 'text/html');
         }
         this.dl.done = true;
       },

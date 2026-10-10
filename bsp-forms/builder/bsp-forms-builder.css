@@ -23,7 +23,7 @@
   border-radius: 0; min-height: 0;
 }
 .bfb-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.bfb-mono { font-family: var(--font-mono, Consolas, monospace); }
+.bfb .bfb-mono { font-family: var(--font-mono, Consolas, monospace); }
 .bfb-eyebrow {
   font: var(--type-caption1-strong); color: var(--fg-secondary);
   letter-spacing: .06em; text-transform: uppercase;
@@ -111,7 +111,7 @@
 }
 .bfb-outline__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-120); }
 .bfb-props { min-height: 0; overflow: auto; padding: var(--space-200) var(--space-240); }
-.bfb-props__in { max-width: 760px; display: flex; flex-direction: column; gap: var(--space-160); }
+.bfb-props__in, .bfb-props__in > div { max-width: 760px; display: flex; flex-direction: column; gap: var(--space-160); }
 .bfb-props__head { display: flex; align-items: center; gap: var(--space-120); margin-bottom: var(--space-40); }
 .bfb-props__title { margin: 0; font: var(--type-title3); overflow-wrap: anywhere; }
 @container bfb (max-width: 860px) {

@@ -24,6 +24,7 @@ Which rules bind which part is explicit, not inferred:
 | `sp-list-ordering` | Web part tool | **Required** |
 | `bilingual` | Page library | No |
 | `bsp-forms` | Page library | No — could optionally adopt it for its mount (host wait / edit mode / SPA re-mount would genuinely help); if that ever happens, its README says so |
+| `bsp-forms/builder` | Page library (part of `bsp-forms`) | No — its own idempotent boot and edit-mode note; needs the bsp-forms engine 0.6.0+ on the page. Contract: `bsp-forms/builder/README.md` |
 | `classic-referrer-redirects` | Page library | No |
 | `admin-script-runner` | Page library | **Adopted deliberately** — `dcsMountPart()` for host discovery, the edit-mode placeholder and SPA re-mount; no Alpine, no four-artifact pattern (its README says so) |
 | `bsp-notify` | Tenant service | No |

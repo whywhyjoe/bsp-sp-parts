@@ -871,7 +871,7 @@
       getListFields: function (spec) {
         return whenCtx().then(function () {
           return (spec ? listOf(spec) : list()).fields
-            .select('InternalName', 'Title', 'TypeAsString', 'Required', 'ReadOnlyField', 'Hidden', 'RichText')
+            .select('InternalName', 'Title', 'TypeAsString', 'Required', 'ReadOnlyField', 'Hidden', 'RichText', 'DefaultValue')
             .filter('Hidden eq false')
             .get();
         });
@@ -3594,7 +3594,11 @@
         var mapped = !!extra[fd.InternalName] || cfg._ordered.some(function (f) { return f.column === fd.InternalName; });
         var viaTemplate = fd.InternalName === 'Title' && cfg.target.titleTemplate;
         if (!mapped && !viaTemplate) {
-          rows.push({ field: '—', column: fd.InternalName, expected: '(required by the list)', actual: fd.TypeAsString, level: 'warn' });
+          // an omitted column gets its default — so a required one with a
+          // default is satisfied (verified live, B0)
+          var hasDef = fd.DefaultValue != null && fd.DefaultValue !== '';
+          rows.push({ field: '—', column: fd.InternalName, expected: '(required by the list)',
+            actual: fd.TypeAsString + (hasDef ? ' (its default “' + fd.DefaultValue + '” is saved)' : ''), level: hasDef ? 'ok' : 'warn' });
         }
       });
       // the assignments source list: readable, and has every column the rows use
