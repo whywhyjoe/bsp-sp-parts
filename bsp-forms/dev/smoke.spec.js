@@ -1064,7 +1064,13 @@ async function testNormalizeErrors(browser) {
     ['unknown date rule op', true, cfg => { itField(cfg, 'neededBy').rules.push({ op: 'onWeekday', mode: 'block' }); }, /date rule op must be one of/],
     ['minBusinessDays without form.businessHours', false, cfg => { delete cfg.form.businessHours; }, /minBusinessDays needs form\.businessHours/],
     ['attachments on a page with visibleWhen', true, cfg => { cfg.pages[2].visibleWhen = { field: 'category', op: 'notEmpty' }; }, /which has visibleWhen/],
-    ['default "@me" on a text field', true, cfg => { itField(cfg, 'costCentre').default = '@me'; }, /default "@me" is for person fields/]
+    ['default "@me" on a text field', true, cfg => { itField(cfg, 'costCentre').default = '@me'; }, /default "@me" is for person fields/],
+    ['choicesWhen map entry that is a string, not an array', true, cfg => { itField(cfg, 'accessLevel').choicesWhen.map.Hardware = 'Standard kit'; },
+      /choicesWhen\.map "Hardware" must be an array of choice values/],
+    ['choicesWhen map key not a declared driver value (driver has fillIn)', true, cfg => {
+      itField(cfg, 'category').fillIn = true;
+      itField(cfg, 'accessLevel').choicesWhen.map.Printer = ['Standard kit'];
+    }, /choicesWhen\.map key "Printer" is not a value of "category"/]
   ];
   const probe = await browser.newPage();
   await probe.goto(BASE);
@@ -1508,6 +1514,133 @@ async function testConfirmationRedirect(browser) {
   await ctx.close();
 }
 
+/* Regressions for the Codex review of 0.6.0 (six fixes). */
+const SLOW_READY = () => {
+  // the mock's ready() resolves after 3 s, so an @me fill is still pending
+  let v;
+  Object.defineProperty(window, 'BSPF_MOCK_SP', {
+    configurable: true,
+    get() { return v; },
+    set(x) { x.ready = () => new Promise(r => setTimeout(r, 3000)); v = x; }
+  });
+};
+const bilingual = cfg => { cfg.form.languages = ['en', 'fr']; };
+async function testReviewFixes(browser) {
+  console.log('0.6.0 review fixes:');
+  const itF = (cfg, id) => { let hit; cfg.pages.forEach(p => p.sections.forEach(s => s.fields.forEach(f => { if (f.id === id) hit = f; }))); return hit; };
+
+  // 1. a default the driver doesn't allow is pruned at init (and never saved)
+  let { ctx, page } = await openForm(browser, {
+    it: true, now: TUE_10AM_ET,
+    mutate: cfg => { itF(cfg, 'category').default = 'Hardware'; itF(cfg, 'accessLevel').default = 'Single user'; }
+  });
+  let s = await state(page);
+  check('init: a disallowed default (Single user under Hardware) is pruned', s.values.category === 'Hardware' && s.values.accessLevel === '',
+    JSON.stringify([s.values.category, s.values.accessLevel]));
+  await page.evaluate(new Function('a', 'const s = ' + ST + '; s.values.requestFor = [a]; s.values.contactEmail = "dev.tester@example.com"; s.values.costCentre = "12345";'), SOFIA);
+  await navClick(page, 'Next'); await page.waitForTimeout(200);
+  await page.evaluate(new Function('const s = ' + ST + '; s.values.hardwareType = "Dock"; s.values.priorityJustification = "Needed for the new starter joining the team next month."; s.values.neededBy = "2030-01-22";'));
+  await navClick(page, 'Next'); await page.waitForTimeout(200);
+  await page.evaluate(new Function('const s = ' + ST + '; s.values.managerAware = true;'));
+  await navClick(page, 'Submit request');
+  await page.waitForSelector('.bspf-done', { state: 'visible', timeout: 5000 });
+  let p = (await adds(page))[0] || {};
+  check('…and absent from the payload', !('AccessLevel' in p) && p.Category === 'Hardware' && p.SubCategory === 'Dock', JSON.stringify(p));
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+  ({ ctx, page } = await openForm(browser, {
+    it: true, now: TUE_10AM_ET,
+    mutate: cfg => { itF(cfg, 'category').default = 'Hardware'; itF(cfg, 'accessLevel').default = 'Upgraded kit'; }
+  }));
+  check('init: an allowed default is kept', (await state(page)).values.accessLevel === 'Upgraded kit');
+  await ctx.close();
+  ({ ctx, page } = await openForm(browser, {
+    it: true, now: TUE_10AM_ET,
+    mutate: cfg => { itF(cfg, 'category').default = 'Hardware'; Object.assign(itF(cfg, 'accessLevel'), { fillIn: true, default: 'Gold tier' }); }
+  }));
+  s = await state(page);
+  check('init: a fill-in ("Other") default not in the list survives', s.values.accessLevel === 'Gold tier', JSON.stringify(s.values.accessLevel));
+  await toPage(page, 1);
+  check('…shown as the custom pill', (await page.locator('[data-bspf-field="accessLevel"] .bspf-combo__value').innerText()).trim() === 'Gold tier');
+  await comboPick(page, 'category', 'Software');
+  check('…but a driver change still drops it', (await state(page)).values.accessLevel === '');
+  await ctx.close();
+
+  // 3. language switch while the @me fill is pending: it lands in the new instance
+  ({ ctx, page } = await openForm(browser, { settle: 0, init: SLOW_READY, mutate: bilingual }));
+  const before = (await state(page)).values.requester.length;
+  await page.evaluate(() => window.intl.setLang('fr'));
+  await page.waitForTimeout(400);
+  const fr = await page.evaluate(() => document.querySelector('.bspf').getAttribute('lang'));
+  await page.waitForTimeout(3400);
+  s = await state(page);
+  check('switch to FR before @me resolves → the new instance gets it', before === 0 && fr === 'fr' && s.values.requester.length === 1 &&
+    s.values.requester[0].key === ME_LOGIN, JSON.stringify({ before, fr, req: s.values.requester }));
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+  ({ ctx, page } = await openForm(browser, { mutate: bilingual }));
+  check('bilingual form: @me filled', (await state(page)).values.requester.length === 1);
+  await clickIn(page, '[data-bspf-field="requester"] .tag__remove');
+  await page.evaluate(() => window.intl.setLang('fr'));
+  await page.waitForTimeout(800);
+  s = await state(page);
+  check('@me removed, then switch to FR → not refilled (touched carried)', s.values.requester.length === 0 &&
+    (await page.evaluate(() => document.querySelector('.bspf').getAttribute('lang'))) === 'fr', JSON.stringify(s.values.requester));
+  await ctx.close();
+
+  // 4. includeTime + blocking minBusinessDays, viewer in Los Angeles: the
+  //    picker's min is the business day's Toronto midnight in LA wall time.
+  //    Thu 2030-01-10 10:00 ET → 2 business days → Mon 14th (00:00 EST = Sun 21:00 PST)
+  ({ ctx, page } = await openForm(browser, {
+    tz: 'America/Los_Angeles', now: '2030-01-10T15:00:00Z',
+    mutate: cfg => { cfg.pages[2].sections[0].fields.find(f => f.id === 'bookingDate').includeTime = true; }
+  }));
+  await comboPick(page, 'requestType', 'Room booking');
+  await navClick(page, 'Next'); await page.waitForTimeout(150);
+  const dt = '[data-bspf-field="bookingDate"] input.input';
+  check('includeTime min (LA viewer) = Sun 21:00 local', (await page.getAttribute(dt, 'type')) === 'datetime-local' &&
+    (await page.getAttribute(dt, 'min')) === '2030-01-13T21:00', await page.getAttribute(dt, 'min'));
+  await page.fill(dt, '2030-01-13T22:00');
+  await page.waitForTimeout(120);
+  s = await state(page);
+  check('Sun 22:00 LA (= Mon 01:00 Toronto) validates', s.errors.bookingDate === '', JSON.stringify(s.errors.bookingDate));
+  await page.fill(dt, '2030-01-13T20:00');
+  await page.waitForTimeout(120);
+  s = await state(page);
+  check('Sun 20:00 LA (= Sun 23:00 Toronto) is rejected', s.errors.bookingDate !== '', JSON.stringify(s.errors.bookingDate));
+  await ctx.close();
+
+  // 5. language switch during the confirmation countdown: carried, navigates once
+  ({ ctx, page } = await openForm(browser, { mutate: cfg => { bilingual(cfg); cfg.confirmation.redirect.seconds = 4; } }));
+  let homeHits = 0;
+  await page.route('**/sites/FCUPortal/SitePages/Home.aspx', r => { homeHits++; return r.fulfill({ contentType: 'text/html', body: '<title>home</title>home' }); });
+  const bspfErrors = [];
+  page.on('console', m => { if (m.type() === 'error' && /\[BSP Forms\]/.test(m.text())) bspfErrors.push(m.text()); });
+  await comboPick(page, 'requestType', 'Something else');
+  await page.fill('[data-bspf-field="otherDetails"] textarea', 'A whiteboard.');
+  await submitConfirmed(page);
+  await page.evaluate(() => window.intl.setLang('fr'));
+  await page.waitForTimeout(500);
+  const cd = await page.evaluate(() => {
+    const e = document.querySelector('.bspf-done .bspf-result__count');
+    return { vis: !!e && e.offsetParent !== null, text: e ? e.textContent : '', lang: document.querySelector('.bspf').getAttribute('lang') };
+  });
+  check('FR render keeps the countdown, in French', cd.vis && cd.lang === 'fr' && /Redirection dans \d+ secondes/.test(cd.text), JSON.stringify(cd));
+  check('no [BSP Forms] errors after the switch', bspfErrors.length === 0 && page.__errors.length === 0, bspfErrors.concat(page.__errors).join(' | '));
+  await page.waitForURL(HOME_RE, { timeout: 9000 }).catch(() => {});
+  await page.waitForTimeout(2500);
+  check('navigates to the redirect exactly once', HOME_RE.test(page.url()) && homeHits === 1, page.url() + ' hits=' + homeHits);
+  await ctx.close();
+
+  // 6. the stepper's accessible total follows the active pages
+  ({ ctx, page } = await openForm(browser));
+  const lbl = () => page.getAttribute('.bspf__stepper', 'aria-label');
+  check('stepper aria-label: "Step  of 2" initially', (await lbl()) === 'Step  of 2', await lbl());
+  await comboPick(page, 'requestType', 'Equipment');
+  check('…"Step  of 3" after Equipment', (await lbl()) === 'Step  of 3', await lbl());
+  await ctx.close();
+}
+
 async function testListsApi(browser) {
   console.log('BSPForms.lists() (read-only builder facade):');
   const page = await browser.newPage();
@@ -1541,7 +1674,7 @@ async function testListsApi(browser) {
     testDoctorRichText, testZoneAttestation, testFullFlow,
     // engine 0.6.0
     testBranching, testNormalizeErrors, testChoicesWhen, testNumberControls, testClearButtons, testBusinessDays,
-    testSendEmpty, testAtMe, testConfirmationRedirect, testListsApi];
+    testSendEmpty, testAtMe, testConfirmationRedirect, testListsApi, testReviewFixes];
   try {
     for (const t of suite) if (!only || only.includes(t.name)) await t(browser);
   } finally {

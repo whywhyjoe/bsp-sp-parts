@@ -227,6 +227,16 @@ contract. Read both before changing behavior.
 - **`_`-prefixed internal names save as `OData_<name>`** (`ekey()`); the raw
   name 400s with "property does not exist". The doctor and `column` stay the
   internal name.
+- **A language switch rebuilds the instance mid-flight.** Anything async or
+  timed must survive it: `relocalize` stops the old countdown and the new
+  `init` restarts it from the carried `redir`; `touched` is carried so a
+  pending `@me` fill (re-run after the carry) never refills a person the
+  user removed. `choicesWhen` prunes at init too, keeping typed "Other"
+  values (`pruneChoices(k, true)`). New async/timer state: add it to
+  `snapshotState` and the carry list. (Codex review, xo turn 8.)
+- **A date+time picker's `min` is the business day's first instant in the
+  viewer's zone** (`bizDayStartMs`), not `T00:00` — Monday in Toronto starts
+  Sunday 21:00 in Los Angeles.
 - **`BSPForms.lists()` is read-only by construction** — a facade exposing
   four methods over `makeAdapter({ target: {} })`. The builder must never get
   the full adapter (it has `addItem`, `ensureUser`).

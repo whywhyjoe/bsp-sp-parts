@@ -197,6 +197,14 @@
     for (var d = from + 1; d <= to; d++) if (isBizDay(bh, d)) n++;
     return n;
   }
+  // the first instant (ms, to 15 minutes) of civil day `day` in the business
+  // zone — every zone's midnight is within UTC-14..+14 of UTC midnight
+  function bizDayStartMs(bh, day) {
+    for (var t = day * 86400000 - 14 * 3600000; t <= day * 86400000 + 14 * 3600000; t += 900000) {
+      if (bizNow(bh, t).day === day) return t;
+    }
+    return null;
+  }
   // earliest date (YYYY-MM-DD) at least n whole business days after today
   function bizMinDate(bh, n, nowMs) {
     var today = bizNow(bh, nowMs).day, count = 0;
@@ -1230,9 +1238,10 @@
           var keys = drv.type === 'boolean' ? ['true', 'false'] : drv.choices.map(function (c) { return String(c.value); });
           var map = Object.create(null);
           Object.keys(cw.map).forEach(function (key) {
-            if (keys.indexOf(key) < 0 && !(drv.type === 'choice' && drv.fillIn)) {
-              errors.push(where + ': choicesWhen.map key "' + key + '" is not a value of "' + cw.field + '"');
-            }
+            // keys are the driver's declared values (a typed "Other" value
+            // falls to else); entries are arrays — never coerced
+            if (keys.indexOf(key) < 0) errors.push(where + ': choicesWhen.map key "' + key + '" is not a value of "' + cw.field + '"');
+            if (!Array.isArray(cw.map[key])) errors.push(where + ': choicesWhen.map "' + key + '" must be an array of choice values');
             var list = Array.isArray(cw.map[key]) ? cw.map[key] : [];
             list.forEach(function (v) { if (mine.indexOf(v) < 0) errors.push(where + ': choicesWhen value "' + v + '" is not one of this field\'s choices'); });
             map[key] = list;
@@ -2025,7 +2034,9 @@
 
     // Stepper
     if (pages.length > 1) {
-      h += '<ol class="stepper bspf__stepper" aria-label="' + esc(fmtStr(S.stepOf, { n: '', total: pages.length })) + '">';
+      // with branching the total is the pages that apply right now
+      h += '<ol class="stepper bspf__stepper" aria-label="' + esc(fmtStr(S.stepOf, { n: '', total: pages.length })) + '"' +
+        (cfg._pageRules ? ' :aria-label="fmt(' + esc(jstr(S.stepOf)) + ', { n: \'\', total: activePages().length })"' : '') + '>';
       pages.forEach(function (pg, i) {
         // branching: skipped pages drop out and the rest renumber
         var rules = cfg._pageRules;
@@ -2259,7 +2270,7 @@
         def.carry = null;
         if (carry) {
           Object.keys(carry.values).forEach(function (k) { if (k in self.values) self.values[k] = carry.values[k]; });
-          ['page', 'view', 'filesMeta', 'promptAck', 'asg', 'me', 'result'].forEach(function (p) {
+          ['page', 'view', 'filesMeta', 'promptAck', 'asg', 'me', 'result', 'redir'].forEach(function (p) {
             if (carry[p] !== undefined) self[p] = carry[p];
           });
           if (cfg._asg) (this.values[cfg._asg.k] || []).forEach(function (r) { r.open = false; });
@@ -2279,7 +2290,19 @@
         Object.keys(drivers).forEach(function (dk) {
           self.$watch('values.' + dk, function () { drivers[dk].forEach(function (k) { self.pruneChoices(k); }); });
         });
-        if (carry) { if (cfg._pageRules) this.clampPage(); return; }
+        // a default, URL value or carried answer the driver doesn't allow
+        // goes now (a typed "Other" value is kept: no driver changed)
+        cfg._ordered.forEach(function (f) { if (f._cw) self.pruneChoices(f.k, true); });
+        if (carry) {
+          if (carry.touched) Object.keys(carry.touched).forEach(function (k) { if (k in self.touched) self.touched[k] = carry.touched[k]; });
+          if (cfg._pageRules) this.clampPage();
+          // a countdown running when the language switched carries on here
+          // (relocalize stopped the old instance's timer)
+          if (this.redir && this.redir.url) this.startRedirect(this.redir.url, this.redir.left, this.redir.paused);
+          // an @me fill still pending in the old instance lands here instead
+          this.fillMe();
+          return;
+        }
         this.fillMe();
         // a required/invalid URL value (field.query) can't be fixed by the
         // user: show queryError instead of the form
@@ -2604,13 +2627,16 @@
       },
       optOk: function (k, v) { return this.allowed(k).indexOf(v) > -1; },
       // after the driver changed: keep only allowed choices; an "Other"
-      // value was typed against the old driver, so it goes too
-      pruneChoices: function (k) {
+      // value was typed against the old driver, so it goes too — unless
+      // keepCustom (init: nothing changed, only listed values are checked)
+      pruneChoices: function (k, keepCustom) {
         var ok = this.allowed(k), v = this.values[k];
+        var listed = cfg._byKey[k].choices.map(function (c) { return c.value; });
+        function keep(x) { return ok.indexOf(x) > -1 || (keepCustom && listed.indexOf(x) < 0); }
         if (Array.isArray(v)) {
-          var kept = v.filter(function (x) { return ok.indexOf(x) > -1; });
+          var kept = v.filter(keep);
           if (kept.length !== v.length) this.values[k] = kept;
-        } else if (v !== '' && ok.indexOf(v) < 0) this.values[k] = '';
+        } else if (v !== '' && !keep(v)) this.values[k] = '';
         if (this.errors[k]) this.check(k);
       },
 
@@ -2649,7 +2675,15 @@
           if (r.op === 'minBusinessDays' && (r.mode || 'block') === 'block' && r.days > n) n = r.days;
         });
         var d = n ? bizMinDate(cfg._bh, n, nowMs()) : '';
-        return d && f.includeTime ? d + 'T00:00' : (d || '');
+        if (!d || !f.includeTime) return d || '';
+        // date+time: the picker is in the viewer's zone, so the minimum is
+        // the instant that business day starts in the business zone, shown
+        // as the viewer's wall clock (Mon 00:00 Toronto = Sun 21:00 in LA)
+        var start = bizDayStartMs(cfg._bh, Math.round(Date.parse(d + 'T00:00:00Z') / 86400000));
+        if (start == null) return '';
+        var t = new Date(start);
+        function p2(x) { return ('0' + x).slice(-2); }
+        return t.getFullYear() + '-' + p2(t.getMonth() + 1) + '-' + p2(t.getDate()) + 'T' + p2(t.getHours()) + ':' + p2(t.getMinutes());
       },
       secVis: function (secId) {
         var sec = cfg._sectionsById[secId];
@@ -3745,7 +3779,7 @@
   function snapshotState(st) {
     var out = {};
     // plain-data copies (answers, rows, result text); open menus/dialogs don't carry
-    ['values', 'page', 'view', 'filesMeta', 'promptAck', 'asg', 'me', 'result'].forEach(function (p) {
+    ['values', 'page', 'view', 'filesMeta', 'promptAck', 'asg', 'me', 'result', 'touched', 'redir'].forEach(function (p) {
       out[p] = st[p] === undefined ? undefined : JSON.parse(JSON.stringify(st[p]));
     });
     return out;
@@ -3761,6 +3795,9 @@
     var cfg = norm.cfg;
     cfg._ordered.forEach(function (f) { f.domId = def.uid + '-' + f.k; });
     def.carry = st ? snapshotState(st) : null;
+    // the old instance's countdown stops here; the new one restarts it from
+    // the carried redir (so it neither runs invisibly nor navigates twice)
+    if (def.store.redirTimer) { clearInterval(def.store.redirTimer); def.store.redirTimer = null; }
     def.cfg = cfg;
     var old = def.root;
     try { if (window.Alpine && window.Alpine.destroyTree) window.Alpine.destroyTree(old); } catch (e) { /* best effort */ }
