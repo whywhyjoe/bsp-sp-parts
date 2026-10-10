@@ -1,7 +1,8 @@
 # BSP Forms builder — build plan
 
-Status: **draft for review** (2026-10-10). Thread state:
-`bsp-forms/state/2026-10-10-bsp-forms-builder.md`.
+Status: **revised after Codex review** (xo turn 7, 2026-10-10; all 11
+findings accepted — see section 7). Awaiting the user's approval. Thread
+state: `bsp-forms/state/2026-10-10-bsp-forms-builder.md`.
 
 ## 1. What we're building
 
@@ -55,8 +56,12 @@ login from `getUserInfo()` (`ensureUser` accepts it). Editable like any
 pick. Works with `multiple`. If the user can't be resolved, the field stays
 empty (console warning) — never an error card.
 
+- The fill is asynchronous (the page context resolves after init), so it
+  applies **only if the field is still empty and untouched** — it never
+  overwrites a person the user picked first.
 - Validation: `@me` only on `person`.
-- Mock: `userInfo()` already exists; add a `login`.
+- Mock: `userInfo()` already returns a claims `login` (`mock-sp.js:68`);
+  test against it.
 
 ### E2. Choice filtering (`choicesWhen`)
 
@@ -103,9 +108,22 @@ with `max > min`; `integer` is implied. Dropdown is capped at 200 options
 
 ### E4. Branching: page `visibleWhen` and `endWhen`
 
+- `pages[0]` must not have `visibleWhen` or depend on anything (normalize
+  error), so there is always at least one active page and init, reset and
+  the language-switch carry can always land on page 0.
 - `pages[i].visibleWhen` — the page is skipped when false. Its rule may only
   reference fields on **earlier pages** (normalize error otherwise — a page
   can't hide itself by its own answers).
+- **Answers on inactive pages read as empty.** `_get(id)` returns the type's
+  empty value for a field whose page is inactive, for every rule (page,
+  section, field, `choicesWhen`, `lockWhen`, date `compareTo`) and for
+  `{field:…}` tokens. Otherwise an answer typed on page 2 before the user
+  went Back and took the other branch would still drive page 3. There's no
+  cycle: `pageActive(i)` reads only pages before `i` (its `visibleWhen` by
+  the rule above; the earlier pages' `endWhen` read pages ≤ themselves).
+  Existing configs have no page rules, so every page stays active and
+  nothing changes for them. (Hidden **sections** keep today's raw-value
+  semantics; documented, not changed.)
 - `pages[i].endWhen` — when true, this page is the last: Submit replaces
   Next, later pages are inactive. May reference fields on this page or
   earlier.
@@ -119,7 +137,9 @@ with `max > min`; `integer` is implied. Dropdown is capped at 200 options
   `nextOrSubmit`, `validateAll`, `pageHasError`, `focusFirstError` and
   `pendingPrompt(null)` all switch to the active list.
 - If answers change on an earlier page (user went Back), the active set is
-  recomputed live; the current page index is clamped to an active page.
+  recomputed live. If the current page becomes inactive, `page` moves to the
+  nearest earlier active page (page 0 at worst). The same clamp runs after a
+  language-switch carry.
 - **Attachments:** the dropzone's page must always be reachable: normalize
   errors if `attachments.page`/`section` is on a page with `visibleWhen`, or
   after any page with `endWhen`. (The builder enforces the same and defaults
@@ -140,6 +160,12 @@ as the calendar ops). Both need `form.businessHours` (only `timeZone` and
   (`bizNow(...).day`). `minBusinessDays N` passes when the number of business
   days in `(today, D]` is ≥ N (today never counts). Fri → Mon is 1.
 - `businessDay` fails when D's weekday isn't in `businessHours.days`.
+- `minBusinessDays` alone does **not** reject a weekend D (a Saturday far
+  enough out passes it). D8's "weekends rejected" is the builder's job: a
+  builder date control with a business-day lead rule always also emits
+  `businessDay` in **block** mode, and the builder's standalone "weekdays
+  only" is block-only. The engine keeps both ops independent (and `warn`
+  available) for hand-written configs.
 - For `includeTime` values, D is the business-zone date of the picked
   instant (`bizAtDate`), matching the existing business-time rules.
 - The date input gets a reactive `:min` = the earliest date a **block**
@@ -159,6 +185,19 @@ shown while the field has a value and the form isn't busy. Choice menus also
 get the "Clear selection" first row the assignments combo has. Clearing
 re-runs `check` and (for drivers) the E2 pruning. No config key.
 
+**Cleared must mean empty in the list (E6a).** Today the payload omits an
+empty value, and SharePoint then applies the column's default to the new
+item — so clearing a Priority that defaults to `Standard` would save
+`Standard`. New opt-in `target.sendEmpty: true`: every **active**, mapped,
+empty field is sent as an explicit empty value (text/choice/note `null`,
+number/currency `null`, date `null`, link `null`, multichoice
+`{ results: [] }`, person `<col>Id: null` or `{ results: [] }`). A column
+whose every mapping is inactive is still omitted (its default applies).
+Builder forms always set it; existing configs don't, so their payloads are
+unchanged. The builder pre-fills a control's `default` from the column's
+`DefaultValue` (removable), so what the form shows is what gets saved. B0
+verifies each explicit-empty shape against real columns.
+
 ### E7. Redirect after the plain success message
 
 `confirmation.redirect: { "url": "...", "seconds": 5 }` — reuses
@@ -169,28 +208,54 @@ and cancels the countdown.
 ### E8. Column names starting with `_`
 
 The payload key for an internal name starting with `_` becomes `OData_` +
-name (and `OData_<name>Id` for person). The doctor and builder compare by
-internal name, unchanged.
+name (and `OData_<name>Id` for person). That is SharePoint's rule for
+`EntityPropertyName` (internal names of columns created with a leading
+digit or symbol start `_x00…` too). The doctor and builder compare by
+internal name, unchanged. The builder treats the schema's
+`EntityPropertyName` as the authority: a column whose `EntityPropertyName`
+doesn't match `column` / `OData_` + `column` is shown as not mappable.
 
 ### E9. Public API for the builder
 
 - `BSPForms.normalize(raw, lang)` → `{ errors: [...] }` — the exact
   validation the page runs. The builder's "valid" means "loads on the page".
-- `BSPForms.mountConfig(el, raw, { preview: true })` → `{ destroy(), writes }`.
-  Renders a config object into an element (no `data-bsp-form`, so `scan()`
-  never touches it). `preview: true` wraps the adapter: reads go through
-  (people search, current user, lookups), `addItem`/`addAttachment` are
-  recorded in `writes` and never sent, and a redirect shows "Would go to
-  <url>" instead of navigating (a preview must not take the builder page
-  away). `destroy()` tears down Alpine, timers and `NS._defs[uid]`.
-- `BSPForms.adapter()` → a read-only adapter for the builder: `ready()`,
-  `userInfo()`, `getWebLists(webUrl)`, `getListSchema({ siteUrl, listId })`.
-  These live in `makeAdapter` (the "every SharePoint read stays in the
-  adapter" rule) and in `dev/mock-sp.js`.
+E9 is split: **E9a** (normalize, the read-only lists facade, compat,
+assetVersion) ships in Phase 1 because the builder core needs it; **E9b**
+(`mountConfig` preview) ships in Phase 3 with the preview pane. Both stay
+inside engine 0.6.0 — nothing deploys to prod before Phase 5.
+
+- **E9b** `BSPForms.mountConfig(el, raw, { preview: true })` →
+  `{ destroy(), writes }`. Renders a config object into an element (no
+  `data-bsp-form`, so `scan()` never touches it; its own `uid`, so `_defs`
+  stay separate). `preview: true` builds a **preview adapter**, a distinct
+  object rather than a wrapper that forwards unknown calls:
+  - reads pass through to a real adapter (people search, current user,
+    lookups);
+  - `ensureUser` is **simulated** (synthetic ids) — on a real site it can
+    add the person to the site's user list, which is a write, and the engine
+    calls it both on pick (`addPerson`, engine:2435) and in `buildPayload`;
+  - `addItem` / `addAttachment` are recorded in `writes` and return a
+    synthetic `{ id, item }` so the attachment path and its retry complete;
+  - the instance's `startRedirect` is replaced for the preview mount, so
+    **every** redirect path (E7, `afterSubmit`, `queryError`) shows "Would go
+    to <url>" instead of calling `location.assign`.
+  `destroy()` tears down Alpine (`destroyTree`), the redirect timer, and
+  `NS._defs[uid]`. Test: a preview submit with a person and an attachment
+  issues no SharePoint write request (network log), and leaves no `_defs`
+  entry after `destroy()`.
+- **E9a** `BSPForms.lists()` → a **read-only facade** exposing exactly
+  `ready()`, `userInfo()`, `getWebLists(webUrl)` and
+  `getListSchema({ siteUrl, listId })` — nothing that writes. Under it is a
+  `makeAdapter({ target: {} })` instance (target web = the page web), so the
+  calls live in `makeAdapter` (the "every SharePoint read stays in the
+  adapter" rule) and in `dev/mock-sp.js`. Each call routes to its own
+  `siteUrl` per call (`web(absUrl(siteUrl))`), never through the global
+  `pnp.sp.setup` state of a mounted form.
   - `getWebLists`: non-hidden lists with `BaseTemplate eq 100` (custom
-    lists), selecting `Id, Title, RootFolder/ServerRelativeUrl,
-    EnableAttachments, ItemCount`.
-  - `getListSchema`: list properties + **all** fields **without** `$select`,
+    lists): `.select('Id', 'Title', 'EnableAttachments', 'ItemCount',
+    'RootFolder/ServerRelativeUrl').expand('RootFolder')`.
+  - `getListSchema`: `lists.getById(listId)` → list properties (same select
+    + expand) + **all** fields **without** `$select`,
     so derived-type properties come back (`Choices`, `FillInChoice`,
     `MaxLength`, `DisplayFormat`, `AllowMultipleValues`, `MinimumValue`,
     `MaximumValue`, `ShowAsPercentage`, `RichText`, `AppendOnly`,
@@ -198,6 +263,9 @@ internal name, unchanged.
     `DefaultValue`, `EntityPropertyName`). **Verify on dev first** (B0) that
     pnp v2's accept header returns these; fall back to per-type `$select`
     with `odata=verbose` if not.
+  - `DisplayFormat` means different things per type and is read only after
+    checking `TypeAsString`: DateTime `0` = date only, `1` = date and time;
+    URL `0` = hyperlink, `1` = picture.
 - `BSPForms.compat` — the doctor's `TYPE_COMPAT` table, so the builder and
   doctor share one compatibility source.
 - `BSPForms.assetVersion` — the engine's `?v=` (for the generated stub).
@@ -206,6 +274,8 @@ internal name, unchanged.
 
 `forms/example-it-request.json` keeps exercising every feature that fits a
 single linear form (E1, E2, E3, E5, E6, E7, E8 via a mock `_`-column).
+`sendEmpty` (E6a) changes every payload, so it gets its own small fixture
+rather than switching the IT request over.
 Branching (E4) gets its own `forms/example-branching.json`, because adding
 skipped pages to the IT request would change the existing smoke flow
 (precedent: the zone attestation has its own reference config). The mock
@@ -324,9 +394,23 @@ above. `EnforceUniqueValues` and a `ValidationFormula` show a warning ("the
 form can't check this; a failing submit shows SharePoint's message").
 
 **Ids:** generated from the label (camelCase, unique, `[A-Za-z][A-Za-z0-9]*`),
-editable. Renaming an id rewrites every reference: rules (`field`,
-`compareTo`), `choicesWhen.field`, `{field:…}` tokens in `titleTemplate`,
-`target.set`, confirmation/submitConfirm text.
+editable. One **reference walker** (shared by rename, delete, and the
+"rule refers to a deleted control" check) knows every place an id appears,
+including in preserved structures the builder can't edit:
+
+- rules anywhere: field/section/heading/note `visibleWhen`, page
+  `visibleWhen` / `endWhen`, `lockWhen` — the `field` and `compareTo` keys,
+  through `all` / `any` / `not` at any depth;
+- date `rules[].compareTo`; `choicesWhen.field`;
+- `prompt.confirm.set` **keys**; `afterSubmit.lookup.matchField`;
+- `{field:…}` tokens in `titleTemplate`, `target.set` values,
+  `confirmation`, `submitConfirm`, `afterSubmit` screens
+  (`title`, `message`, `copy`, `link.text`, `redirect.url`) and
+  `queryError` — in both halves of a `{en, fr}` pair.
+
+Rename rewrites all of them; delete is blocked while any remain (the
+message lists them). Phase 4 tests renaming `resourceName` in the classic
+link config (its `afterSubmit.lookup.matchField` must follow).
 
 **Shared columns:** a column already used by another control is offered
 only after a confirm ("conditional variants — make sure only one is ever
@@ -349,9 +433,11 @@ choice filter's driver (E2, a table rather than a rule).
   read-only JSON with "Replace" (start over) — never silently rewritten.
 - Date control rules: "not in the past", "at least N business days ahead"
   (E5), "weekdays only" (E5), "after/before another date field" — each with
-  block/warn and an optional message. Using a business-day rule adds
-  `form.businessHours` (`America/Toronto`, Mon–Fri, 09:00–17:00) if it's
-  missing.
+  an optional message. Calendar rules offer block/warn; "at least N business
+  days ahead" offers block/warn for the lead time but **always** adds a
+  blocking `businessDay` (D8); "weekdays only" is block-only. Using a
+  business-day rule adds `form.businessHours` (`America/Toronto`, Mon–Fri,
+  09:00–17:00) if it's missing.
 
 ### B6. Form-level settings
 
@@ -369,15 +455,39 @@ pages are offered — E4).
 ### B7. Checks and download
 
 Download is disabled while there are **errors**; warnings don't block.
-Errors come from two places, shown together in an errors panel (click →
-select the control):
+Errors come from two separate sources, shown in one errors panel but
+labelled by source (click → select the control). Passing (2) proves the
+config **loads**; only (1) speaks to whether a **save** will succeed, and
+even (1) can't see list-level rules (warned, not checked).
 
-1. Builder checks: unmapped value control (not logic-only); column missing
-   from the schema or no longer compatible; Choice subset violations;
-   list-required column unmapped (Title excepted with `titleTemplate`);
-   attachments on a list without attachments; dropdown/slider without
-   bounds; empty choice list; rule referring to a deleted control.
-2. `BSPForms.normalize(json)` — anything the engine would reject.
+1. **Schema checks (builder)** — each one an explicit check on a named
+   schema property, not just `BSPForms.compat`:
+   - unmapped value control (not logic-only); column missing from the schema;
+     type incompatible (`compat`); `EntityPropertyName` mismatch (E8);
+   - Choice/MultiChoice subset violations; "Other" without `FillInChoice`;
+   - `MaxLength`, `MinimumValue`/`MaximumValue` exceeded by the control;
+   - DateOnly column with "date + time"; URL in picture format; percent
+     Number; read-only/hidden columns;
+   - **required columns, path-aware:** a column the list requires must be
+     written on **every** submit path. Satisfied only by a mapped control
+     that is unconditionally active (no `visibleWhen` on it or its section,
+     no `choicesWhen`, on a page with no `visibleWhen` and not after any
+     page with `endWhen`) and itself required; or by `target.set`; or for
+     `Title` by a `titleTemplate` containing literal text or an
+     always-filled token (`{form:title}`, `{date}`, `{time}`, `{now}`,
+     `{user:name}`, `{user:email}`); or by a column `DefaultValue` (only
+     where B0 confirms SharePoint applies it to an omitted required
+     column). Shared variants never count — the builder can't prove one is
+     always visible;
+   - attachments on a list without attachments; attachments section on a
+     page some path skips;
+   - dropdown/slider without integer bounds; empty choice list; a reference
+     to a missing control (the walker, B4);
+   - **warnings:** `EnforceUniqueValues`, a column `ValidationFormula`, a
+     list `ValidationFormula` ("the form can't check this; a failing submit
+     shows SharePoint's message").
+2. **Engine load check** — `BSPForms.normalize(json)`: anything the engine
+   would reject.
 
 Download produces:
 
@@ -397,8 +507,11 @@ After download the builder shows the deploy checklist (upload JSON to
 `form.headerCard`, `form.languages` + any `{en,fr}` pairs (D4), `strings`,
 `target.set`, field `query`/`normalize`/`readOnly`/`prompt`/`lockWhen`,
 `hidden` and `lookup` controls. The outline shows those controls with a
-lock icon; they can be moved or deleted but their advanced keys pass
-through byte-for-byte.
+lock icon; they can be moved or deleted, and their advanced keys are
+preserved **semantically** (parsed and re-serialized in the fixed key
+order, so values are deep-equal but whitespace and key order may differ —
+Phase 4's round-trip test asserts deep equality, not bytes). Ids inside
+them are still kept consistent by the reference walker (B4).
 
 ## 4. Gotchas this plan designs around
 
@@ -413,7 +526,8 @@ through byte-for-byte.
    empty is not sent, so the column's `DefaultValue` applies server-side
    (e.g. the GSI list's Priority `Standard`). The properties panel shows the
    column default next to "required".
-5. **Preview must not navigate or write** (E9 preview adapter).
+5. **Preview must not navigate or write** — including `ensureUser`, which
+   the engine calls on every person pick (E9b preview adapter).
 6. **Branching vs attachments:** the dropzone must sit on a page every path
    reaches (E4, B6).
 7. **Page rules can't depend on their own page** (E4) — otherwise a page
@@ -429,6 +543,12 @@ through byte-for-byte.
     `baseUrl` per call.
 13. **The page URL never chooses a redirect** — E7 keeps the config-only
     rule.
+14. **Omitted means "use the column default"** in SharePoint, so a cleared
+    field would silently save the default; E6a's `sendEmpty` fixes it for
+    builder forms only.
+15. **Stale answers on skipped pages** read as empty for every rule (E4);
+    hidden sections keep the old raw-value behavior.
+16. **`DisplayFormat` is type-specific** (B3/E9a).
 
 ## 5. Phases and acceptance
 
@@ -440,20 +560,31 @@ xo Codex review round.
 list `BSPF-Builder-Test` (one column of every type the builder handles plus
 the excluded ones, a required column, a `_`-prefixed column, FillInChoice
 on/off, DateOnly and DateTime, percent Number, picture URL). Script:
-`dev/live/live-builder-list.ps1`. Confirm which schema properties pnp v2
-returns without `$select`. Outcome decides E9's fetch shape.
+`dev/live/live-builder-list.ps1`. B0 answers, by REST against real columns
+(the mock can't): which schema properties pnp v2 returns without `$select`
+(decides E9a's fetch shape); whether each E6a explicit-empty shape is
+accepted and saves empty (text, note, choice, multichoice, number, date,
+link, single/multi person); whether an omitted column with a
+`DefaultValue` gets the default, including a **required** one (decides
+whether B7 may count a default as satisfying a required column); and the
+`EntityPropertyName` of the `_`-prefixed column (E8).
 
-**Phase 1 — engine 0.6.0 (E1–E10).** Acceptance:
+**Phase 1 — engine 0.6.0 (E1–E8, E9a, E10).** Acceptance:
 - smoke suite green, with new checks for each feature, including: page
-  skip/end + stepper numbering + Back after changing a branch answer;
-  inactive-page fields absent from the payload; choicesWhen pruning (single,
-  multi, fill-in, boolean driver) and the "no options → inactive" case;
-  slider unset/required/clear and dropdown values saved as numbers; every
-  clear button; business-day rules with the clock pinned on Fri/Sat/Sun and
-  across a DST change, browser zone Pacific; `@me` prefill and reset;
-  confirmation redirect (and that a preview mount doesn't navigate);
-  `OData_` payload key; `mountConfig` preview records writes and `destroy()`
-  leaves no `_defs` entry.
+  skip/end + stepper numbering + Back after changing a branch answer; a
+  **stale answer** on a now-skipped page doesn't drive a later page rule or
+  appear in the payload; the current page clamps when it becomes inactive;
+  `pages[0].visibleWhen` is a normalize error; inactive-page fields absent
+  from the payload; choicesWhen pruning (single, multi, fill-in, boolean
+  driver) and the "no options → inactive" case; slider unset/required/clear
+  and dropdown values saved as numbers; every clear button; `sendEmpty`
+  payload shapes, and that existing configs' payloads are byte-identical to
+  0.5.0's for the same answers; business-day rules with the clock pinned on
+  Fri/Sat/Sun and across a DST change, browser zone Pacific, including a
+  weekend date beyond the lead time (passes `minBusinessDays`, fails
+  `businessDay`); `@me` prefill, reset, and not overwriting an earlier pick;
+  confirmation redirect; `OData_` payload key; `BSPForms.lists()` exposes no
+  write method.
 - all six existing configs normalize unchanged; their smoke checks pass
   untouched.
 - dev live regression: `live-submit.js`, `live-creative.js`,
@@ -461,25 +592,36 @@ returns without `$select`. Outcome decides E9's fetch shape.
 - CONFIG-REFERENCE, Copilot guide, README features, PROD-DEPLOY §1 (engine
   update) current.
 
-**Phase 2 — builder core (B1–B4, B7 download).** Harness with a mock tenant
-(three lists incl. the B0 column set). Acceptance (`builder.spec.js`): pick
-list → schema catalog correct (mappable vs excluded with reasons); add one
-of each control, map, required forced by schema; switching lists clears
-columns; unmapped blocks download, logic-only doesn't; id rename rewrites
-references; undo/redo; autosave restore; downloaded JSON passes
-`BSPForms.normalize` and, loaded into the engine harness, submits a payload
-whose keys are exactly the mapped columns.
+**Phase 2 — builder core (B1 outline + properties panes, B2, B3, B4, B7
+schema checks and download).** No preview pane yet. Harness with a mock
+tenant (three lists incl. the B0 column set). Acceptance
+(`builder.spec.js`): pick list → schema catalog correct (mappable vs
+excluded with reasons); add one of each control, map, required forced by
+schema; switching lists clears columns; unmapped blocks download,
+logic-only doesn't; each B7 schema check fires on a crafted case, including
+a required column mapped only on a skippable page; renaming an id rewrites
+the references Phase 2 can create (`{field:}` tokens in `titleTemplate`);
+undo/redo; autosave restore; downloaded JSON passes `BSPForms.normalize`
+and, loaded into the engine harness, submits a payload whose keys are
+exactly the mapped columns.
 
-**Phase 3 — rules, settings, preview (B5, B6, preview pane).** Acceptance:
-show-when on field/section/page, end-form, choice filter, date rules,
-submit confirm, confirmation redirect, attachments limits — each built in
-the builder, previewed, and asserted in the downloaded JSON; the preview
-records writes and never navigates.
+**Phase 3 — rules, settings, preview (B5, B6, E9b, the B1 preview pane).**
+Acceptance: show-when on field/section/page, end-form, choice filter, date
+rules (a business-day rule emits the blocking `businessDay`), submit
+confirm, confirmation redirect, attachments limits — each built in the
+builder, previewed, and asserted in the downloaded JSON; rename/delete
+through rules created here; the E9b preview tests (no write requests incl.
+`ensureUser`, no navigation on any redirect path, clean `destroy()`).
 
 **Phase 4 — open/round-trip, live E2E, docs.** Acceptance:
 - round-trip: each of `forms/*.json` except the zone attestation opens,
   re-downloads, and is deep-equal to the original apart from `$builder` and
   key order; the zone attestation is refused with the D3 message.
+- the full reference walker: renaming `resourceName` in the classic link
+  config carries `afterSubmit.lookup.matchField` and its `{field:}` tokens;
+  renaming the creative form's `priority` carries `prompt.confirm.set`;
+  delete is blocked while references remain.
+- dev live regression of all four live forms again on the final 0.6.0.
 - live dev E2E (sp-env §0 — the agent verifies, not the user): builder page
   on the dev site; pick `BSPF-Builder-Test`; load a scripted draft; download
   (Playwright download capture); upload JSON to dev `Code/bsp-forms/forms/`;
@@ -498,3 +640,27 @@ Bilingual editing; lookup controls; URL-parameter fields; `afterSubmit`
 lookups; assignments; prompts/locks; holidays; "go to page X" branching;
 nested rule groups; writing files to SharePoint from the builder; creating
 or changing list columns; a raw JSON editor (view + copy only).
+
+## 7. Review log
+
+**xo turn 7 — Codex (gpt-6-sol), 2026-10-10, against 571ea01.** 11
+findings, all accepted:
+
+| # | Sev | Finding | Where fixed |
+| --- | --- | --- | --- |
+| 1 | High | Preview could still write via `ensureUser` | E9b (simulated `ensureUser`, synthetic add results), gotcha 5, Phase 3 |
+| 2 | High | Required-column check ignored branching | B7 path-aware rule, Phase 2 test |
+| 3 | High | `minBusinessDays` let a far-out weekend pass | E5 note, B5 (builder always adds blocking `businessDay`), Phase 1 test |
+| 4 | High | Page rules could branch on stale answers from skipped pages | E4 "inactive pages read as empty", Phase 1 test |
+| 5 | High | Clear could save the column default | E6a `target.sendEmpty`, B0, gotcha 14 |
+| 6 | Med | Builder adapter would expose writes / need a target | E9a read-only `BSPForms.lists()` facade |
+| 7 | Med | Rename missed `matchField` and `prompt.confirm.set` | B4 reference walker, Phase 4 tests |
+| 8 | Med | "Loads" ≠ "saves"; compat table too coarse; use `EntityPropertyName` | B7 two labelled sources + explicit checks, E8 |
+| 9 | Med | No defined behavior with zero active pages | E4: page 1 unconditional, clamp rule |
+| 10 | Med | Preview pane and rename tests in the wrong phases | §5 phases rewritten; E9 split into E9a/E9b |
+| 11 | Low | Mock already has `login`; `@me` must not overwrite a pick | E1 |
+
+Also adopted from its "missing gotchas": every redirect path guarded in
+preview (E9b), type-specific `DisplayFormat` (E9a, gotcha 16), and
+"semantic, not byte-for-byte" preservation (B7). Review cost: 1.41M input
+tokens / 9.8K output.
