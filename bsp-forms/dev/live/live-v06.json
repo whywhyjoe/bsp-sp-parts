@@ -1,0 +1,67 @@
+{
+  "$comment": "DEV ONLY: engine 0.6.0 live test against BSPF Builder Test (live-builder-list.ps1). __DEV_SITE__ is replaced on upload by live-v06.ps1. Exercises sendEmpty against real column defaults, an _-prefixed column, @me with a real login, branching, number dropdown + slider, choicesWhen on a yes/no field, and business-day date rules.",
+  "form": {
+    "title": "Engine 0.6.0 live test",
+    "intro": "Dev-only form for the 0.6.0 live test.",
+    "appearance": { "frame": "card", "header": "band", "tint": "sky" },
+    "businessHours": { "timeZone": "America/Toronto", "days": [1, 2, 3, 4, 5] }
+  },
+  "target": {
+    "siteUrl": "__DEV_SITE__",
+    "listUrl": "Lists/BSPFBuilderTest",
+    "titleTemplate": "0.6.0 live — {field:path} — {user:name}",
+    "sendEmpty": true
+  },
+  "confirmation": { "title": "Saved", "message": "Saved to BSPF Builder Test.", "allowAnother": true },
+  "pages": [
+    {
+      "id": "basics",
+      "title": "Basics",
+      "endWhen": { "field": "path", "op": "equals", "value": "Short" },
+      "sections": [
+        {
+          "id": "s1",
+          "title": "Basics",
+          "columns": 2,
+          "fields": [
+            { "id": "requester", "type": "person", "label": "Requester", "default": "@me", "required": true, "column": "Person" },
+            { "id": "path", "type": "choice", "label": "Path (logic only)", "required": true, "choices": ["Full", "Short"] },
+            { "id": "txtReq", "type": "text", "label": "Required text", "required": true, "column": "TxtReq" },
+            { "id": "level", "type": "choice", "label": "Level (column default Medium)", "column": "ChoiceA", "choices": ["Low", "Medium", "High"] },
+            { "id": "txtDefault", "type": "text", "label": "Text (column default Hello)", "column": "TxtDefault" },
+            { "id": "reqDef", "type": "choice", "label": "Required choice", "required": true, "column": "ChoiceReqDef", "choices": ["Standard", "Urgent"] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "more",
+      "title": "More",
+      "visibleWhen": { "field": "path", "op": "equals", "value": "Full" },
+      "sections": [
+        {
+          "id": "s2",
+          "title": "More",
+          "columns": 2,
+          "fields": [
+            { "id": "warm", "type": "boolean", "label": "Warm colours?", "toggleText": "Yes" },
+            {
+              "id": "colours", "type": "multichoice", "label": "Colours", "column": "Multi",
+              "choices": ["Red", "Green", "Blue"],
+              "choicesWhen": { "field": "warm", "map": { "true": ["Red"], "false": ["Green", "Blue"] } }
+            },
+            { "id": "numDefault", "type": "number", "display": "dropdown", "label": "Dropdown (column default 7)", "column": "NumDefault", "validation": { "min": 1, "max": 10 } },
+            { "id": "numPlain", "type": "number", "display": "slider", "label": "Slider", "column": "NumPlain", "validation": { "min": 0, "max": 100 } },
+            {
+              "id": "dateOnly", "type": "date", "label": "Date (2+ business days)", "column": "DateOnlyCol",
+              "rules": [ { "op": "minBusinessDays", "days": 2, "mode": "block" }, { "op": "businessDay", "mode": "block" } ]
+            },
+            { "id": "people", "type": "person", "multiple": true, "label": "People", "column": "People" },
+            { "id": "link", "type": "link", "label": "Link", "column": "LinkCol", "withDescription": true },
+            { "id": "under", "type": "text", "label": "Underscore column", "column": "_Under" }
+          ]
+        }
+      ]
+    }
+  ]
+}

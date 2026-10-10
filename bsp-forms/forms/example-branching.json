@@ -1,0 +1,222 @@
+{
+  "$comment": "BSP Forms reference config for branching (0.6.0): page visibleWhen / endWhen, answers on skipped pages reading as empty, choicesWhen keyed on a yes/no field, number dropdown + slider, business-day date rules, target.sendEmpty, an '_'-prefixed column, a person defaulting to the signed-in user, and a confirmation redirect. See docs/CONFIG-REFERENCE.md.",
+
+  "form": {
+    "title": "Workplace Request",
+    "intro": "Equipment and room bookings for your team. What you're asked depends on what you need.",
+    "appearance": { "frame": "card", "header": "band", "tint": "blue", "icon": "abacus-icons/digital-form-48.svg" },
+    "businessHours": { "timeZone": "America/Toronto", "days": [1, 2, 3, 4, 5] }
+  },
+
+  "target": {
+    "listTitle": "Workplace Requests",
+    "titleTemplate": "{form:title} — {field:requestType} — {user:name}",
+    "sendEmpty": true
+  },
+
+  "submitConfirm": {
+    "title": "Send this request?",
+    "message": "Your request goes straight to the workplace team.",
+    "confirm": "Yes",
+    "cancel": "No"
+  },
+
+  "confirmation": {
+    "title": "Request sent",
+    "message": "The workplace team will be in touch.",
+    "redirect": { "url": "/sites/FCUPortal/SitePages/Home.aspx", "seconds": 8 }
+  },
+
+  "pages": [
+    {
+      "id": "about",
+      "title": "About the request",
+      "endWhen": { "field": "requestType", "op": "equals", "value": "Something else" },
+      "sections": [
+        {
+          "id": "who",
+          "title": "Who and what",
+          "icon": "person",
+          "columns": 2,
+          "fields": [
+            {
+              "id": "requester",
+              "type": "person",
+              "label": "Requested by",
+              "hint": "That's you, unless you're asking on someone's behalf.",
+              "required": true,
+              "default": "@me",
+              "column": "Requester"
+            },
+            {
+              "id": "requestType",
+              "type": "choice",
+              "label": "What do you need?",
+              "required": true,
+              "column": "RequestType",
+              "choices": [
+                { "value": "Equipment", "color": "blue" },
+                { "value": "Room booking", "color": "teal" },
+                { "value": "Something else", "color": "gray" }
+              ]
+            },
+            {
+              "id": "otherDetails",
+              "type": "textarea",
+              "label": "Tell us what you need",
+              "required": true,
+              "span": "full",
+              "column": "OtherDetails",
+              "visibleWhen": { "field": "requestType", "op": "equals", "value": "Something else" }
+            },
+            {
+              "id": "hasDeadline",
+              "type": "boolean",
+              "label": "Is there a deadline?",
+              "toggleText": "Yes, there's a date we need this by",
+              "column": "HasDeadline",
+              "span": "full"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "equipment",
+      "title": "Equipment",
+      "visibleWhen": { "field": "requestType", "op": "equals", "value": "Equipment" },
+      "sections": [
+        {
+          "id": "kit",
+          "title": "The equipment",
+          "icon": "grid",
+          "columns": 2,
+          "fields": [
+            {
+              "id": "ergonomic",
+              "type": "boolean",
+              "label": "Ergonomic equipment?",
+              "toggleText": "Yes — for an ergonomic assessment",
+              "column": "Ergonomic",
+              "span": "full"
+            },
+            {
+              "id": "item",
+              "type": "choice",
+              "label": "Item",
+              "required": true,
+              "column": "Item",
+              "choices": [
+                { "value": "Standing desk", "color": "teal" },
+                { "value": "Ergonomic chair", "color": "lavender" },
+                { "value": "Monitor", "color": "blue" },
+                { "value": "Keyboard", "color": "sky" },
+                { "value": "Mouse", "color": "berry" }
+              ],
+              "fillIn": true,
+              "choicesWhen": {
+                "field": "ergonomic",
+                "map": {
+                  "true": ["Standing desk", "Ergonomic chair"],
+                  "false": ["Monitor", "Keyboard", "Mouse"]
+                }
+              }
+            },
+            {
+              "id": "quantity",
+              "type": "number",
+              "display": "dropdown",
+              "label": "Quantity",
+              "column": "Quantity",
+              "validation": { "min": 1, "max": 5 }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "room",
+      "title": "Room booking",
+      "visibleWhen": { "field": "requestType", "op": "equals", "value": "Room booking" },
+      "sections": [
+        {
+          "id": "booking",
+          "title": "The booking",
+          "icon": "calendar-ltr",
+          "columns": 2,
+          "fields": [
+            {
+              "id": "bookingDate",
+              "type": "date",
+              "label": "Date",
+              "required": true,
+              "column": "BookingDate",
+              "rules": [
+                { "op": "minBusinessDays", "days": 2, "mode": "block" },
+                { "op": "businessDay", "mode": "block" }
+              ]
+            },
+            {
+              "id": "attendees",
+              "type": "number",
+              "display": "slider",
+              "label": "How many people? (optional)",
+              "column": "Attendees",
+              "validation": { "min": 1, "max": 20 }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "deadline",
+      "title": "Deadline",
+      "visibleWhen": { "field": "hasDeadline", "op": "equals", "value": true },
+      "sections": [
+        {
+          "id": "when",
+          "title": "When do you need it?",
+          "fields": [
+            {
+              "id": "deadlineDate",
+              "type": "date",
+              "label": "Needed by",
+              "required": true,
+              "column": "Deadline",
+              "rules": [
+                { "op": "minBusinessDays", "days": 3, "mode": "warn", "message": "Under 3 business days' notice — we'll try, but can't promise." },
+                { "op": "businessDay", "mode": "block" }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "wrapup",
+      "title": "Anything else",
+      "sections": [
+        {
+          "id": "extra",
+          "title": "Last details",
+          "tint": "sky",
+          "fields": [
+            {
+              "id": "notes",
+              "type": "textarea",
+              "label": "Notes (optional)",
+              "column": "Notes"
+            },
+            {
+              "id": "reference",
+              "type": "text",
+              "label": "Your reference (optional)",
+              "placeholder": "e.g. a ticket number",
+              "column": "_Ref"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

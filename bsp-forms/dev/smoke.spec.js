@@ -16,6 +16,9 @@
  */
 'use strict';
 const { chromium } = require('playwright');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const BASE = process.argv[2] || 'http://localhost:8000/bsp-sp-parts/bsp-forms/dev/index.html';
 
@@ -808,22 +811,739 @@ async function testFullFlow(browser) {
   check('hidden field not rendered', (await page.locator('[data-bspf-field="sourceTeam"]').count()) === 0);
   check('title template rendered', typeof p.Title === 'string' && p.Title.indexOf('Dev Tester') > -1);
   check('attachment uploaded after retry', writes.some(w => w.op === 'addAttachment' && w.name === 'quote.pdf'));
+  // target.sendEmpty is opt-in: a config without it never sends explicit empties
+  check('no null values in the payload (sendEmpty is opt-in)', Object.keys(p).every(k => p[k] !== null),
+    Object.keys(p).filter(k => p[k] === null).join(', '));
   check('no page errors', pageErrors.length === 0, pageErrors.join(' | '));
+  await page.close();
+}
+
+/* =====================================================================
+   Engine 0.6.0 — branching, choicesWhen, number dropdown/slider, clear
+   buttons, business-day rules, sendEmpty, @me, confirmation redirect,
+   BSPForms.normalize / BSPForms.lists (docs/BUILDER-PLAN.md E1–E9a).
+   ===================================================================== */
+const BRANCH = '?form=example-branching';
+const HOME_RE = /\/sites\/FCUPortal\/SitePages\/Home\.aspx$/;
+const ME_LOGIN = 'i:0#.f|membership|dev.tester@example.com';
+const SOFIA = { key: 'i:0#.f|membership|sofia.chen@example.com', text: 'Sofia Chen', email: 'sofia.chen@example.com' };
+// Fri 2030-01-11 10:00 ET (January = UTC-5)
+const FRI_10AM_ET = '2030-01-11T15:00:00Z';
+const ST = 'document.querySelector(".bspf")._x_dataStack[0]';
+
+/* A harness page on either fixture: clock pinned, config route-mutated,
+   the confirmation redirect target stubbed, adds fast. */
+async function openForm(browser, opts) {
+  opts = opts || {};
+  const ctxOpts = { viewport: { width: 1100, height: 1600 } };
+  if (opts.tz) ctxOpts.timezoneId = opts.tz;
+  const ctx = await browser.newContext(ctxOpts);
+  const page = await ctx.newPage();
+  page.__errors = [];
+  page.on('pageerror', e => page.__errors.push(e.message));
+  await page.clock.setFixedTime(new Date(opts.now || FRI_10AM_ET));
+  const fixture = opts.it ? 'example-it-request' : 'example-branching';
+  await page.route('**/' + fixture + '.json', async route => {
+    const cfg = await (await route.fetch()).json();
+    if (opts.mutate) opts.mutate(cfg);
+    await route.fulfill({ json: cfg });
+  });
+  await page.route('**/sites/FCUPortal/SitePages/Home.aspx', r => r.fulfill({ contentType: 'text/html', body: '<title>home</title>home' }));
+  await page.addInitScript(ms => { window.BSPF_MOCK_ADD_MS = ms; }, opts.addMs == null ? 100 : opts.addMs);
+  if (opts.init) await page.addInitScript(opts.init);
+  await page.goto(BASE + (opts.it ? '' : BRANCH));
+  await page.waitForFunction(() => {
+    const m = document.querySelector('[data-bsp-form]');
+    return m && /ready|error/.test(m.getAttribute('data-bspf-state') || '');
+  }, null, { timeout: 8000 });
+  await page.waitForTimeout(opts.settle == null ? 300 : opts.settle);
+  return { ctx, page };
+}
+const state = page => page.evaluate(new Function('const s = ' + ST + '; return { page: s.page, view: s.view, active: s.activePages(), values: JSON.parse(JSON.stringify(s.values)), errors: JSON.parse(JSON.stringify(s.errors)), warnings: JSON.parse(JSON.stringify(s.warnings)) };'));
+const adds = page => page.evaluate(() => window.__BSPF_MOCK_WRITES__.filter(w => w.op === 'addItem').map(w => w.payload));
+// open a combo, click the visible option with this text (programmatic: no pointer flake)
+async function comboPick(page, k, label) {
+  await page.evaluate(async ({ k, label }) => {
+    const f = document.querySelector('[data-bspf-field="' + k + '"]');
+    f.querySelector('.bspf-combo__control').click();
+    await new Promise(r => setTimeout(r, 80));
+    const opt = [...f.querySelectorAll('.bspf-combo__option')]
+      .find(b => b.offsetParent !== null && b.innerText.trim() === String(label));
+    if (!opt) throw new Error('comboPick: no visible option "' + label + '" in ' + k);
+    opt.click();
+  }, { k, label });
+  await page.waitForTimeout(120);
+}
+// the visible (allowed) option texts of a combo; leaves the menu closed
+async function comboOptions(page, k) {
+  return page.evaluate(async k => {
+    const f = document.querySelector('[data-bspf-field="' + k + '"]');
+    const c = f.querySelector('.bspf-combo__control');
+    c.click();
+    await new Promise(r => setTimeout(r, 80));
+    const out = [...f.querySelectorAll('.bspf-combo__option:not(.bspf-combo__option--clear)')]
+      .filter(b => b.offsetParent !== null).map(b => b.innerText.trim());
+    c.click();
+    await new Promise(r => setTimeout(r, 40));
+    return out;
+  }, k);
+}
+async function clickIn(page, sel) {
+  const ok = await page.evaluate(s => { const e = document.querySelector(s); if (!e) return false; e.click(); return true; }, sel);
+  if (!ok) throw new Error('clickIn: nothing matches ' + sel);
+  await page.waitForTimeout(120);
+}
+const isVisible = (page, sel) => page.evaluate(s => { const e = document.querySelector(s); return !!e && e.offsetParent !== null; }, sel);
+const setVal = (page, k, v) => page.evaluate(new Function('a', 'const s = ' + ST + '; s.values[a.k] = a.v;'), { k, v }).then(() => page.waitForTimeout(150));
+const visibleSteps = page => page.evaluate(() => [...document.querySelectorAll('.bspf__stepper .stepper__step')]
+  .filter(li => li.offsetParent !== null)
+  .map(li => li.querySelector('.stepper__label').textContent + '#' + li.querySelector('.stepper__dot span[x-text]').textContent.trim()));
+const navVisible = page => page.evaluate(() => [...document.querySelectorAll('.bspf-nav button')]
+  .filter(b => b.offsetParent !== null).map(b => b.textContent.trim()));
+async function submitConfirmed(page) {
+  await navClick(page, 'Submit');
+  await page.waitForTimeout(250);
+  await navClick(page, 'Yes');
+  await page.waitForSelector('.bspf-done', { state: 'visible', timeout: 5000 });
+  await page.waitForTimeout(100);
+}
+
+async function testBranching(browser) {
+  console.log('branching (example-branching: page visibleWhen / endWhen):');
+  let { ctx, page } = await openForm(browser);
+  let s = await state(page);
+  check('mount ready', (await page.getAttribute('[data-bsp-form]', 'data-bspf-state')) === 'ready');
+  check('initial active pages [0,4]', JSON.stringify(s.active) === '[0,4]', JSON.stringify(s.active));
+  let steps = await visibleSteps(page);
+  check('stepper: 2 steps numbered 1, 2', JSON.stringify(steps) === JSON.stringify(['About the request#1', 'Anything else#2']), JSON.stringify(steps));
+
+  await comboPick(page, 'requestType', 'Equipment');
+  s = await state(page);
+  steps = await visibleSteps(page);
+  check('Equipment → Equipment page added [0,1,4]', JSON.stringify(s.active) === '[0,1,4]', JSON.stringify(s.active));
+  check('stepper renumbers: 3 steps 1, 2, 3', JSON.stringify(steps) === JSON.stringify(['About the request#1', 'Equipment#2', 'Anything else#3']), JSON.stringify(steps));
+  await navClick(page, 'Next');
+  await page.waitForTimeout(150);
+  check('Next: 0 → 1 (Equipment)', (await state(page)).page === 1);
+  await comboPick(page, 'item', 'Monitor');
+  await navClick(page, 'Next');
+  await page.waitForTimeout(150);
+  check('Next: 1 → 4 (Room booking and Deadline skipped)', (await state(page)).page === 4);
+  await navClick(page, 'Back');
+  await page.waitForTimeout(150);
+  check('Back: 4 → 1', (await state(page)).page === 1);
+  await navClick(page, 'Back');
+  await page.waitForTimeout(150);
+  check('Back: 1 → 0, and no Back button on page 0', (await state(page)).page === 0 && !(await navVisible(page)).includes('Back'));
+  await clickIn(page, '[data-bspf-field="hasDeadline"] input[type="checkbox"]');
+  s = await state(page);
+  check('hasDeadline on → Deadline page added [0,1,3,4]', JSON.stringify(s.active) === '[0,1,3,4]', JSON.stringify(s.active));
+  steps = await visibleSteps(page);
+  check('…4 steps, Deadline numbered 3', steps.length === 4 && steps[2] === 'Deadline#3', JSON.stringify(steps));
+
+  // clamp: the current page stops applying → nearest earlier active page
+  await navClick(page, 'Next');
+  await page.waitForTimeout(150);
+  await setVal(page, 'requestType', 'Room booking');
+  s = await state(page);
+  check('clamp: on Equipment, requestType → Room booking moves page back to 0', s.page === 0 && JSON.stringify(s.active) === '[0,2,3,4]',
+    JSON.stringify({ page: s.page, active: s.active }));
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+
+  // stale answers: room answers left behind, deadline answered then switched off
+  ({ ctx, page } = await openForm(browser));
+  await comboPick(page, 'requestType', 'Room booking');
+  await navClick(page, 'Next');
+  await page.waitForTimeout(150);
+  check('Room booking → page 2', (await state(page)).page === 2);
+  await page.fill('[data-bspf-field="bookingDate"] input.input', '2030-01-15');
+  await page.focus('[data-bspf-field="attendees"] input[type="range"]');
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(100);
+  s = await state(page);
+  check('room answers entered (date + slider)', s.values.bookingDate === '2030-01-15' && typeof s.values.attendees === 'number', JSON.stringify([s.values.bookingDate, s.values.attendees]));
+  await navClick(page, 'Back');
+  await page.waitForTimeout(150);
+  await comboPick(page, 'requestType', 'Equipment');
+  await clickIn(page, '[data-bspf-field="hasDeadline"] input[type="checkbox"]');
+  await navClick(page, 'Next');
+  await page.waitForTimeout(150);
+  await comboPick(page, 'item', 'Monitor');
+  await comboPick(page, 'quantity', 2);
+  await navClick(page, 'Next');
+  await page.waitForTimeout(150);
+  check('Equipment → Next lands on Deadline (3)', (await state(page)).page === 3);
+  await page.fill('[data-bspf-field="deadlineDate"] input.input', '2030-01-18');
+  await navClick(page, 'Back'); await page.waitForTimeout(150);
+  await navClick(page, 'Back'); await page.waitForTimeout(150);
+  await clickIn(page, '[data-bspf-field="hasDeadline"] input[type="checkbox"]');
+  s = await state(page);
+  check('hasDeadline off → Deadline drops out [0,1,4] (its answer kept in state)', JSON.stringify(s.active) === '[0,1,4]' && s.values.deadlineDate === '2030-01-18',
+    JSON.stringify({ active: s.active, d: s.values.deadlineDate }));
+  check('a rule/token read of a skipped page\'s field sees it empty', await page.evaluate(new Function('const s = ' + ST + '; return s._get("deadlineDate") === "" && s._get("bookingDate") === "" && s._get("attendees") === "";')));
+  await navClick(page, 'Next'); await page.waitForTimeout(150);
+  await navClick(page, 'Next'); await page.waitForTimeout(150);
+  check('…and Next skips it: 1 → 4', (await state(page)).page === 4);
+  await page.fill('[data-bspf-field="reference"] input', 'TCK-42');
+  await submitConfirmed(page);
+  let p = (await adds(page))[0] || {};
+  check('stale room answers absent from the payload', !('BookingDate' in p) && !('Attendees' in p), JSON.stringify(p));
+  check('skipped Deadline page: its column absent (not null)', !('Deadline' in p), JSON.stringify(p.Deadline));
+  check('hidden field (otherDetails) absent', !('OtherDetails' in p));
+  check('number dropdown saves a Number', p.Quantity === 2 && typeof p.Quantity === 'number', JSON.stringify(p.Quantity));
+  check('"_Ref" written as OData__Ref, never _Ref', p.OData__Ref === 'TCK-42' && !('_Ref' in p), JSON.stringify(p));
+  check('active answers saved (Requester = @me, Item, booleans)', p.RequesterId === 999 && p.RequestType === 'Equipment' && p.Item === 'Monitor' &&
+    p.HasDeadline === false && p.Ergonomic === false, JSON.stringify(p));
+  check('title template', p.Title === 'Workplace Request — Equipment — Dev Tester', JSON.stringify(p.Title));
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+
+  // a later PAGE rule and a {field:} token reading a field on a now-skipped page
+  ({ ctx, page } = await openForm(browser, {
+    mutate: cfg => {
+      cfg.pages[3].visibleWhen = { any: [{ field: 'hasDeadline', op: 'equals', value: true }, { field: 'bookingDate', op: 'notEmpty' }] };
+      cfg.target.titleTemplate = '{form:title} — {field:requestType} — {field:bookingDate}';
+    }
+  }));
+  await comboPick(page, 'requestType', 'Room booking');
+  await navClick(page, 'Next'); await page.waitForTimeout(150);
+  await page.fill('[data-bspf-field="bookingDate"] input.input', '2030-01-15');
+  await page.waitForTimeout(100);
+  s = await state(page);
+  check('bookingDate drives the Deadline page [0,2,3,4]', JSON.stringify(s.active) === '[0,2,3,4]', JSON.stringify(s.active));
+  await navClick(page, 'Back'); await page.waitForTimeout(150);
+  await comboPick(page, 'requestType', 'Equipment');
+  s = await state(page);
+  check('stale bookingDate (room page skipped) no longer drives it [0,1,4]', JSON.stringify(s.active) === '[0,1,4]' && s.values.bookingDate === '2030-01-15',
+    JSON.stringify({ active: s.active, b: s.values.bookingDate }));
+  await navClick(page, 'Next'); await page.waitForTimeout(150);
+  await comboPick(page, 'item', 'Keyboard');
+  await navClick(page, 'Next'); await page.waitForTimeout(150);
+  check('…Next skips Deadline: lands on 4', (await state(page)).page === 4);
+  await submitConfirmed(page);
+  p = (await adds(page))[0] || {};
+  check('{field:} token of a skipped page renders empty', p.Title === 'Workplace Request — Equipment — ', JSON.stringify(p.Title));
+  await ctx.close();
+
+  // endWhen: "Something else" ends the form on page 0
+  ({ ctx, page } = await openForm(browser));
+  await setVal(page, 'notes', 'left on a page the form will skip');
+  await setVal(page, 'reference', 'X-1');
+  await clickIn(page, '[data-bspf-field="hasDeadline"] input[type="checkbox"]');
+  await comboPick(page, 'requestType', 'Something else');
+  s = await state(page);
+  const nav = await navVisible(page);
+  check('endWhen: only page 0 active', JSON.stringify(s.active) === '[0]', JSON.stringify(s.active));
+  check('Submit replaces Next on page 0', nav.includes('Submit') && !nav.includes('Next'), JSON.stringify(nav));
+  check('stepper shows one step', (await visibleSteps(page)).length === 1);
+  await navClick(page, 'Submit');
+  await page.waitForTimeout(250);
+  check('otherDetails required: error, no dialog, nothing saved', await isVisible(page, '[data-bspf-field="otherDetails"] .field__error') &&
+    !(await isVisible(page, '.bspf-dialog .dialog')) && (await adds(page)).length === 0);
+  await page.fill('[data-bspf-field="otherDetails"] textarea', 'A coat rack for the team room.');
+  await submitConfirmed(page);
+  p = (await adds(page))[0] || {};
+  check('payload has page-0 columns only', JSON.stringify(Object.keys(p).sort()) === JSON.stringify(['HasDeadline', 'OtherDetails', 'RequestType', 'RequesterId', 'Title']),
+    JSON.stringify(Object.keys(p).sort()));
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+}
+
+async function testNormalizeErrors(browser) {
+  console.log('0.6.0 config errors (error card + BSPForms.normalize):');
+  const read = name => JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'forms', name + '.json'), 'utf8'));
+  const itField = (cfg, id) => { let hit; cfg.pages.forEach(p => p.sections.forEach(s => s.fields.forEach(f => { if (f.id === id) hit = f; }))); return hit; };
+  const cases = [
+    ['pages[0].visibleWhen', false, cfg => { cfg.pages[0].visibleWhen = { field: 'requestType', op: 'notEmpty' }; }, /first page always shows/],
+    ['page visibleWhen on a field of its own page', false, cfg => { cfg.pages[1].visibleWhen = { field: 'ergonomic', op: 'equals', value: true }; }, /visibleWhen can only use fields on earlier pages/],
+    ['choicesWhen driver after the field', true, cfg => { itField(cfg, 'accessLevel').choicesWhen = { field: 'isRecurring', map: { 'true': ['Read'] } }; }, /choicesWhen\.field must come before this field/],
+    ['choicesWhen value not in choices', true, cfg => { itField(cfg, 'accessLevel').choicesWhen.map.Hardware = ['Standard kit', 'Gold kit']; }, /choicesWhen value "Gold kit" is not one of this field's choices/],
+    ['slider without validation.max', true, cfg => { delete itField(cfg, 'impactScore').validation.max; }, /display "slider" needs whole-number validation\.min and validation\.max/],
+    ['number dropdown with > 200 values', true, cfg => { itField(cfg, 'quantity').validation.max = 250; }, /lists at most 200 values/],
+    ['unknown date rule op', true, cfg => { itField(cfg, 'neededBy').rules.push({ op: 'onWeekday', mode: 'block' }); }, /date rule op must be one of/],
+    ['minBusinessDays without form.businessHours', false, cfg => { delete cfg.form.businessHours; }, /minBusinessDays needs form\.businessHours/],
+    ['attachments on a page with visibleWhen', true, cfg => { cfg.pages[2].visibleWhen = { field: 'category', op: 'notEmpty' }; }, /which has visibleWhen/],
+    ['default "@me" on a text field', true, cfg => { itField(cfg, 'costCentre').default = '@me'; }, /default "@me" is for person fields/]
+  ];
+  const probe = await browser.newPage();
+  await probe.goto(BASE);
+  await probe.waitForTimeout(800);
+  for (const [name, it, mutate, re] of cases) {
+    const { ctx, page } = await openForm(browser, { it, mutate, settle: 100 });
+    const st = await page.getAttribute('[data-bsp-form]', 'data-bspf-state');
+    check(name + ' → error card', st === 'error' && await page.locator('[data-bspf-fatal]').isVisible(), 'state=' + st);
+    await ctx.close();
+    const cfg = read(it ? 'example-it-request' : 'example-branching');
+    mutate(cfg);
+    const errs = await probe.evaluate(c => BSPForms.normalize(c).errors, cfg);
+    check('  …BSPForms.normalize reports it', errs.some(e => re.test(e)), JSON.stringify(errs));
+  }
+  // every shipped config still loads
+  const names = fs.readdirSync(path.join(__dirname, '..', 'forms')).filter(f => /\.json$/.test(f)).map(f => f.replace(/\.json$/, ''));
+  const bad = [];
+  for (const n of names) {
+    const errs = await probe.evaluate(c => BSPForms.normalize(c).errors, read(n));
+    if (errs.length) bad.push(n + ': ' + errs.join('; '));
+  }
+  check('BSPForms.normalize: every forms/*.json has no errors (' + names.length + ')', bad.length === 0, bad.join(' | '));
+  await probe.close();
+}
+
+async function testChoicesWhen(browser) {
+  console.log('choicesWhen:');
+  // IT request: driver = choice "category"
+  let { ctx, page } = await openForm(browser, { it: true, now: TUE_10AM_ET });
+  await toPage(page, 1);
+  check('no driver value → dependent field hidden', !(await isVisible(page, '[data-bspf-field="accessLevel"]')));
+  await comboPick(page, 'category', 'Hardware');
+  check('driver set → field shows', await isVisible(page, '[data-bspf-field="accessLevel"]'));
+  let opts = await comboOptions(page, 'accessLevel');
+  check('only the allowed options are visible (Hardware)', JSON.stringify(opts) === JSON.stringify(['Standard kit', 'Upgraded kit']), JSON.stringify(opts));
+  await comboPick(page, 'accessLevel', 'Upgraded kit');
+  check('pick held', (await state(page)).values.accessLevel === 'Upgraded kit');
+  await comboPick(page, 'category', 'Software');
+  check('driver change prunes a no-longer-allowed value', (await state(page)).values.accessLevel === '');
+  opts = await comboOptions(page, 'accessLevel');
+  check('options follow the driver (Software)', JSON.stringify(opts) === JSON.stringify(['Single user', 'Team licence']), JSON.stringify(opts));
+  await comboPick(page, 'accessLevel', 'Team licence');
+  await setVal(page, 'category', 'System access');   // not a click: the $watch prunes whatever changed it
+  check('programmatic driver change prunes too', (await state(page)).values.accessLevel === '');
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+
+  // branching: driver = boolean "ergonomic", dependent single choice with fill-in
+  ({ ctx, page } = await openForm(browser));
+  await comboPick(page, 'requestType', 'Equipment');
+  await navClick(page, 'Next'); await page.waitForTimeout(150);
+  opts = await comboOptions(page, 'item');
+  check('boolean driver off → its "false" options', JSON.stringify(opts) === JSON.stringify(['Monitor', 'Keyboard', 'Mouse']), JSON.stringify(opts));
+  await comboPick(page, 'item', 'Keyboard');
+  await clickIn(page, '[data-bspf-field="ergonomic"] input[type="checkbox"]');
+  check('boolean driver flip prunes the value', (await state(page)).values.item === '');
+  opts = await comboOptions(page, 'item');
+  check('boolean driver on → its "true" options', JSON.stringify(opts) === JSON.stringify(['Standing desk', 'Ergonomic chair']), JSON.stringify(opts));
+  await page.evaluate(new Function('const s = ' + ST + '; s.fill.item = "Footrest"; s.pickFill("item");'));
+  await page.waitForTimeout(100);
+  check('fill-in ("Other") value held', (await state(page)).values.item === 'Footrest');
+  await clickIn(page, '[data-bspf-field="ergonomic"] input[type="checkbox"]');
+  check('driver change drops the fill-in value', (await state(page)).values.item === '');
+  await ctx.close();
+
+  // multichoice + fill-in pruning (route-mutated: an "extras" multichoice keyed on category)
+  ({ ctx, page } = await openForm(browser, {
+    it: true, now: TUE_10AM_ET,
+    mutate: cfg => {
+      const sec = cfg.pages[1].sections[0];
+      const at = sec.fields.findIndex(f => f.id === 'accessLevel') + 1;
+      sec.fields.splice(at, 0, {
+        id: 'extras', type: 'multichoice', label: 'Extras', column: 'Extras', fillIn: true,
+        choices: ['Bag', 'Stand', 'Charger', 'Licence key', 'Training'],
+        choicesWhen: { field: 'category', map: { Hardware: ['Bag', 'Stand', 'Charger'], Software: ['Licence key', 'Training'], 'System access': ['Training'] } }
+      });
+    }
+  }));
+  await toPage(page, 1);
+  await comboPick(page, 'category', 'Hardware');
+  opts = await comboOptions(page, 'extras');
+  check('multichoice: only allowed options', JSON.stringify(opts) === JSON.stringify(['Bag', 'Stand', 'Charger']), JSON.stringify(opts));
+  await page.evaluate(new Function('const s = ' + ST + '; s.toggleMulti("extras", "Bag"); s.toggleMulti("extras", "Charger"); s.fill.extras = "Sticker"; s.pickFillMulti("extras");'));
+  await page.waitForTimeout(100);
+  check('multichoice picks + fill-in held', JSON.stringify((await state(page)).values.extras) === '["Bag","Charger","Sticker"]');
+  await comboPick(page, 'category', 'Software');
+  check('multichoice: driver change drops disallowed picks and the fill-in', JSON.stringify((await state(page)).values.extras) === '[]',
+    JSON.stringify((await state(page)).values.extras));
+  await page.evaluate(new Function('const s = ' + ST + '; s.toggleMulti("extras", "Licence key"); s.toggleMulti("extras", "Training");'));
+  await comboPick(page, 'category', 'System access');
+  check('multichoice: still-allowed picks are kept', JSON.stringify((await state(page)).values.extras) === '["Training"]',
+    JSON.stringify((await state(page)).values.extras));
+  await ctx.close();
+
+  // no driver value → inactive → absent from the payload (sendEmpty on, so an
+  // ACTIVE empty field would show up as null)
+  ({ ctx, page } = await openForm(browser, {
+    it: true, now: TUE_10AM_ET,
+    mutate: cfg => {
+      cfg.target.sendEmpty = true;
+      cfg.pages[1].sections[0].fields.find(f => f.id === 'category').required = false;
+    }
+  }));
+  await page.evaluate(new Function('a', 'const s = ' + ST + '; s.values.requestFor = [a]; s.values.contactEmail = "dev.tester@example.com"; s.values.costCentre = "12345";'), SOFIA);
+  await navClick(page, 'Next'); await page.waitForTimeout(200);
+  await page.evaluate(new Function('const s = ' + ST + '; s.values.priorityJustification = "Needed for the new starter joining the team next month."; s.values.neededBy = "2030-01-22"; s.values.accessLevel = "Read";'));
+  await navClick(page, 'Next'); await page.waitForTimeout(200);
+  await page.evaluate(new Function('const s = ' + ST + '; s.values.managerAware = true;'));
+  await navClick(page, 'Submit request');
+  await page.waitForSelector('.bspf-done', { state: 'visible', timeout: 5000 });
+  const p = (await adds(page))[0] || {};
+  check('no driver value → dependent field absent (even with a stale value)', !('AccessLevel' in p), JSON.stringify(p.AccessLevel));
+  check('…while active empty fields are sent as null (sendEmpty on)', p.Category === null && p.ContactPhone === null, JSON.stringify([p.Category, p.ContactPhone]));
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+}
+
+async function testNumberControls(browser) {
+  console.log('number dropdown + slider:');
+  let { ctx, page } = await openForm(browser, { it: true, now: TUE_10AM_ET });
+  await toPage(page, 1);
+  await comboPick(page, 'category', 'Hardware');
+  const sl = '[data-bspf-field="impactScore"]';
+  const readout = () => page.locator(sl + ' .bspf-slider__value').textContent();
+  const unset = () => page.evaluate(s => document.querySelector(s + ' .bspf-slider').classList.contains('is-unset'), sl);
+  check('slider starts unset: "Not set" readout + is-unset, value ""', (await readout()).trim() === 'Not set' && await unset() &&
+    (await state(page)).values.impactScore === '');
+  const unsetShot = await page.locator(sl).screenshot();
+  await page.focus(sl + ' input[type="range"]');
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(120);
+  let v = (await state(page)).values.impactScore;
+  check('ArrowRight sets a Number (midpoint 6 → 7)', v === 7, JSON.stringify(v));
+  check('readout shows it, is-unset gone', (await readout()).trim() === '7' && !(await unset()));
+  const setShot = await page.locator(sl).screenshot();
+  await page.keyboard.press('End');
+  await page.waitForTimeout(80);
+  check('End → max', (await state(page)).values.impactScore === 10);
+  await clickIn(page, sl + ' .bspf-slider__clear');
+  check('Clear → unset again', (await state(page)).values.impactScore === '' && (await readout()).trim() === 'Not set' && await unset());
+  check('Clear button hides while unset', !(await isVisible(page, sl + ' .bspf-slider__clear')));
+
+  // number dropdown 1..12
+  const dd = '[data-bspf-field="quantity"]';
+  const nums = await comboOptions(page, 'quantity');
+  check('dropdown lists min..max (1..12)', JSON.stringify(nums) === JSON.stringify(Array.from({ length: 12 }, (_, i) => String(i + 1))), JSON.stringify(nums));
+  await comboPick(page, 'quantity', 3);
+  v = (await state(page)).values.quantity;
+  check('dropdown value is a Number', v === 3 && typeof v === 'number', JSON.stringify(v));
+  check('…shown as a pill', (await page.locator(dd + ' .bspf-numdrop__pill').textContent()).trim() === '3');
+  // screenshot: the dropdown open
+  await clickIn(page, dd + ' .bspf-combo__control');
+  const box = await page.evaluate(s => {
+    const a = document.querySelector(s).getBoundingClientRect(), b = document.querySelector(s + ' .bspf-combo__menu').getBoundingClientRect();
+    const x = Math.min(a.left, b.left) - 8, y = Math.min(a.top, b.top) - 8;
+    return { x, y: y + window.scrollY, width: Math.max(a.right, b.right) - x + 8, height: Math.max(a.bottom, b.bottom) - y + 8 };
+  }, dd);
+  const numdropPath = path.join(os.tmpdir(), 'bspf-numdrop.png');
+  await page.screenshot({ path: numdropPath, clip: box, fullPage: true });
+  await clickIn(page, dd + ' .bspf-combo__control');
+  // slider screenshot: unset over set, one image
+  const shotPage = await ctx.newPage();
+  await shotPage.setContent('<body style="margin:0;background:#fff"><div id="shot" style="display:inline-block;padding:12px">' +
+    '<img src="data:image/png;base64,' + unsetShot.toString('base64') + '" style="display:block;margin-bottom:12px">' +
+    '<img src="data:image/png;base64,' + setShot.toString('base64') + '" style="display:block"></div></body>');
+  const sliderPath = path.join(os.tmpdir(), 'bspf-slider.png');
+  await shotPage.locator('#shot').screenshot({ path: sliderPath });
+  await shotPage.close();
+  check('screenshots saved', fs.existsSync(sliderPath) && fs.existsSync(numdropPath), sliderPath + ' ' + numdropPath);
+  console.log('    screenshots: ' + sliderPath + ' , ' + numdropPath);
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+
+  // required slider: required error until moved, no Clear button
+  ({ ctx, page } = await openForm(browser, {
+    it: true, now: TUE_10AM_ET,
+    mutate: cfg => { cfg.pages[1].sections[0].fields.find(f => f.id === 'impactScore').required = true; }
+  }));
+  await toPage(page, 1);
+  check('required slider: no Clear button rendered', (await page.locator(sl + ' .bspf-slider__clear').count()) === 0);
+  await navClick(page, 'Next');
+  await page.waitForTimeout(200);
+  let s = await state(page);
+  check('required + unset → required error', s.page === 1 && s.errors.impactScore === 'This field is required.' &&
+    await isVisible(page, sl + ' .field__error'), JSON.stringify(s.errors.impactScore));
+  await page.focus(sl + ' input[type="range"]');
+  await page.keyboard.press('ArrowLeft');
+  await page.waitForTimeout(150);
+  s = await state(page);
+  check('moving it sets a Number and clears the error', s.values.impactScore === 5 && s.errors.impactScore === '', JSON.stringify([s.values.impactScore, s.errors.impactScore]));
+  await ctx.close();
+
+  // slider value saved as a Number (branching: Room booking path)
+  ({ ctx, page } = await openForm(browser));
+  await comboPick(page, 'requestType', 'Room booking');
+  await navClick(page, 'Next'); await page.waitForTimeout(150);
+  await page.fill('[data-bspf-field="bookingDate"] input.input', '2030-01-15');
+  await page.focus('[data-bspf-field="attendees"] input[type="range"]');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await navClick(page, 'Next'); await page.waitForTimeout(150);
+  await submitConfirmed(page);
+  const p = (await adds(page))[0] || {};
+  check('slider payload value is a Number (11 → 13)', p.Attendees === 13 && typeof p.Attendees === 'number', JSON.stringify(p.Attendees));
+  check('Room path: Equipment columns absent, BookingDate written', !('Item' in p) && !('Quantity' in p) && !('Ergonomic' in p) &&
+    /^2030-01-15T/.test(p.BookingDate), JSON.stringify(p));
+  await ctx.close();
+}
+
+async function testClearButtons(browser) {
+  console.log('clear buttons:');
+  const { ctx, page } = await openForm(browser, { it: true, now: TUE_10AM_ET });
+  await toPage(page, 1);
+  await comboPick(page, 'category', 'Hardware');
+  const f = k => '[data-bspf-field="' + k + '"]';
+  // optional single choice: the × and the menu's "Clear selection" row
+  check('× hidden while empty', !(await isVisible(page, f('accessLevel') + ' .bspf-clear')));
+  await comboPick(page, 'accessLevel', 'Standard kit');
+  check('× shows once a choice is set', await isVisible(page, f('accessLevel') + ' .bspf-clear'));
+  await clickIn(page, f('accessLevel') + ' .bspf-clear');
+  check('choice × clears it (menu stays closed)', (await state(page)).values.accessLevel === '' && !(await isVisible(page, f('accessLevel') + ' .bspf-combo__menu')));
+  await comboPick(page, 'accessLevel', 'Upgraded kit');
+  await page.evaluate(async s => {
+    document.querySelector(s + ' .bspf-combo__control').click();
+    await new Promise(r => setTimeout(r, 80));
+    document.querySelector(s + ' .bspf-combo__option--clear').click();
+  }, f('accessLevel'));
+  await page.waitForTimeout(100);
+  check('menu "Clear selection" clears it', (await state(page)).values.accessLevel === '');
+  // date (optional recurrenceEnd)
+  await clickIn(page, f('isRecurring') + ' input[type="checkbox"]');
+  await page.fill(f('recurrenceEnd') + ' input.input', '2030-02-01');
+  await page.waitForTimeout(100);
+  check('date × shows when set', await isVisible(page, f('recurrenceEnd') + ' .bspf-clear'));
+  await clickIn(page, f('recurrenceEnd') + ' .bspf-clear');
+  check('date × clears it', (await state(page)).values.recurrenceEnd === '' && (await page.inputValue(f('recurrenceEnd') + ' input.input')) === '');
+  // number input (optional currency)
+  await page.fill(f('estimatedCost') + ' input.input', '250');
+  await page.waitForTimeout(100);
+  check('number input holds a Number', (await state(page)).values.estimatedCost === 250);
+  await clickIn(page, f('estimatedCost') + ' .bspf-clear');
+  check('number × clears it', (await state(page)).values.estimatedCost === '' && (await page.inputValue(f('estimatedCost') + ' input.input')) === '');
+  // number dropdown
+  await comboPick(page, 'quantity', 4);
+  await clickIn(page, f('quantity') + ' .bspf-clear');
+  check('number dropdown × clears it', (await state(page)).values.quantity === '');
+  // link (url + display text)
+  await page.fill(f('vendorLink') + ' input[type="url"]', 'https://example.com/dock');
+  await page.fill(f('vendorLink') + ' input[type="text"]', 'Dock');
+  await page.waitForTimeout(100);
+  await clickIn(page, f('vendorLink') + ' .bspf-clear');
+  const lv = (await state(page)).values.vendorLink;
+  check('link × clears url and text', lv.url === '' && lv.desc === '', JSON.stringify(lv));
+  // required fields never get one
+  const req = await page.evaluate(() => ['category', 'hardwareType', 'neededBy', 'priorityJustification']
+    .map(k => document.querySelectorAll('[data-bspf-field="' + k + '"] .bspf-clear').length));
+  check('required fields have no ×', req.every(n => n === 0), JSON.stringify(req));
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+}
+
+async function testBusinessDays(browser) {
+  for (const tz of [null, 'America/Los_Angeles']) {
+    console.log('business-day date rules (browser zone ' + (tz || 'default') + '):');
+    const { ctx, page } = await openForm(browser, { tz });
+    await comboPick(page, 'requestType', 'Room booking');
+    await navClick(page, 'Next'); await page.waitForTimeout(150);
+    const inp = '[data-bspf-field="bookingDate"] input.input';
+    check('Fri: date input min = earliest allowed (Tue 15th)', (await page.getAttribute(inp, 'min')) === '2030-01-15', await page.getAttribute(inp, 'min'));
+    const err = () => page.evaluate(() => { const e = document.querySelector('[data-bspf-field="bookingDate"] .field__error'); return e && e.offsetParent ? e.textContent : ''; });
+    await page.fill(inp, '2030-01-14');
+    await page.waitForTimeout(100);
+    check('Fri: minBusinessDays 2 rejects Mon 14th', /at least 2 business day/.test(await err()), await err());
+    await page.fill(inp, '2030-01-15');
+    await page.waitForTimeout(100);
+    check('Fri: accepts Tue 15th', (await err()) === '');
+    await page.fill(inp, '2030-02-02');
+    await page.waitForTimeout(100);
+    check('far-out Saturday passes minBusinessDays, fails businessDay', /business day, not a weekend/.test(await err()), await err());
+    // state-level: the same field under other "todays" (clock re-pinned)
+    const at = async (now, v) => {
+      await page.clock.setFixedTime(new Date(now));
+      return page.evaluate(new Function('v', 'const s = ' + ST + '; s.values.bookingDate = v; s.check("bookingDate"); return { err: s.errors.bookingDate, min: s.minDate("bookingDate") };'), v);
+    };
+    let r = await at('2030-01-12T15:00:00Z', '2030-01-14');
+    let r2 = await at('2030-01-13T15:00:00Z', '2030-01-15');
+    check('Sat/Sun "today": Mon rejected, Tue allowed, min Tue', !!r.err && r.min === '2030-01-15' && !r2.err && r2.min === '2030-01-15', JSON.stringify([r, r2]));
+    // Mon 01:00 ET = Sun 22:00 Pacific: "today" is the business zone's Monday
+    r = await at('2030-01-14T06:00:00Z', '2030-01-15');
+    r2 = await at('2030-01-14T06:00:00Z', '2030-01-16');
+    check('Mon 01:00 ET (Sun evening PT): Tue rejected, Wed allowed, min Wed', !!r.err && !r2.err && r2.min === '2030-01-16', JSON.stringify([r, r2]));
+    // DST starts Sun 2030-03-10: whole days still count right
+    r = await at('2030-03-08T15:00:00Z', '2030-03-11');
+    r2 = await at('2030-03-08T15:00:00Z', '2030-03-12');
+    check('DST weekend (Fri 8 Mar): Mon 11 rejected, Tue 12 allowed, min Tue 12', !!r.err && !r2.err && r2.min === '2030-03-12', JSON.stringify([r, r2]));
+    r = await at('2030-03-11T04:30:00Z', '2030-03-13');   // Mon 00:30 EDT = Sun 21:30 PDT
+    check('just after the DST switch (Mon 00:30 EDT): Wed 13 = 2 days, allowed', !r.err, JSON.stringify(r));
+    // a warn-mode lead time: a warning, never a block, and no :min
+    await page.clock.setFixedTime(new Date(FRI_10AM_ET));
+    await page.evaluate(new Function('const s = ' + ST + '; s.values.bookingDate = "2030-01-15"; s.check("bookingDate"); s.values.hasDeadline = true;'));
+    await toPage(page, 3);
+    const dl = '[data-bspf-field="deadlineDate"]';
+    check('warn-only minBusinessDays → no min attribute', (await page.getAttribute(dl + ' input.input', 'min')) === null);
+    await page.fill(dl + ' input.input', '2030-01-15');
+    await page.waitForTimeout(100);
+    let ds = await state(page);
+    check('warn-mode: under 3 business days → warning, no error', /Under 3 business days/.test(ds.warnings.deadlineDate) && ds.errors.deadlineDate === '',
+      JSON.stringify([ds.warnings.deadlineDate, ds.errors.deadlineDate]));
+    await page.fill(dl + ' input.input', '2030-01-16');
+    await page.waitForTimeout(100);
+    ds = await state(page);
+    check('…3 business days → no warning', ds.warnings.deadlineDate === '' && ds.errors.deadlineDate === '');
+    check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+    await ctx.close();
+  }
+}
+
+async function testSendEmpty(browser) {
+  console.log('target.sendEmpty (example-branching):');
+  const { ctx, page } = await openForm(browser, {
+    mutate: cfg => {
+      cfg.pages[4].sections[0].fields.push(
+        { id: 'tags', type: 'multichoice', label: 'Tags', column: 'Tags', choices: ['Urgent', 'Follow-up'] },
+        { id: 'watchers', type: 'person', multiple: true, label: 'Watchers', column: 'Watchers' },
+        { id: 'backup', type: 'person', label: 'Backup contact', column: 'Backup' },
+        { id: 'website', type: 'link', label: 'Website', column: 'Website' });
+    }
+  });
+  await comboPick(page, 'requestType', 'Equipment');
+  await navClick(page, 'Next'); await page.waitForTimeout(150);
+  await comboPick(page, 'item', 'Mouse');
+  await navClick(page, 'Next'); await page.waitForTimeout(150);
+  await submitConfirmed(page);
+  const p = (await adds(page))[0] || {};
+  check('exact keys: active columns only (inactive pages absent)', JSON.stringify(Object.keys(p).sort()) === JSON.stringify(
+    ['BackupId', 'Ergonomic', 'HasDeadline', 'Item', 'Notes', 'OData__Ref', 'Quantity', 'RequestType', 'RequesterId', 'Tags', 'Title', 'WatchersId', 'Website']),
+  JSON.stringify(Object.keys(p).sort()));
+  check('empty scalars → null (number, note, text, link, single person)', p.Quantity === null && p.Notes === null && p.OData__Ref === null &&
+    p.Website === null && p.BackupId === null, JSON.stringify(p));
+  check('empty multi-values → { results: [] } (multichoice, multi person)', JSON.stringify(p.Tags) === '{"results":[]}' &&
+    JSON.stringify(p.WatchersId) === '{"results":[]}', JSON.stringify([p.Tags, p.WatchersId]));
+  check('no "_Ref" key', !('_Ref' in p));
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+}
+
+async function testAtMe(browser) {
+  console.log('@me person default:');
+  // reference config: a multi person defaulting to me
+  let { ctx, page } = await openForm(browser, { it: true, now: TUE_10AM_ET });
+  let s = await state(page);
+  check('IT request: ccPeople (multiple) prefilled with me', s.values.ccPeople.length === 1 && s.values.ccPeople[0].key === ME_LOGIN &&
+    s.values.ccPeople[0].text === 'Dev Tester', JSON.stringify(s.values.ccPeople));
+  await ctx.close();
+
+  // branching: remove me, pick someone else; Submit another re-fills me and cancels the countdown
+  ({ ctx, page } = await openForm(browser, { mutate: cfg => { cfg.confirmation.redirect.seconds = 3; } }));
+  const rq = '[data-bspf-field="requester"]';
+  s = await state(page);
+  check('requester prefilled with Dev Tester (claims login, id resolved at submit)', s.values.requester.length === 1 && s.values.requester[0].key === ME_LOGIN &&
+    s.values.requester[0].email === 'dev.tester@example.com' && s.values.requester[0].id === null, JSON.stringify(s.values.requester));
+  check('…shown as a tag', (await page.locator(rq + ' .bspf-people__tag').textContent()).includes('Dev Tester'));
+  await clickIn(page, rq + ' .tag__remove');
+  check('removed', (await state(page)).values.requester.length === 0);
+  await page.fill(rq + ' .bspf-people__input', 'sof');
+  await page.waitForSelector(rq + ' .bspf-people__option', { state: 'visible', timeout: 4000 });
+  await clickIn(page, rq + ' .bspf-people__option');
+  await page.waitForTimeout(250);
+  s = await state(page);
+  check('someone else picked instead', s.values.requester.length === 1 && s.values.requester[0].text === 'Sofia Chen', JSON.stringify(s.values.requester));
+  await comboPick(page, 'requestType', 'Something else');
+  await page.fill('[data-bspf-field="otherDetails"] textarea', 'Picked on behalf of Sofia.');
+  await submitConfirmed(page);
+  const p = (await adds(page))[0] || {};
+  check('payload: the picked person, not me', p.RequesterId === 1000, JSON.stringify(p.RequesterId));
+  check('confirmation countdown shows', await isVisible(page, '.bspf-done .bspf-result__count') &&
+    /Redirecting in \d+ seconds/.test(await page.locator('.bspf-done .bspf-result__count').textContent()));
+  await navClick(page, 'Submit another');
+  await page.waitForTimeout(400);
+  s = await state(page);
+  check('Submit another re-fills me', s.view === 'form' && s.values.requester.length === 1 && s.values.requester[0].key === ME_LOGIN, JSON.stringify(s.values.requester));
+  await page.waitForTimeout(4200);
+  check('Submit another cancelled the redirect', !HOME_RE.test(page.url()) &&
+    await page.evaluate(new Function('return ' + ST + '.redir.url === "";')), page.url());
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+
+  // the fill is async: a person picked before it lands is never replaced.
+  // The mock's ready() is slowed (3 s) so the pick reliably comes first.
+  ({ ctx, page } = await openForm(browser, {
+    settle: 0,
+    init: () => {
+      let v;
+      Object.defineProperty(window, 'BSPF_MOCK_SP', {
+        configurable: true,
+        get() { return v; },
+        set(x) { x.ready = () => new Promise(r => setTimeout(r, 3000)); v = x; }
+      });
+    }
+  }));
+  const before = (await state(page)).values.requester.length;
+  await page.evaluate(new Function('a', 'const s = ' + ST + '; s.addPerson("requester", a);'), SOFIA);
+  await page.waitForTimeout(3600);
+  s = await state(page);
+  check('an earlier pick is not overwritten by the late @me fill', before === 0 && s.values.requester.length === 1 &&
+    s.values.requester[0].text === 'Sofia Chen', JSON.stringify({ before, now: s.values.requester }));
+  await ctx.close();
+  ({ ctx, page } = await openForm(browser, {
+    settle: 0,
+    init: () => {
+      let v;
+      Object.defineProperty(window, 'BSPF_MOCK_SP', {
+        configurable: true,
+        get() { return v; },
+        set(x) { x.ready = () => new Promise(r => setTimeout(r, 3000)); v = x; }
+      });
+    }
+  }));
+  await page.waitForTimeout(3600);
+  s = await state(page);
+  check('…while an untouched field is filled once the user is known', s.values.requester.length === 1 && s.values.requester[0].key === ME_LOGIN,
+    JSON.stringify(s.values.requester));
+  await ctx.close();
+}
+
+async function testConfirmationRedirect(browser) {
+  console.log('confirmation redirect:');
+  const { ctx, page } = await openForm(browser, { mutate: cfg => { cfg.confirmation.redirect.seconds = 1; } });
+  await comboPick(page, 'requestType', 'Something else');
+  await page.fill('[data-bspf-field="otherDetails"] textarea', 'A whiteboard.');
+  await navClick(page, 'Submit');
+  await page.waitForTimeout(250);
+  check('submitConfirm: custom title and Yes / No', /Send this request\?/.test(await page.locator('.bspf-dialog').textContent()) &&
+    (await page.locator('.bspf-dialog__ok').textContent()).trim() === 'Yes' && (await page.locator('.bspf-dialog__alt').textContent()).trim() === 'No');
+  await navClick(page, 'Yes');
+  await page.waitForSelector('.bspf-done', { state: 'visible', timeout: 5000 });
+  check('done view: countdown + "Go now" link to the configured page', await isVisible(page, '.bspf-done .bspf-result__count') &&
+    (await page.getAttribute('.bspf-done .bspf-result__count a', 'href')) === '/sites/FCUPortal/SitePages/Home.aspx');
+  await page.waitForURL(HOME_RE, { timeout: 5000 }).catch(() => {});
+  check('navigates to confirmation.redirect.url', HOME_RE.test(page.url()), page.url());
+  await ctx.close();
+}
+
+async function testListsApi(browser) {
+  console.log('BSPForms.lists() (read-only builder facade):');
+  const page = await browser.newPage();
+  await page.goto(BASE);
+  await page.waitForTimeout(800);
+  const r = await page.evaluate(async () => {
+    const L = BSPForms.lists();
+    const keys = Object.keys(L).sort();
+    const lists = await L.getWebLists();
+    const t = lists.find(l => l.title === 'BSPF Builder Test');
+    const schema = await L.getListSchema({ listId: t.id });
+    const under = schema.fields.find(f => f.InternalName === '_Under');
+    const nd = schema.fields.find(f => f.InternalName === 'NumDefault');
+    return { keys, n: lists.length, same: BSPForms.lists() === L, title: schema.list.title,
+      under: under && under.EntityPropertyName, ndMin: nd ? nd.MinimumValue : 'missing', nfields: schema.fields.length };
+  });
+  check('exactly ready / userInfo / getWebLists / getListSchema', JSON.stringify(r.keys) === '["getListSchema","getWebLists","ready","userInfo"]', JSON.stringify(r.keys));
+  check('no write method', !r.keys.some(k => /add|ensure|update|delete|write|set|save|remove/i.test(k)));
+  check('getWebLists() → 3 lists', r.n === 3, r.n);
+  check('getListSchema(BSPF Builder Test): _Under → OData__Under', r.title === 'BSPF Builder Test' && r.under === 'OData__Under', JSON.stringify(r));
+  check('…NumDefault MinimumValue is null (unbounded)', r.ndMin === null, JSON.stringify(r.ndMin));
+  check('one shared facade', r.same);
   await page.close();
 }
 
 (async () => {
   const browser = await launch();
+  // ONLY=testBranching,testSendEmpty runs a subset (iterating on one area)
+  const only = process.env.ONLY ? process.env.ONLY.split(',') : null;
+  const suite = [testEditMode, testConfigErrors, testPresentation, testBusinessPrompt, testClassic, testCreativeCallout,
+    testDoctorRichText, testZoneAttestation, testFullFlow,
+    // engine 0.6.0
+    testBranching, testNormalizeErrors, testChoicesWhen, testNumberControls, testClearButtons, testBusinessDays,
+    testSendEmpty, testAtMe, testConfirmationRedirect, testListsApi];
   try {
-    await testEditMode(browser);
-    await testConfigErrors(browser);
-    await testPresentation(browser);
-    await testBusinessPrompt(browser);
-    await testClassic(browser);
-    await testCreativeCallout(browser);
-    await testDoctorRichText(browser);
-    await testZoneAttestation(browser);
-    await testFullFlow(browser);
+    for (const t of suite) if (!only || only.includes(t.name)) await t(browser);
   } finally {
     await browser.close();
   }

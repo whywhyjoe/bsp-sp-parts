@@ -61,6 +61,7 @@
         if (form) {
           mount.setAttribute('data-config', '../forms/' + form[1] + '.json');
           if (form[1] === 'ps-zone-attestation') window.BSPF_MOCK_TARGET = 'PS_Zone-Attestation-Responses';
+          if (form[1] === 'example-branching') window.BSPF_MOCK_TARGET = 'Workplace Requests';
         }
         if (location.search.indexOf('validate') > -1) mount.setAttribute('data-validate', '');
       })();

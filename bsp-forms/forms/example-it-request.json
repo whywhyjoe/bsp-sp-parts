@@ -82,7 +82,8 @@
               "type": "person",
               "multiple": true,
               "label": "Keep informed (optional)",
-              "hint": "These people are copied on updates.",
+              "hint": "These people are copied on updates. You're added to start with — remove yourself if you like.",
+              "default": "@me",
               "column": "CcPeople",
               "validation": { "maxPeople": 5 }
             },
@@ -169,6 +170,48 @@
               "validation": { "maxChoices": 3 }
             },
             {
+              "id": "accessLevel",
+              "type": "choice",
+              "label": "Level needed (optional)",
+              "column": "AccessLevel",
+              "hint": "The options follow the category above.",
+              "choices": [
+                { "value": "Standard kit", "color": "blue" },
+                { "value": "Upgraded kit", "color": "teal" },
+                { "value": "Single user", "color": "green" },
+                { "value": "Team licence", "color": "sky" },
+                { "value": "Read", "color": "gray" },
+                { "value": "Contribute", "color": "lavender" },
+                { "value": "Admin", "color": "orange" }
+              ],
+              "choicesWhen": {
+                "field": "category",
+                "map": {
+                  "Hardware": ["Standard kit", "Upgraded kit"],
+                  "Software": ["Single user", "Team licence"],
+                  "System access": ["Read", "Contribute", "Admin"]
+                }
+              }
+            },
+            {
+              "id": "quantity",
+              "type": "number",
+              "display": "dropdown",
+              "label": "How many? (optional)",
+              "column": "Quantity",
+              "visibleWhen": { "field": "category", "op": "in", "value": ["Hardware", "Software"] },
+              "validation": { "min": 1, "max": 12 }
+            },
+            {
+              "id": "impactScore",
+              "type": "number",
+              "display": "slider",
+              "label": "Business impact if this isn't done (optional)",
+              "hint": "1 = minor inconvenience, 10 = work stops.",
+              "column": "ImpactScore",
+              "validation": { "min": 1, "max": 10 }
+            },
+            {
               "id": "priorityJustification",
               "type": "textarea",
               "label": "Business justification",
@@ -228,7 +271,8 @@
                   "days": 2,
                   "mode": "warn",
                   "message": "Less than 2 days' notice — same-week fulfilment isn't guaranteed."
-                }
+                },
+                { "op": "businessDay", "mode": "block" }
               ],
               "prompt": {
                 "withinBusinessDays": 1,

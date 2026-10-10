@@ -17,7 +17,7 @@ in the **same** library as those two. Use whatever path your existing
 ## 1. Updating the engine (any form)
 
 Do this whenever `bsp-forms.js` or `bsp-forms.css` changes on main. The engine
-version is the `VERSION` line near the top of `bsp-forms.js` (now `0.5.0`).
+version is the `VERSION` line near the top of `bsp-forms.js` (now `0.6.0`).
 
 1. Keep a copy of the deployed `bsp-forms.js` and `bsp-forms.css` (for
    rollback).
@@ -29,7 +29,7 @@ version is the `VERSION` line near the top of `bsp-forms.js` (now `0.5.0`).
    the other forms; they never load it.
 4. **Bump `?v=` on every page that embeds a form.** It's the `?v=…` at the end
    of the `bsp-forms.js` script URL in each page's web part snippet; use the
-   engine version, e.g. `?v=0.5.0`. The same stamp cache-busts
+   engine version, e.g. `?v=0.6.0`. The same stamp cache-busts
    `bsp-forms.css`. A page left on its old `?v=` can keep running the cached
    old engine.
 5. Open each form page once and check that it renders and that devtools shows
@@ -38,7 +38,17 @@ version is the `VERSION` line near the top of `bsp-forms.js` (now `0.5.0`).
 Config JSON files (`forms/*.json`) are fetched uncached, so editing one never
 needs a `?v=` bump: it's live on the next page load.
 
-**What 0.5.0 changes for existing forms:** nothing in how they look or what
+**What 0.6.0 changes for existing forms:** what they save is unchanged (an
+empty field is still left out unless a form opts into `target.sendEmpty`).
+What they show changes in one way: an **optional** single choice, lookup,
+date, number or link field now has a **×** to clear it, and choice menus start
+with "Clear selection". Everything else in 0.6.0 is new config (branching,
+`choicesWhen`, number dropdown/slider, business-day date rules,
+`confirmation.redirect`, person `"@me"`) and the API the form builder uses —
+see docs/CONFIG-REFERENCE.md. One config check got stricter: a date rule's
+`op` must be a known one (a typo used to be ignored silently).
+
+**What 0.5.0 changed for existing forms:** nothing in how they look or what
 they save. Inputs (attachments included) are locked while a submit is saving.
 The save sends the list's item type explicitly, which fixes a pnp cache clash
 between same-titled lists on different sites. The doctor now accepts a Text

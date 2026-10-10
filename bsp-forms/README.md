@@ -56,7 +56,21 @@ two-line web part insert.
   neither validated nor submitted.
 - **Date validation rules** in `block` (can't continue) or `warn` (note only)
   mode — e.g. "due date must be ≥ 2 days out" as a warning, "end date must be
-  after start date" as a hard stop.
+  after start date" as a hard stop — plus whole **business-day** rules
+  (`minBusinessDays`, `businessDay`: at least N business days out, no
+  weekends), counted in the form's business time zone.
+- **Branching:** a page shows only when its `visibleWhen` holds, and
+  `endWhen` ends the form early. Skipped pages drop out of the stepper, and
+  their answers count as empty everywhere.
+- **Limiting choices:** `choicesWhen` narrows a choice field's options by an
+  earlier choice or yes/no answer, removing picks that no longer fit.
+- **Number dropdown and slider** (`display`), and a **×** to clear any
+  optional single-value field. `target.sendEmpty` saves a cleared field as
+  empty instead of letting SharePoint fill in the column's default.
+- **Signed-in user as a default:** a person field with `"default": "@me"`
+  starts with the submitter (editable — "on behalf of").
+- **Redirect after submit:** `confirmation.redirect` counts down, then goes
+  to a page set in the config.
 - **Conditional choice variants:** several fields may map to the **same list
   column**, declared explicitly via top-level `sharedColumns` (undeclared
   duplicates are config errors). Only one should be visible at a time; if more

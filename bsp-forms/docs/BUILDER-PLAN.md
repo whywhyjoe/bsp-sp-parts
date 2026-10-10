@@ -1,8 +1,8 @@
 # BSP Forms builder — build plan
 
-Status: **revised after Codex review** (xo turn 7, 2026-10-10; all 11
-findings accepted — see section 7). Awaiting the user's approval. Thread
-state: `bsp-forms/state/2026-10-10-bsp-forms-builder.md`.
+Status: **approved** (user, 2026-10-10), after the Codex review (xo turn
+7; all 11 findings accepted — see section 7). Thread state:
+`bsp-forms/state/2026-10-10-bsp-forms-builder.md`.
 
 ## 1. What we're building
 
@@ -39,6 +39,9 @@ layers: **engine 0.6.0** (new runtime features the builder needs) and the
 | D16 | Single user (the operator). Dense three-pane editor, move up/down + drag, autosaved draft, no guided help. |
 | D17 | Clear button on optional single choice, date, date+time, number (all displays), link. Checkbox/switch excluded; multi-choice and person already remove per chip. |
 | D18 | Attachments: max **5** files, max **10 MB** each (the builder's ceiling; can be set lower). They attach to the created list item, so the list must have attachments enabled. |
+| D19 | The review's four additions are approved: cleared means empty (E6a `sendEmpty`), answers on skipped pages count as empty (E4), page 1 always shows (E4), required columns must be written on every branch path (B7). |
+| D20 | The builder offers one- or two-column layout per section (the engine's `columns`), and drag ordering of pages, sections and controls (plus move up/down for keyboard). |
+| D21 | Visual interest at the level of the zone attestation form: new engine controls (slider, number dropdown, clear buttons) and the builder's own UI use the same tinted sections, icon tiles, pills/dots and motion vocabulary — not bare inputs. |
 
 ## 2. Engine 0.6.0
 
@@ -568,6 +571,31 @@ link, single/multi person); whether an omitted column with a
 `DefaultValue` gets the default, including a **required** one (decides
 whether B7 may count a default as satisfying a required column); and the
 `EntityPropertyName` of the `_`-prefixed column (E8).
+
+**B0 results (dev, 2026-10-10, `live-builder-probe.js`)** — done:
+- pnp v2 `fields.filter('Hidden eq false').get()` with **no `$select`**
+  returns every derived property the builder needs (`Choices` as an array,
+  `FillInChoice`, `MaxLength`, `DisplayFormat`, `MinimumValue`/
+  `MaximumValue` — **±1.797e308 when unbounded**, `ShowAsPercentage`,
+  `RichText`, `AppendOnly`, `NumberOfLines`, `AllowMultipleValues`,
+  `SelectionMode`, `EnforceUniqueValues`, `ValidationFormula`,
+  `DefaultValue` as a string, `EntityPropertyName`, `LookupList`).
+  `getWebLists` with `RootFolder` expand works. `pnp.Web` is absent.
+- Explicit empties all save empty: `null` for Text, Note (plain and rich),
+  Number, Currency, Choice, DateTime, URL, `<Person>Id`; `{ results: [] }`
+  for MultiChoice and `<People>Id`. `''` also empties Text/Choice/Note.
+- Omitted columns get their `DefaultValue` (Text, Number, Choice), and an
+  omitted **required** Choice with a default saves its default.
+- **REST does not enforce `Required`:** `ChoiceReqDef: null` on a required
+  column was accepted and saved empty. So the B7 required-column check is
+  the only guard; a gap there means bad data, not a failed save.
+- `_Under` as a payload key → 400 ("property does not exist");
+  `OData__Under` works; `EntityPropertyName` is `OData__Under`, and the
+  digit-led column is `_x0032_Num` / `OData__x0032_Num` — E8's rule holds.
+- A column `ValidationFormula` violation → 500 "List data validation
+  failed." (B7 warns; nothing more to do).
+- UI-created lists drop hyphens from their URL (`BSPDash Test  Empty`) —
+  another reason to read `RootFolder/ServerRelativeUrl`, never build it.
 
 **Phase 1 — engine 0.6.0 (E1–E8, E9a, E10).** Acceptance:
 - smoke suite green, with new checks for each feature, including: page

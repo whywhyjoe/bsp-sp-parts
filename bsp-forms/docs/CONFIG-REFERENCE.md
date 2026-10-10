@@ -18,7 +18,10 @@ below in use.
 `forms/example-it-request.json` is the reference for the single-item form;
 `forms/ps-zone-attestation.json` is the reference for bilingual text,
 `assignments`, `currentUser`, `headerCard`, `submitConfirm`, `target.set` and
-section `tint`.
+section `tint`; `forms/example-branching.json` is the reference for
+branching (page `visibleWhen` / `endWhen`), `choicesWhen` on a yes/no field,
+business-day date rules, `target.sendEmpty`, a `_`-prefixed column and
+`confirmation.redirect`.
 
 ## Bilingual forms (`form.languages`)
 
@@ -78,6 +81,12 @@ the config, anywhere, may be a pair instead of a string:
 | `siteUrl` | current site | Absolute or server-relative URL of the target web, e.g. `/sites/FCUPortal`. |
 | `titleTemplate` | — | Fills the list's `Title` column when no field maps to `Title`. Tokens: `{form:title}` `{user:name}` `{user:email}` `{date}` `{time}` `{now}` `{field:<id>}` `{var:<name>}` (and `{lookup}` on `afterSubmit` screens, `{row:<column>}` on an assignments form). |
 | `set` | — | Columns filled from templates, not fields: `{ "UserName": "{user:name}", "UserEmail": "{user:email}", "AttestationTime": "{now}" }`. Same tokens as `titleTemplate`. An empty result is left out; a field mapped to the same column wins. |
+| `sendEmpty` | `false` | `true`: every shown, mapped field that's empty is saved as **empty** (`null`; `{ "results": [] }` for multi-choice and multi-person). Without it an empty field is left out of the save, and SharePoint then fills in the column's **default** — so clearing a Priority that defaults to `Standard` would save `Standard`. Columns whose fields are all hidden (or on skipped pages) are still left out. The form builder always sets it. |
+
+**Column names starting with `_`** (and the `_x0032_…` names SharePoint makes
+for columns created with a leading digit or symbol): write `column` as the
+internal name; the engine saves it as `OData_<name>`, which is how
+SharePoint's REST API names those columns.
 
 **Tokens.** `{user:name}` and `{user:email}` are the signed-in user from
 SharePoint (the email falls back to the account's UPN). `{now}` is the moment of
@@ -106,6 +115,7 @@ opposite of a date `prompt`, whose Escape keeps the date.
 | `title` | strings.confirmTitle | Heading of the post-submit screen. |
 | `message` | strings.confirmMessage | Body text. |
 | `allowAnother` | `true` | Show a "Submit another response" button (resets the form). |
+| `redirect` | — | `{ "url": "/sites/x/SitePages/Home.aspx", "seconds": 5 }`: a countdown under the message, then the page goes there ("Go now" skips the wait; "Submit another" cancels it). `seconds` is 0–60, default 5. Only `http(s)` or server-relative URLs; `{var:…}` works. The URL comes from the config only, never the page URL. |
 | `anotherLabel` | strings.confirmAnother | Label for that button. |
 | `illustration` | — | Artwork above the title, replacing the default checkmark icon — e.g. `"spot-illustrations/checkmark-l.svg"` (resolved against `bsp-design/` like `appearance.icon`). |
 
@@ -145,6 +155,8 @@ optional title/description and can carry their own `visibleWhen`.
 | `id` | Optional but recommended; auto-generated if missing. |
 | `title`, `description` | Optional headings. `description` supports links. |
 | `icon` (sections only) | A Fluent sprite name (`person`, `edit`, `document`, `calendar-ltr`, … — the `fluent-basic-icons.svg` set, without the `ic-fluent-`/`-24-regular` wrapper). Shows the section head with an icon tile. A name the sprite doesn't have renders blank. |
+| `visibleWhen` (pages only) | Rule — **branching**. The page is skipped while it's false. It may only use fields on **earlier** pages, and the first page can't have one (so there's always a page). See *Branching*. |
+| `endWhen` (pages only) | Rule. While it's true this page is the last: **Submit** replaces **Next** and every later page is skipped. It may use fields on this page or earlier. |
 | `columns` (sections only) | `1` (default) or `2`. Two columns once the **form** is at least 600px wide, one below — keyed to the form's own width, so a narrow web-part column stays single. Headings, notes and `span: "full"` fields take the whole row; a hidden field gives its cell to the next one. |
 | `tint` (sections only) | `sky` · `blue` · `neutral`: the section becomes a soft tinted panel, e.g. to set an attestation checkbox apart. |
 | `visibleWhen` (sections only) | Rule — a hidden section's fields are neither validated nor submitted. |
@@ -161,7 +173,8 @@ Common keys:
 | `span` | `"full"` makes the field take the whole row in a `columns: 2` section. |
 | `required` | Enforced only while the field is visible. For `boolean`, required means "must be switched on". |
 | `column` | SharePoint **internal** column name. Omit for display-only fields. Several fields may share one column — see *Conditional variants*. |
-| `default` | Initial value (type-appropriate). |
+| `default` | Initial value (type-appropriate). On a `person` field, `"@me"` fills in the signed-in user (still editable — "on behalf of"); it fills only a field that's still empty, so a person the user already picked is kept. |
+| `choicesWhen` | `choice` / `multichoice` only: which choices show depends on an earlier field — see *Limiting choices*. |
 | `query` | Fill the field from a page-URL parameter, e.g. `"Team"` for `?Team=…`. The name matches in any case and the value arrives decoded. Works on `text` `textarea` `email` `phone` `hidden` `choice`. It beats `default`, and "Submit another" resets back to it. |
 | `normalize` | Cleans a `query` value: `{ "keep": "alnum", "case": "lower", "maxLength": 40 }`. `keep: "alnum"` drops everything but a–z/0–9 (spaces too); `case` is `lower` or `upper`; `maxLength` cuts it. |
 | `readOnly` | `text` only: shown as plain, non-editable text (the decoded value, never parsed as HTML) and still submitted. The row is hidden while empty. |
@@ -180,7 +193,7 @@ Common keys:
 | `textarea` | multi-line (`rows` opt.) | Multiple lines (plain, or rich text with `richText`) | `minLength`, `maxLength`; `richText: true` for a **rich-text** column — the text is HTML-escaped and line breaks become `<br>` (raw newlines collapse in a rich-text column). The doctor flags a mismatch. |
 | `email` | input w/ email validation | Single line of text | — |
 | `phone` | input w/ phone validation | Single line of text | — |
-| `number` | numeric input | Number | `min`, `max`, `integer: true` |
+| `number` | numeric input — or a dropdown or slider with `display` | Number | `min`, `max`, `integer: true`; `display`: `"input"` (default), `"dropdown"` or `"slider"` — see *Number dropdown and slider* |
 | `currency` | numeric input (0.01 step) | Currency (or Number) | `min`, `max` |
 | `choice` | **pill dropdown** | Choice | `choices` (see below), `fillIn: true` for an "enter your own" row |
 | `multichoice` | pill multi-select | Choice, multi | `choices`, `fillIn`, `validation.minChoices` / `maxChoices` |
@@ -193,6 +206,40 @@ Common keys:
 | `note` | message bar / paragraph | — | `text`, `style`: `info` `warning` `success` `danger` `plain` |
 | `currentUser` | identity card: photo (initials fallback), name, email | — | `label`. Display only. |
 | `assignments` | a table of the user's rows, a color-dot dropdown per row | Text or Choice (`column`, per row) | See *Assignments*. One per form. |
+
+**Clear buttons.** An optional single choice, lookup, date, number (any
+display) and link field shows a **×** while it has a value; choice-style
+menus also start with **Clear selection**. Required fields don't get one. A
+checkbox or switch is cleared by turning it off; multi-choice and people
+fields remove one pill at a time.
+
+### Number dropdown and slider
+
+`"display": "dropdown"` lists every whole number from `validation.min` to
+`validation.max` (at most 200 of them) in the pill dropdown;
+`"display": "slider"` gives a slider between them with the two ends labelled
+and the value in a pill. Both need whole-number `min` and `max`, step 1, and
+save a Number. A slider starts **Not set** (dimmed) until it's moved or
+clicked — so an optional slider can stay empty, and a required one shows
+the required message until it's touched. Not for `currency`.
+
+### Limiting choices (`choicesWhen`)
+
+```json
+"choicesWhen": {
+  "field": "category",
+  "map": { "Hardware": ["Laptop", "Monitor"], "Software": ["Licence"] },
+  "else": []
+}
+```
+
+`field` is an **earlier** `choice` or `boolean` field (for a boolean, the map
+keys are `"true"` and `"false"`). The choices shown are the map entry for
+its current value, else `else`, else none. **With no choices to show, the
+field is hidden** (not validated, not saved) — that's also what happens
+while the driver is unanswered. When the driver changes, picks it no longer
+allows are removed, and so is an "enter your own" value. Every listed value
+must be one of the field's own `choices`.
 
 `choices` entries are strings or `{ "value": "…", "label": "…", "color": "…" }`.
 `value` is what's saved; `label` (optional, may be bilingual) is what's shown.
@@ -309,6 +356,23 @@ Ops: `equals` · `notEquals` · `in` · `notIn` · `includes` · `includesAny` �
 Show/hide is intended to be driven by **yes/no, choice, multichoice, and date**
 fields.
 
+## Branching (pages)
+
+A page with `visibleWhen` is skipped while its rule is false; a page whose
+`endWhen` is true ends the form there. The stepper shows only the pages that
+apply and numbers them 1, 2, 3…; **Next** and **Back** jump over skipped
+pages.
+
+- **Answers on a skipped page count as empty**, for every rule, choice
+  filter and `{field:…}` token, and they're not saved. An answer left behind
+  on a branch the user backed out of can't drive anything.
+- If an earlier answer changes so the page the user is on no longer applies,
+  the form steps back to the nearest page that does.
+- Attachments must be on a page every path reaches: not a page with
+  `visibleWhen`, and not after a page with `endWhen`.
+- Hidden **sections** are different: their fields keep their values for
+  rules (as before); only pages read as empty.
+
 ## Date rules (`rules` on a `date` field)
 
 Each rule compares the field's value against another date field or `@today`
@@ -332,6 +396,24 @@ Each rule compares the field's value against another date field or `@today`
 | `days` | offset added to `compareTo` before comparing (may be negative) |
 | `mode` | `block` (validation error) or `warn` (amber note under the field) |
 | `message` | shown to the user; defaults exist in `strings` |
+
+**Business-day rules** (need `form.businessHours`; only its `timeZone` and
+`days` matter here):
+
+```json
+{ "op": "minBusinessDays", "days": 2, "mode": "block" },
+{ "op": "businessDay", "mode": "block" }
+```
+
+- `minBusinessDays` — the date must be at least `days` **whole** business
+  days after today: Friday → Monday is 1. Today never counts, and "today"
+  is the business time zone's date. A blocking one also sets the date
+  picker's earliest date.
+- `businessDay` — the date must fall on a business day (not a weekend).
+  `minBusinessDays` alone lets a far-off Saturday through, so pair them.
+- A date+time value counts on the business zone's calendar (a late-evening
+  pick in Vancouver can be the next day in Toronto). Holidays aren't
+  modeled.
 
 Rules are skipped while either date is empty — pair with `required` or a
 `notEmpty` visibility guard as needed.
@@ -389,9 +471,21 @@ is true while the date is at most 1 business day away. Use it in
 Tests can pin "now" with `BSPForms.clock = function () { return <ms>; }`
 (set before the engine loads, or any time after).
 
+## For the form builder (public API)
+
+The engine exposes what the builder needs; nothing here writes to SharePoint.
+
+| Call | Returns |
+| --- | --- |
+| `BSPForms.normalize(config)` | `{ errors: [...] }` — exactly what a page would reject. |
+| `BSPForms.lists()` | A read-only object: `ready()`, `userInfo()`, `getWebLists(webUrl?)` (custom lists: `id`, `title`, `url`, `enableAttachments`, `itemCount`) and `getListSchema({ siteUrl?, listId or listUrl })` (`list` + `fields` with SharePoint's own property names: `InternalName`, `EntityPropertyName`, `TypeAsString`, `Required`, `Choices`, `MaxLength`, `DisplayFormat`, `MinimumValue`/`MaximumValue` — null when unbounded — and so on). |
+| `BSPForms.compat` | The doctor's field-type → column-type table. |
+| `BSPForms.assetVersion` | The engine script's `?v=`. |
+
 ## Hidden-field semantics
 
-A field hidden by `visibleWhen` (or inside a hidden section) is **not
+A field hidden by `visibleWhen` (or inside a hidden section, on a skipped
+page, or with no choices left by `choicesWhen`) is **not
 validated and not submitted**; its value is kept in memory, so re-showing it
 restores what the user had entered.
 

@@ -34,7 +34,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '0.5.0';
+  var VERSION = '0.6.0';
   var NS = window.BSPForms = window.BSPForms || {};
   if (NS.__engineLoaded) { if (NS.scan) NS.scan(); return; }
   NS.__engineLoaded = true;
@@ -101,6 +101,10 @@
     if (text != null) e.textContent = text;
     return e;
   }
+  // payload key for a column: SharePoint's EntityPropertyName prefixes
+  // internal names that start with "_" (incl. encoded "_x0032_…" names)
+  // with "OData_"; the raw name is rejected ("property does not exist")
+  function ekey(col) { return col.charAt(0) === '_' ? 'OData_' + col : col; }
   function fmtSize(bytes) {
     if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
     if (bytes >= 1024) return Math.round(bytes / 1024) + ' KB';
@@ -180,6 +184,28 @@
     return null;
   }
   function bizToday(bh, nowMs) { return new Date(bizNow(bh, nowMs).day * 86400000).toISOString().slice(0, 10); }
+  /* Whole business days (date rules minBusinessDays / businessDay). A
+     value's day is its civil date in the business zone: a date-only value
+     is its own date, a picked date+time is converted (bizAtDate). "Today"
+     is the business zone's date. Holidays aren't modeled. */
+  function civilIso(day) { return new Date(day * 86400000).toISOString().slice(0, 10); }
+  function isBizDay(bh, day) { return bh.days.indexOf(new Date(day * 86400000).getUTCDay()) > -1; }
+  // business days in (from, to] — today never counts
+  function bizDaysBetween(bh, from, to) {
+    if (to - from > 3660) return Infinity; // far future: always enough
+    var n = 0;
+    for (var d = from + 1; d <= to; d++) if (isBizDay(bh, d)) n++;
+    return n;
+  }
+  // earliest date (YYYY-MM-DD) at least n whole business days after today
+  function bizMinDate(bh, n, nowMs) {
+    var today = bizNow(bh, nowMs).day, count = 0;
+    if (!(n > 0)) return civilIso(today);
+    for (var d = today + 1; d < today + 3660; d++) {
+      if (isBizDay(bh, d) && ++count >= n) return civilIso(d);
+    }
+    return null;
+  }
   function dayDiff(a, b) { return Math.round((a - b) / 86400000); }
   function fmtDate(d) { return d ? d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : ''; }
 
@@ -273,7 +299,13 @@
     assignKeysMore: 'More than {max} earlier responses were found, so some items you already answered may show again.',
     submitConfirmTitle: 'Please confirm', submitConfirmOk: 'Confirm', submitConfirmCancel: 'Go back',
     userLoading: 'Identifying you…',
-    opensNewTab: '(opens in a new tab)'
+    opensNewTab: '(opens in a new tab)',
+    // 0.6.0: clear buttons, number dropdown/slider, business-day date rules
+    clearValue: 'Clear',
+    numberPlaceholder: 'Select a number',
+    sliderUnset: 'Not set',
+    dateMinBusinessDays: 'Pick a date at least {days} business day(s) from today.',
+    dateBusinessDay: 'Pick a business day, not a weekend.'
   };
 
   /* French defaults (form.languages includes "fr"). Same keys as above;
@@ -364,7 +396,12 @@
     assignKeysMore: 'Plus de {max} réponses antérieures ont été trouvées; certains éléments auxquels vous avez déjà répondu pourraient donc réapparaître.',
     submitConfirmTitle: 'Veuillez confirmer', submitConfirmOk: 'Confirmer', submitConfirmCancel: 'Revenir',
     userLoading: 'Identification en cours…',
-    opensNewTab: '(s’ouvre dans un nouvel onglet)'
+    opensNewTab: '(s’ouvre dans un nouvel onglet)',
+    clearValue: 'Effacer',
+    numberPlaceholder: 'Sélectionnez un nombre',
+    sliderUnset: 'Non défini',
+    dateMinBusinessDays: 'Choisissez une date au moins {days} jour(s) ouvrable(s) après aujourd’hui.',
+    dateBusinessDay: 'Choisissez un jour ouvrable, pas une fin de semaine.'
   };
 
   /* ------------------------------------------------------------------
@@ -598,6 +635,22 @@
      SP adapter — one seam over pnpjs v2, replaceable by a mock.
      The mock (dev/mock-sp.js) implements the same method names.
      ------------------------------------------------------------------ */
+  // one field of a list schema, as plain data: the properties the builder
+  // reads (SharePoint names), unbounded Number limits (±1.797e308) as null
+  var SCHEMA_KEYS = ['InternalName', 'EntityPropertyName', 'Title', 'TypeAsString', 'Required', 'ReadOnlyField',
+    'FromBaseType', 'Sealed', 'Hidden', 'DefaultValue', 'Description', 'Choices', 'FillInChoice', 'MaxLength',
+    'DisplayFormat', 'AllowMultipleValues', 'SelectionMode', 'MinimumValue', 'MaximumValue', 'ShowAsPercentage',
+    'RichText', 'AppendOnly', 'NumberOfLines', 'EnforceUniqueValues', 'ValidationFormula', 'LookupList'];
+  function schemaField(fd) {
+    var o = {};
+    SCHEMA_KEYS.forEach(function (k) { if (fd[k] !== undefined) o[k] = fd[k]; });
+    if (o.Choices && !Array.isArray(o.Choices) && Array.isArray(o.Choices.results)) o.Choices = o.Choices.results;
+    ['MinimumValue', 'MaximumValue'].forEach(function (k) {
+      if (typeof o[k] === 'number' && Math.abs(o[k]) > 1e300) o[k] = null;
+    });
+    return o;
+  }
+
   function makeAdapter(cfg) {
     if (settings.mockSp) return settings.mockSp;
 
@@ -815,6 +868,47 @@
             .get();
         });
       },
+      // builder reads (BSPForms.lists()). Each call routes to its own web,
+      // built synchronously right after setup, so a form on the same page
+      // can't redirect it. Custom lists (BaseTemplate 100) only.
+      getWebLists: function (webUrl) {
+        return whenCtx().then(function () {
+          return web(webUrl ? absUrl(webUrl) : null).lists
+            .filter('Hidden eq false and BaseTemplate eq 100')
+            .select('Id', 'Title', 'EnableAttachments', 'ItemCount', 'RootFolder/ServerRelativeUrl')
+            .expand('RootFolder')
+            .orderBy('Title', true)
+            .get();
+        }).then(function (rows) {
+          return (rows || []).map(function (l) {
+            return { id: l.Id, title: l.Title, url: l.RootFolder && l.RootFolder.ServerRelativeUrl,
+              enableAttachments: !!l.EnableAttachments, itemCount: l.ItemCount };
+          });
+        });
+      },
+      // the list + every visible field, with the type-specific properties
+      // (no $select: SharePoint then returns Choices, MaxLength, DisplayFormat,
+      // MinimumValue, … — verified on dev, B0)
+      getListSchema: function (spec) {
+        var url = spec.siteUrl ? absUrl(spec.siteUrl) : null;
+        function theList() {
+          var w = web(url);
+          return spec.listId ? w.lists.getById(spec.listId) : w.getList(listServerRelUrl(spec.listUrl, url));
+        }
+        return whenCtx().then(function () {
+          return Promise.all([
+            theList().select('Id', 'Title', 'EnableAttachments', 'ValidationFormula', 'RootFolder/ServerRelativeUrl').expand('RootFolder').get(),
+            theList().fields.filter('Hidden eq false').get()
+          ]);
+        }).then(function (res) {
+          var l = res[0] || {};
+          return {
+            list: { id: l.Id, title: l.Title, url: l.RootFolder && l.RootFolder.ServerRelativeUrl,
+              enableAttachments: !!l.EnableAttachments, validationFormula: l.ValidationFormula || '' },
+            fields: (res[1] || []).map(schemaField)
+          };
+        });
+      },
       getLookupItems: function (lk) {
         var display = lk.displayField || 'Title';
         return whenCtx().then(function () {
@@ -896,6 +990,47 @@
       }
     }
   }
+
+  /* number display: "input" (default), "dropdown" or "slider". The last two
+     pick a whole number in validation.min..max (step 1), so both bounds are
+     required integers; a dropdown lists every value, so it's capped. */
+  var NUMBER_DROPDOWN_MAX = 200;
+  function normalizeNumberDisplay(f, errors) {
+    var where = 'field "' + f.id + '"';
+    var d = f.display == null ? 'input' : f.display;
+    if (d !== 'input' && d !== 'dropdown' && d !== 'slider') { errors.push(where + ': display must be "input", "dropdown" or "slider"'); d = 'input'; }
+    if (d !== 'input' && f.type !== 'number') { errors.push(where + ': display "' + d + '" is for number fields'); d = 'input'; }
+    f.display = d;
+    if (d === 'input') return;
+    var v = f.validation, lo = v.min, hi = v.max;
+    function whole(n) { return typeof n === 'number' && isFinite(n) && n % 1 === 0; }
+    if (!whole(lo) || !whole(hi) || hi <= lo) {
+      errors.push(where + ': display "' + d + '" needs whole-number validation.min and validation.max, max above min');
+      return;
+    }
+    if (d === 'dropdown' && hi - lo + 1 > NUMBER_DROPDOWN_MAX) {
+      errors.push(where + ': a number dropdown lists at most ' + NUMBER_DROPDOWN_MAX + ' values (min..max) — use display "slider"');
+      return;
+    }
+    v.integer = true;
+    if (d === 'dropdown') { f._range = []; for (var n = lo; n <= hi; n++) f._range.push(n); }
+  }
+
+  // every field id a rule reads (field + compareTo), through all/any/not
+  function ruleFieldIds(rule, out) {
+    out = out || [];
+    if (!rule || typeof rule !== 'object') return out;
+    if (rule.all) rule.all.forEach(function (r) { ruleFieldIds(r, out); });
+    else if (rule.any) rule.any.forEach(function (r) { ruleFieldIds(r, out); });
+    else if (rule.not) ruleFieldIds(rule.not, out);
+    else {
+      if (rule.field) out.push(rule.field);
+      if (rule.compareTo && rule.compareTo !== '@today') out.push(rule.compareTo);
+    }
+    return out;
+  }
+
+  var DATE_RULE_OPS = ['after', 'onOrAfter', 'before', 'onOrBefore', 'minBusinessDays', 'businessDay'];
 
   function normalizeConfig(raw, lang) {
     var errors = [];
@@ -1007,7 +1142,9 @@
           }
           if (f.type === 'person') f.multiple = !!f.multiple;
           if (f.type === 'date') f.includeTime = !!f.includeTime;
+          if (f.type === 'number' || f.type === 'currency') normalizeNumberDisplay(f, errors);
           if (STATIC_TYPES[f.type]) f.column = null;
+          f._idx = ordered.length;
           byKey[k] = f; keyOfId[f.id] = k; ordered.push(f);
         });
       });
@@ -1068,12 +1205,78 @@
         }
       }
       (f.rules || []).forEach(function (r) {
+        if (DATE_RULE_OPS.indexOf(r.op) < 0) {
+          errors.push(where + ': date rule op must be one of ' + DATE_RULE_OPS.join(', ') + ' (got "' + r.op + '")');
+          return;
+        }
+        if (r.op === 'minBusinessDays' || r.op === 'businessDay') {
+          if (!cfg._bh) errors.push(where + ': ' + r.op + ' needs form.businessHours');
+          if (r.op === 'minBusinessDays' && !(r.days > 0 && r.days % 1 === 0)) errors.push(where + ': minBusinessDays needs a whole number of days above 0');
+          return;
+        }
         checkRuleRefs({ field: f.id, compareTo: r.compareTo }, 'field "' + f.id + '"');
       });
+      if (f.default === '@me' && f.type !== 'person') errors.push(where + ': default "@me" is for person fields');
+      // choicesWhen: an earlier choice / yes-no field decides which choices show
+      if (f.choicesWhen != null) {
+        var cw = f.choicesWhen, dk = cw && keyOfId[cw.field], drv = dk && byKey[dk];
+        if (f.type !== 'choice' && f.type !== 'multichoice') errors.push(where + ': choicesWhen is for choice and multichoice fields');
+        else if (!cw || typeof cw !== 'object' || !cw.map || typeof cw.map !== 'object') errors.push(where + ': choicesWhen needs field and map');
+        else if (!drv) errors.push(where + ': choicesWhen.field "' + cw.field + '" is not a field id');
+        else if (drv.type !== 'choice' && drv.type !== 'boolean') errors.push(where + ': choicesWhen.field must be a choice or boolean field');
+        else if (drv._idx >= f._idx) errors.push(where + ': choicesWhen.field must come before this field');
+        else {
+          var mine = f.choices.map(function (c) { return c.value; });
+          var keys = drv.type === 'boolean' ? ['true', 'false'] : drv.choices.map(function (c) { return String(c.value); });
+          var map = Object.create(null);
+          Object.keys(cw.map).forEach(function (key) {
+            if (keys.indexOf(key) < 0 && !(drv.type === 'choice' && drv.fillIn)) {
+              errors.push(where + ': choicesWhen.map key "' + key + '" is not a value of "' + cw.field + '"');
+            }
+            var list = Array.isArray(cw.map[key]) ? cw.map[key] : [];
+            list.forEach(function (v) { if (mine.indexOf(v) < 0) errors.push(where + ': choicesWhen value "' + v + '" is not one of this field\'s choices'); });
+            map[key] = list;
+          });
+          var other = cw['else'];
+          if (other != null && !Array.isArray(other)) errors.push(where + ': choicesWhen.else must be an array of choice values');
+          (Array.isArray(other) ? other : []).forEach(function (v) { if (mine.indexOf(v) < 0) errors.push(where + ': choicesWhen value "' + v + '" is not one of this field\'s choices'); });
+          f._cw = { k: dk, map: map, other: Array.isArray(other) ? other : [] };
+        }
+      }
     });
     cfg.pages.forEach(function (pg) {
       pg.sections.forEach(function (sec) { checkRuleRefs(sec.visibleWhen, 'section "' + sec.id + '"'); });
     });
+    // branching: a page shows when its visibleWhen holds (rule on EARLIER
+    // pages' fields only); endWhen makes it the last page (this page or
+    // earlier). The first page always shows, so there's always one.
+    cfg._pageRules = false;
+    var endAt = -1;
+    cfg.pages.forEach(function (pg, pi) {
+      var where = 'page "' + pg.id + '"';
+      if (pg.visibleWhen) {
+        cfg._pageRules = true;
+        if (pi === 0) errors.push(where + ': the first page always shows — it can\'t have visibleWhen');
+        checkRuleRefs(pg.visibleWhen, where);
+        ruleFieldIds(pg.visibleWhen).forEach(function (id) {
+          var fk = keyOfId[id];
+          if (fk && byKey[fk].page >= pi) errors.push(where + ': visibleWhen can only use fields on earlier pages ("' + id + '" isn\'t)');
+        });
+      }
+      if (pg.endWhen) {
+        cfg._pageRules = true;
+        checkRuleRefs(pg.endWhen, where + ' endWhen');
+        ruleFieldIds(pg.endWhen).forEach(function (id) {
+          var fk = keyOfId[id];
+          if (fk && byKey[fk].page > pi) errors.push(where + ': endWhen can only use fields on this page or earlier ("' + id + '" isn\'t)');
+        });
+        if (endAt < 0) endAt = pi;
+      }
+    });
+    cfg._endAt = endAt;
+    if (cfg.target.sendEmpty != null && typeof cfg.target.sendEmpty !== 'boolean') errors.push('target.sendEmpty must be true or false');
+    var cr = cfg.confirmation.redirect;
+    if (cr != null && (typeof cr !== 'object' || !cr.url)) errors.push('confirmation.redirect needs a url');
 
     // afterSubmit (post-submit lookup + result screens) and queryError
     function checkScreen(s, where) {
@@ -1117,6 +1320,10 @@
       var ap = cfg.attachments.page;
       if (ap == null) cfg.attachments.page = cfg.pages.length - 1;
       else if (ap < 0 || ap >= cfg.pages.length) { errors.push('attachments.page is out of range'); cfg.attachments.page = cfg.pages.length - 1; }
+      // every branch must reach the dropzone
+      var apg = cfg.pages[cfg.attachments.page];
+      if (apg && apg.visibleWhen) errors.push('attachments are on page "' + apg.id + '", which has visibleWhen — put them on a page every path reaches');
+      else if (endAt > -1 && cfg.attachments.page > endAt) errors.push('attachments are on a page after "' + cfg.pages[endAt].id + '", whose endWhen can end the form first');
     }
 
     // shared columns — several fields may write one column, but only when
@@ -1241,7 +1448,8 @@
   function fieldShell(f, inner, S) {
     var noLabel = f.type === 'heading' || f.type === 'note' || f.type === 'boolean';
     var h = '<div class="field' + (f.span === 'full' ? ' bspf-field--full' : '') + '" data-bspf-field="' + esc(f.k) + '"';
-    if (f.visibleWhen) h += ' x-show="vis(' + esc(jstr(f.k)) + ')" x-cloak';
+    // choicesWhen with nothing allowed hides the field like a visibleWhen
+    if (f.visibleWhen || f._cw) h += ' x-show="vis(' + esc(jstr(f.k)) + ')" x-cloak';
     h += '>';
     if (!noLabel) {
       h += '<label class="field__label" for="' + esc(f.domId) + '">' + esc(f.label || f.id);
@@ -1289,11 +1497,84 @@
       '<textarea class="textarea"' + maxAttr + (f.rows ? ' rows="' + (+f.rows) + '"' : '') +
       ' x-model="values.' + f.k + '"' + inputCommon(f) + '></textarea>', S);
   }
+  /* Clear (×) for an optional field — the assignments combo's pattern: the
+     .stop modifiers keep Enter/Space from reaching a combo control, whose
+     .prevent would swallow the button's own activation. */
+  function clearBtn(f, S, cond) {
+    if (f.required) return '';
+    return '<button type="button" class="bspf-combo__clear bspf-clear" x-show="(' + cond + ') && !busy" x-cloak' +
+      ' aria-label="' + esc(S.clearValue + ' — ' + (f.label || f.id)) + '" title="' + esc(S.clearValue) + '"' +
+      ' @click.stop="clearField(' + esc(jstr(f.k)) + ')" @keydown.enter.stop @keydown.space.stop>' +
+      icon('ic-fluent-dismiss-24-regular', 16) + '</button>';
+  }
+  // a menu's "Clear selection" first row (optional single-value combos)
+  function clearRow(f, S, cond) {
+    if (f.required) return '';
+    return '<button type="button" class="bspf-combo__option bspf-combo__option--clear" role="option" aria-selected="false"' +
+      ' x-show="' + cond + '" @click="clearField(' + esc(jstr(f.k)) + ')">' +
+      icon('ic-fluent-dismiss-24-regular', 16) + '<span>' + esc(S.assignClear) + '</span></button>';
+  }
+  // an input with its clear button beside it (date, number, link)
+  function clearable(f, S, inputHtml, cond) {
+    var b = clearBtn(f, S, cond);
+    return b ? '<div class="bspf-clearable">' + inputHtml + b + '</div>' : inputHtml;
+  }
+
   function renderNumber(f, S) {
+    if (f.display === 'dropdown') return renderNumberDropdown(f, S);
+    if (f.display === 'slider') return renderSlider(f, S);
     var step = f.type === 'currency' ? '0.01' : (f.validation.integer ? '1' : 'any');
-    return fieldShell(f,
+    return fieldShell(f, clearable(f, S,
       '<input class="input" type="number" inputmode="decimal" step="' + step + '"' +
-      ' x-model.number="values.' + f.k + '"' + inputCommon(f) + '>', S);
+      ' x-model.number="values.' + f.k + '"' + inputCommon(f) + '>', 'values.' + f.k + ' !== \'\''), S);
+  }
+  /* number dropdown — the choice combo with min..max as its options; the
+     value is saved as a Number */
+  function renderNumberDropdown(f, S) {
+    var K = f.k, kq = esc(jstr(K)), set = 'values.' + K + ' !== \'\'';
+    var color = f.color || 'blue';
+    var h = '<div class="bspf-combo bspf-numdrop" @click.outside="ui.' + K + '=false" @keydown.escape.stop="ui.' + K + '=false">';
+    h += '<div class="bspf-combo__control" id="' + esc(f.domId) + '" role="combobox" tabindex="0"' +
+      ' aria-haspopup="listbox" :aria-expanded="ui.' + K + ' ? \'true\' : \'false\'"' +
+      ' :aria-invalid="errors.' + K + ' ? \'true\' : \'false\'" @click="ui.' + K + '=!ui.' + K + '"' +
+      ' @keydown.enter.prevent="ui.' + K + '=!ui.' + K + '" @keydown.space.prevent="ui.' + K + '=!ui.' + K + '">';
+    h += '<span class="bspf-combo__value">';
+    h += '<span class="bspf-combo__placeholder" x-show="!(' + set + ')">' + esc(f.placeholder || S.numberPlaceholder) + '</span>';
+    h += '<span class="bspf-pill bspf-pill--' + esc(color) + ' bspf-numdrop__pill" x-show="' + set + '" x-cloak><span x-text="values.' + K + '"></span></span>';
+    h += '</span>' + clearBtn(f, S, set) +
+      icon('ic-fluent-chevron-down-24-regular', 16).replace('class="icon', 'class="bspf-combo__chevron icon') + '</div>';
+    h += '<div class="bspf-combo__menu bspf-numdrop__menu" x-show="ui.' + K + '" x-cloak role="listbox">';
+    h += clearRow(f, S, set);
+    h += '<div class="bspf-numdrop__grid"><template x-for="n in numRange(' + kq + ')" :key="n">' +
+      '<button type="button" class="bspf-combo__option bspf-numdrop__opt" role="option"' +
+      ' :aria-selected="values.' + K + '===n ? \'true\' : \'false\'" @click="pickNumber(' + kq + ', n)" x-text="n"></button>' +
+      '</template></div>';
+    h += '</div></div>';
+    return fieldShell(f, h, S);
+  }
+  /* slider — a native range can't be empty, so the field stays '' (shown
+     "Not set", thumb dimmed) until the user moves or clicks it */
+  function renderSlider(f, S) {
+    var K = f.k, kq = esc(jstr(K)), lo = f.validation.min, hi = f.validation.max;
+    var set = 'values.' + K + ' !== \'\'';
+    var h = '<div class="bspf-slider" :class="{ \'is-unset\': !(' + set + ') }"' +
+      ' :style="{ \'--bspf-pct\': sliderPct(' + kq + ') + \'%\' }">';
+    h += '<div class="bspf-slider__row">' +
+      '<span class="bspf-slider__end" aria-hidden="true">' + lo + '</span>' +
+      '<input class="bspf-slider__input" type="range" id="' + esc(f.domId) + '" min="' + lo + '" max="' + hi + '" step="1"' +
+      ' :value="' + set + ' ? values.' + K + ' : ' + Math.round((lo + hi) / 2) + '"' +
+      ' :aria-valuetext="' + set + ' ? String(values.' + K + ') : ' + esc(jstr(S.sliderUnset)) + '"' +
+      ' :aria-invalid="errors.' + K + ' ? \'true\' : \'false\'"' +
+      ' @input="slide(' + kq + ', $event)" @click="slide(' + kq + ', $event)" @blur="touch(' + kq + ')">' +
+      '<span class="bspf-slider__end" aria-hidden="true">' + hi + '</span>' +
+      '</div>';
+    h += '<div class="bspf-slider__meta">' +
+      '<output class="bspf-slider__value" for="' + esc(f.domId) + '" x-text="' + set + ' ? values.' + K + ' : ' + esc(jstr(S.sliderUnset)) + '"></output>' +
+      (f.required ? '' : '<button type="button" class="btn btn--sm btn--subtle bspf-slider__clear" x-show="' + set + ' && !busy" x-cloak' +
+        ' @click="clearField(' + kq + ')">' + icon('ic-fluent-dismiss-24-regular', 16) + '<span>' + esc(S.clearValue) + '</span></button>') +
+      '</div>';
+    h += '</div>';
+    return fieldShell(f, h, S);
   }
   function renderBoolean(f, S) {
     if (f.control === 'checkbox') {
@@ -1330,13 +1611,18 @@
     return fieldShell(f, inner, S);
   }
   function renderDate(f, S) {
-    return fieldShell(f,
+    // a blocking minBusinessDays rule greys out the dates it rejects (the
+    // weekend rule can't be shown by a native picker; validation enforces it)
+    var hasMin = (f.rules || []).some(function (r) { return r.op === 'minBusinessDays' && (r.mode || 'block') === 'block'; });
+    return fieldShell(f, clearable(f, S,
       '<input class="input" type="' + (f.includeTime ? 'datetime-local' : 'date') + '"' +
-      ' x-model="values.' + f.k + '" @change="dateChanged(' + esc(jstr(f.k)) + ')"' + inputCommon(f) + '>', S);
+      (hasMin ? ' :min="minDate(' + esc(jstr(f.k)) + ')"' : '') +
+      ' x-model="values.' + f.k + '" @change="dateChanged(' + esc(jstr(f.k)) + ')"' + inputCommon(f) + '>', 'values.' + f.k), S);
   }
   function renderLink(f, S) {
     var h = '<input class="input" type="url" x-model.trim="values.' + f.k + '.url"' + inputCommon(f).replace('placeholder="', 'data-x-ph="');
     h += (f.placeholder ? ' placeholder="' + esc(f.placeholder) + '"' : ' placeholder="' + esc(S.linkUrlPlaceholder) + '"') + '>';
+    h = clearable(f, S, h, 'values.' + f.k + '.url || values.' + f.k + '.desc');
     if (f.withDescription) {
       h += '<input class="input" type="text" aria-label="' + esc(S.linkDescPlaceholder) + '" placeholder="' + esc(S.linkDescPlaceholder) + '"' +
         ' x-model.trim="values.' + f.k + '.desc">';
@@ -1346,6 +1632,11 @@
 
   function pillHtml(color, contentHtml) {
     return '<span class="bspf-pill bspf-pill--' + esc(color) + '"><span>' + contentHtml + '</span></span>';
+  }
+
+  // choicesWhen: an option only shows while the driver allows it
+  function optShow(f, vq) {
+    return f._cw ? ' x-show="optOk(' + esc(jstr(f.k)) + ', ' + vq + ')"' : '';
   }
 
   function renderChoice(f, S) {
@@ -1363,11 +1654,13 @@
     if (f.fillIn) {
       h += '<span class="bspf-pill bspf-pill--gray" x-show="isCustom(' + kq + ')" x-cloak><span x-text="values.' + K + '"></span></span>';
     }
-    h += '</span>' + icon('ic-fluent-chevron-down-24-regular', 16).replace('class="icon', 'class="bspf-combo__chevron icon') + '</div>';
+    h += '</span>' + clearBtn(f, S, 'values.' + K) +
+      icon('ic-fluent-chevron-down-24-regular', 16).replace('class="icon', 'class="bspf-combo__chevron icon') + '</div>';
     h += '<div class="bspf-combo__menu" x-show="ui.' + K + '" x-cloak role="listbox">';
+    h += clearRow(f, S, 'values.' + K);
     f.choices.forEach(function (c) {
       var vq = esc(jstr(c.value));
-      h += '<button type="button" class="bspf-combo__option" role="option"' +
+      h += '<button type="button" class="bspf-combo__option" role="option"' + optShow(f, vq) +
         ' :aria-selected="values.' + K + '===' + vq + ' ? \'true\' : \'false\'"' +
         ' @click="pickChoice(' + kq + ',' + vq + ')">' +
         pillHtml(c.color, esc(c.label)) +
@@ -1409,7 +1702,7 @@
     h += '<div class="bspf-combo__menu" x-show="ui.' + K + '" x-cloak role="listbox" aria-multiselectable="true">';
     f.choices.forEach(function (c) {
       var vq = esc(jstr(c.value));
-      h += '<button type="button" class="bspf-combo__option" role="option"' +
+      h += '<button type="button" class="bspf-combo__option" role="option"' + optShow(f, vq) +
         ' :aria-selected="values.' + K + '.indexOf(' + vq + ')>-1 ? \'true\' : \'false\'"' +
         ' @click="toggleMulti(' + kq + ',' + vq + ')">' +
         pillHtml(c.color, esc(c.label)) +
@@ -1436,8 +1729,10 @@
     h += '<span class="bspf-combo__value">';
     h += '<span class="bspf-combo__placeholder" x-show="!values.' + K + '">' + esc(f.placeholder || S.comboPlaceholder) + '</span>';
     h += '<span class="bspf-pill bspf-pill--' + esc(f.color) + '" x-show="values.' + K + '" x-cloak><span x-text="values.' + K + ' && values.' + K + '.text"></span></span>';
-    h += '</span>' + icon('ic-fluent-chevron-down-24-regular', 16).replace('class="icon', 'class="bspf-combo__chevron icon') + '</div>';
+    h += '</span>' + clearBtn(f, S, 'values.' + K) +
+      icon('ic-fluent-chevron-down-24-regular', 16).replace('class="icon', 'class="bspf-combo__chevron icon') + '</div>';
     h += '<div class="bspf-combo__menu" x-show="ui.' + K + '" x-cloak role="listbox">';
+    h += clearRow(f, S, 'values.' + K);
     h += '<div class="spinner-row" x-show="lkBusy.' + K + '"><span class="spinner spinner--16" role="progressbar" aria-label="' + esc(S.lookupLoading) + '"></span> ' + esc(S.lookupLoading) + '</div>';
     h += '<div class="bspf-people__note" x-show="lkErr.' + K + '" x-text="lkErr.' + K + '" x-cloak></div>';
     h += '<template x-for="opt in lkOpts.' + K + '" :key="opt.id">' +
@@ -1686,7 +1981,10 @@
     // lang-keep so the bilingual library's dual-DOM rules never hide or
     // disable it; the page's own <html lang> stays the page's business
     var h = '<div class="bspf' + (card ? ' bspf--card' : '') + (cfg._multiLang ? ' lang-keep" lang="' + esc(cfg._lang) : '') +
-      '" x-data="BSPForms.instance(' + esc(jstr(uid)) + ')" data-bspf-uid="' + esc(uid) + '">';
+      '" x-data="BSPForms.instance(' + esc(jstr(uid)) + ')" data-bspf-uid="' + esc(uid) + '"' +
+      // branching: if the current page stops applying (an earlier answer
+      // changed), step back to the nearest page that still does
+      (cfg._pageRules ? ' x-effect="clampPage()"' : '') + '>';
 
     // Header — shown on every view so the form keeps its identity through
     // the confirmation screen.
@@ -1729,11 +2027,15 @@
     if (pages.length > 1) {
       h += '<ol class="stepper bspf__stepper" aria-label="' + esc(fmtStr(S.stepOf, { n: '', total: pages.length })) + '">';
       pages.forEach(function (pg, i) {
+        // branching: skipped pages drop out and the rest renumber
+        var rules = cfg._pageRules;
         h += '<li class="stepper__step" :class="{ \'is-current\': page===' + i + ', \'is-done\': page>' + i + ', \'is-error\': pageHasError(' + i + ') }"' +
+          (rules ? ' x-show="pageActive(' + i + ')"' : '') +
           ' @click="goTo(' + i + ')">' +
           '<span class="stepper__dot">' +
           '<span x-show="page>' + i + '" x-cloak>' + icon('ic-fluent-checkmark-24-regular', 12) + '</span>' +
-          '<span x-show="page<=' + i + '">' + (i + 1) + '</span>' +
+          (rules ? '<span x-show="page<=' + i + '" x-text="stepNum(' + i + ')"></span>'
+            : '<span x-show="page<=' + i + '">' + (i + 1) + '</span>') +
           '</span>' +
           '<span class="stepper__label">' + esc(pg.title || ('Step ' + (i + 1))) + '</span></li>';
       });
@@ -1778,10 +2080,12 @@
     h += '</fieldset></div>'; // .bspf__lock, .bspf__content
 
     h += '<div class="bspf-nav' + (card ? ' bspf-nav--foot' : '') + '">';
-    h += '<button type="button" class="btn" x-show="page>0" x-cloak @click="prev()">' + esc(S.back) + '</button>';
+    // with branching, "last" is the last page that applies right now
+    var isLast = cfg._pageRules ? 'isLastPage()' : 'page===' + last;
+    h += '<button type="button" class="btn" x-show="' + (cfg._pageRules ? 'hasPrevPage()' : 'page>0') + '" x-cloak @click="prev()">' + esc(S.back) + '</button>';
     h += '<span class="bspf-nav__spacer"></span>';
-    if (last > 0) h += '<button type="button" class="btn btn--primary" x-show="page<' + last + '" @click="next()">' + esc(S.next) + '</button>';
-    h += '<button type="submit" class="btn btn--primary" x-show="page===' + last + '"' + (last > 0 ? ' x-cloak' : '') + ' :disabled="busy">' +
+    if (last > 0) h += '<button type="button" class="btn btn--primary" x-show="!(' + isLast + ')" @click="next()">' + esc(S.next) + '</button>';
+    h += '<button type="submit" class="btn btn--primary" x-show="' + isLast + '"' + (last > 0 ? ' x-cloak' : '') + ' :disabled="busy">' +
       '<span class="spinner spinner--16 spinner--on-accent" x-show="busy" x-cloak aria-hidden="true"></span>' +
       '<span x-text="busy ? ' + esc(jstr(S.submitting)) + ' : ' + esc(jstr(S.submit)) + '"></span></button>';
     h += '</div></form>';
@@ -1860,6 +2164,11 @@
     h += '<h2 class="bspf-done__title">' + esc(cfg.confirmation.title || S.confirmTitle) + '</h2>';
     var cMsg = cfg.confirmation.message || S.confirmMessage;
     if (cMsg) h += '<p class="bspf-done__msg">' + prose(cMsg) + '</p>';
+    // confirmation.redirect: a countdown, then the configured page
+    if (cfg.confirmation.redirect) {
+      h += '<p class="bspf-result__count" x-show="redir.url" x-cloak>' +
+        '<span x-text="countdownText()"></span> <a :href="redir.url">' + esc(S.redirectNow) + '</a></p>';
+    }
     if (cfg.confirmation.allowAnother !== false) {
       h += '<button type="button" class="btn btn--secondary" @click="resetForm()">' + esc(cfg.confirmation.anotherLabel || S.confirmAnother) + '</button>';
     }
@@ -1873,6 +2182,18 @@
      Instance state factory — Alpine evaluates
      x-data="BSPForms.instance('<uid>')" on the generated root.
      ------------------------------------------------------------------ */
+  // the value a field has when nothing's entered — what rules see for a
+  // field on a page the form skipped, and what "Clear" sets
+  function emptyOf(f) {
+    switch (f.type) {
+      case 'multichoice': case 'person': case 'assignments': return [];
+      case 'boolean': return false;
+      case 'link': return { url: '', desc: '' };
+      case 'lookup': return null;
+      default: return '';
+    }
+  }
+
   NS.instance = function (uid) {
     var def = NS._defs[uid];
     if (!def) return {};
@@ -1951,7 +2272,15 @@
         } else if (!this.me.ready && cfg._ordered.some(function (f) { return f.type === 'currentUser'; })) {
           this.loadMe();
         }
-        if (carry) return;
+        // choicesWhen: when a driver changes — a click, a prompt's set, a
+        // reset — drop the dependent answers it no longer allows
+        var drivers = Object.create(null);
+        cfg._ordered.forEach(function (f) { if (f._cw) (drivers[f._cw.k] = drivers[f._cw.k] || []).push(f.k); });
+        Object.keys(drivers).forEach(function (dk) {
+          self.$watch('values.' + dk, function () { drivers[dk].forEach(function (k) { self.pruneChoices(k); }); });
+        });
+        if (carry) { if (cfg._pageRules) this.clampPage(); return; }
+        this.fillMe();
         // a required/invalid URL value (field.query) can't be fixed by the
         // user: show queryError instead of the form
         if (cfg.queryError && cfg._ordered.some(function (f) { return f.query && !self.check(f.k); })) {
@@ -2150,6 +2479,18 @@
       countdownText: function () {
         return this.redir.paused ? S.redirectPaused : fmtStr(S.redirectCountdown, { n: this.redir.left });
       },
+      // the plain confirmation, plus its optional countdown redirect
+      // (confirmation.redirect — a config URL, never the page URL)
+      showDone: function () {
+        this.view = 'done';
+        this.scrollTop();
+        var r = cfg.confirmation.redirect;
+        if (!r) return;
+        var go = safeHref(this.renderTemplate(r.url));
+        if (!go) { console.warn('[BSP Forms] confirmation.redirect skipped: not an http(s) or server-relative URL'); return; }
+        var secs = Math.max(0, Math.min(60, Math.round(+this.renderTemplate(String(r.seconds == null ? 5 : r.seconds))) || 0));
+        this.startRedirect(go, secs, false);
+      },
       runAfterSubmit: function () {
         var self = this, as = cfg.afterSubmit, lk = as.lookup;
         var v = lk ? String(this._get(lk.matchField) == null ? '' : this._get(lk.matchField)).trim() : '';
@@ -2167,16 +2508,148 @@
         });
       },
 
+      /* ---- @me: a person field pre-filled with the signed-in user ---- */
+      // async (the page context resolves after init): fills only a field
+      // that's still empty and untouched, so an earlier pick is never replaced
+      fillMe: function () {
+        var self = this;
+        var mine = cfg._ordered.filter(function (f) { return f.type === 'person' && f.default === '@me'; });
+        if (!mine.length) return;
+        (adapter.ready ? adapter.ready() : Promise.resolve()).then(function () {
+          var u = adapter.userInfo ? adapter.userInfo() : {};
+          var key = u.login || u.email;
+          if (!key) { console.warn('[BSP Forms] default "@me": the signed-in user is unknown'); return; }
+          mine.forEach(function (f) {
+            if (self.values[f.k].length || self.touched[f.k]) return;
+            self.values[f.k] = [{ key: key, text: u.name || u.email || key, email: u.email || userEmails(u)[0] || '', id: null }];
+          });
+        }).catch(function (e) { console.warn('[BSP Forms] default "@me" unavailable:', e); });
+      },
+
       /* ---- visibility ---- */
+      // a field on a page the form skips reads as empty, for every rule and
+      // token — an answer left behind on a branch not taken mustn't drive
+      // anything (only forms with page rules; others are unaffected)
       _get: function (fieldId) {
         var k = cfg._keyOfId[fieldId];
-        return k ? this.values[k] : undefined;
+        if (!k) return undefined;
+        if (cfg._pageRules && !this.pageActive(cfg._byKey[k].page)) return emptyOf(cfg._byKey[k]);
+        return this.values[k];
       },
       vis: function (k) {
         var f = cfg._byKey[k];
-        if (!f || !f.visibleWhen) return true;
+        if (!f) return true;
+        if (f._cw && !this.allowed(k).length) return false;
+        if (!f.visibleWhen) return true;
         var self = this;
         return evalRule(f.visibleWhen, function (id) { return self._get(id); }, cfg._bh);
+      },
+
+      /* ---- branching: page visibleWhen / endWhen ---- */
+      // [bool] per page, built front to back: a page applies when its rule
+      // holds and no earlier applying page ended the form. Rules only read
+      // earlier pages (endWhen: this page too), so the array built so far
+      // answers every read — no recursion.
+      pageStates: function () {
+        if (!cfg._pageRules) return null;
+        var self = this, act = [], ended = false;
+        function get(id) {
+          var k = cfg._keyOfId[id];
+          if (!k) return undefined;
+          var f = cfg._byKey[k];
+          return f.page < act.length && !act[f.page] ? emptyOf(f) : self.values[k];
+        }
+        cfg.pages.forEach(function (pg) {
+          var on = !ended && (!pg.visibleWhen || evalRule(pg.visibleWhen, get, cfg._bh));
+          act.push(on);
+          if (on && pg.endWhen && evalRule(pg.endWhen, get, cfg._bh)) ended = true;
+        });
+        return act;
+      },
+      pageActive: function (i) {
+        var s = this.pageStates();
+        return !s || !!s[i];
+      },
+      activePages: function () {
+        var s = this.pageStates(), out = [];
+        for (var i = 0; i < cfg.pages.length; i++) if (!s || s[i]) out.push(i);
+        return out;
+      },
+      isLastPage: function () {
+        var a = this.activePages();
+        return this.page === a[a.length - 1];
+      },
+      hasPrevPage: function () {
+        var p = this.page;
+        return this.activePages().some(function (i) { return i < p; });
+      },
+      stepNum: function (i) { return this.activePages().indexOf(i) + 1; },
+      // the current page stopped applying: go to the nearest earlier one
+      // that still does (page 0 always does)
+      clampPage: function () {
+        if (!cfg._pageRules || this.view !== 'form' || this.pageActive(this.page)) return;
+        var p = this.page, back = this.activePages().filter(function (i) { return i < p; });
+        this.page = back.length ? back[back.length - 1] : 0;
+      },
+
+      /* ---- choicesWhen ---- */
+      // the choice values the driver allows right now
+      allowed: function (k) {
+        var cw = cfg._byKey[k]._cw;
+        var dv = this._get(cfg._byKey[cw.k].id);
+        if (cfg._byKey[cw.k].type === 'boolean') dv = String(!!dv);
+        else if (isEmptyVal(dv)) return [];
+        var key = String(dv);
+        return Object.prototype.hasOwnProperty.call(cw.map, key) ? cw.map[key] : cw.other;
+      },
+      optOk: function (k, v) { return this.allowed(k).indexOf(v) > -1; },
+      // after the driver changed: keep only allowed choices; an "Other"
+      // value was typed against the old driver, so it goes too
+      pruneChoices: function (k) {
+        var ok = this.allowed(k), v = this.values[k];
+        if (Array.isArray(v)) {
+          var kept = v.filter(function (x) { return ok.indexOf(x) > -1; });
+          if (kept.length !== v.length) this.values[k] = kept;
+        } else if (v !== '' && ok.indexOf(v) < 0) this.values[k] = '';
+        if (this.errors[k]) this.check(k);
+      },
+
+      /* ---- clear, number dropdown, slider, business-day dates ---- */
+      clearField: function (k) {
+        if (this.busy) return;
+        var f = cfg._byKey[k];
+        this.values[k] = emptyOf(f);
+        if (this.ui[k] !== undefined) this.ui[k] = false;
+        this.touched[k] = true;
+        this.check(k);
+      },
+      numRange: function (k) { return cfg._byKey[k]._range || []; },
+      pickNumber: function (k, n) {
+        if (this.busy) return;
+        this.values[k] = n; this.ui[k] = false;
+        this.touched[k] = true; this.check(k);
+      },
+      slide: function (k, ev) {
+        if (this.busy) return;
+        this.values[k] = Number(ev.target.value);
+        this.touched[k] = true;
+        if (this.errors[k]) this.check(k);
+      },
+      sliderPct: function (k) {
+        var f = cfg._byKey[k], v = this.values[k], lo = f.validation.min, hi = f.validation.max;
+        if (v === '' || v == null) return 50;
+        return Math.max(0, Math.min(100, (v - lo) / (hi - lo) * 100));
+      },
+      // the earliest date a blocking minBusinessDays rule allows (the
+      // picker's min; advisory — validation stays authoritative)
+      minDate: function (k) {
+        var f = cfg._byKey[k], n = 0;
+        if (!cfg._bh) return '';
+        (f.rules || []).forEach(function (r) {
+          if (r.op === 'minBusinessDays' && (r.mode || 'block') === 'block' && r.days > n) n = r.days;
+        });
+        var d = n ? bizMinDate(cfg._bh, n, nowMs()) : '';
+        return d && f.includeTime ? d + 'T00:00' : (d || '');
       },
       secVis: function (secId) {
         var sec = cfg._sectionsById[secId];
@@ -2185,7 +2658,9 @@
         return evalRule(sec.visibleWhen, function (id) { return self._get(id); }, cfg._bh);
       },
       fieldActive: function (f) {
-        // a field counts (validation + submit) only when it and its section are visible
+        // a field counts (validation + submit) only when it, its section and
+        // its page apply
+        if (!this.pageActive(f.page)) return false;
         if (!this.vis(f.k)) return false;
         return this.secVis(f.section);
       },
@@ -2565,6 +3040,17 @@
               var self = this;
               (f.rules || []).forEach(function (r) {
                 if (msg) return;
+                // whole business days, on the business zone's calendar
+                if (r.op === 'minBusinessDays' || r.op === 'businessDay') {
+                  var at = cfg._bh && bizAtDate(cfg._bh, v);
+                  if (!at) return;
+                  var okb = r.op === 'businessDay' ? isBizDay(cfg._bh, at.day)
+                    : bizDaysBetween(cfg._bh, bizNow(cfg._bh, nowMs()).day, at.day) >= r.days;
+                  if (okb) return;
+                  var tb = r.message || (r.op === 'businessDay' ? S.dateBusinessDay : fmtStr(S.dateMinBusinessDays, { days: r.days }));
+                  if ((r.mode || 'block') === 'warn') { if (!warn) warn = tb; } else msg = tb;
+                  return;
+                }
                 var mine = parseDateVal(v);
                 var base = r.compareTo === '@today' ? today0() : parseDateVal(self._get(r.compareTo));
                 var ok = evalDateOp(r.op, mine, base, r.days);
@@ -2621,13 +3107,20 @@
         if (pk) { this.maybePrompt(pk); return; }
         if (!this.validatePage(this.page)) { this.pageError = S.pageError; this.focusFirstError(); return; }
         this.pageError = '';
-        this.page++;
+        // the next page that applies (branching skips the rest)
+        var p = this.page, nx = this.activePages().filter(function (i) { return i > p; })[0];
+        if (nx == null) return;
+        this.page = nx;
         this.scrollTop();
       },
-      prev: function () { this.pageError = ''; this.page--; this.scrollTop(); },
-      goTo: function (i) { if (i < this.page) { this.pageError = ''; this.page = i; this.scrollTop(); } },
+      prev: function () {
+        var p = this.page, back = this.activePages().filter(function (i) { return i < p; });
+        if (!back.length) return;
+        this.pageError = ''; this.page = back[back.length - 1]; this.scrollTop();
+      },
+      goTo: function (i) { if (i < this.page && this.pageActive(i)) { this.pageError = ''; this.page = i; this.scrollTop(); } },
       nextOrSubmit: function () {
-        if (this.page < cfg.pages.length - 1) this.next(); else this.submitForm();
+        if (!this.isLastPage()) this.next(); else this.submitForm();
       },
       scrollTop: function () {
         var root = def.mount;
@@ -2671,7 +3164,7 @@
         Object.keys(set).forEach(function (col) {
           var v = self.renderTemplate(set[col], row);
           if (v === '') return;
-          payload[col] = v;
+          payload[ekey(col)] = v;
           if (col === 'Title') titleMapped = true;
         });
         // dev aid: a shared column should have at most one visible field
@@ -2697,21 +3190,28 @@
           }
           return null;
         })).then(function () {
+          // target.sendEmpty: active, mapped, empty fields — sent as explicit
+          // empties after the pass below, only where no field wrote a value,
+          // so SharePoint doesn't fill in the column's default
+          var empties = [];
           cfg._ordered.forEach(function (f) {
             if (!f.column || !self.fieldActive(f)) return;
             var v = V[f.k];
             var out;
+            var key = ekey(f.column);
+            function none() { empties.push(f); }
             switch (f.type) {
               case 'text': case 'email': case 'phone': case 'choice': case 'hidden':
-                if (v === '') return; out = v; break;
+                if (v === '') return none(); out = v; break;
               case 'textarea':
-                if (v === '') return; out = f.richText ? toRichText(v) : v; break;
+                if (v === '') return none(); out = f.richText ? toRichText(v) : v; break;
               case 'number': case 'currency':
-                if (v === '' || v == null || (typeof v === 'number' && isNaN(v))) return; out = Number(v); break;
+                if (v === '' || v == null || (typeof v === 'number' && isNaN(v))) return none(); out = Number(v); break;
               case 'boolean': out = f.values ? (v ? f.values.on : f.values.off) : !!v; break;
               case 'multichoice':
-                if (!v.length) return; out = { results: v.slice() }; break;
+                if (!v.length) return none(); out = { results: v.slice() }; break;
               case 'date': {
+                if (v === '') return none();
                 var d = parseDateVal(v);
                 if (!d) return;
                 if (f.includeTime) {
@@ -2725,23 +3225,23 @@
               }
               case 'person': {
                 var ids = v.map(function (p) { return p.id; }).filter(Boolean);
-                if (!ids.length) return;
-                if (f.multiple) payload[f.column + 'Id'] = { results: ids };
-                else payload[f.column + 'Id'] = ids[0];
+                if (!ids.length) return none();
+                if (f.multiple) payload[key + 'Id'] = { results: ids };
+                else payload[key + 'Id'] = ids[0];
                 if (f.column === 'Title') titleMapped = true;
                 return;
               }
               case 'lookup':
-                if (!v || !v.id) return;
-                payload[f.column + 'Id'] = v.id;
+                if (!v || !v.id) return none();
+                payload[key + 'Id'] = v.id;
                 return;
               case 'link':
-                if (!v.url) return;
+                if (!v.url) return none();
                 out = { Url: v.url, Description: v.desc || v.url };
                 break;
               default: return;
             }
-            payload[f.column] = out;   // duplicate column mappings: later fields win
+            payload[key] = out;   // duplicate column mappings: later fields win
             if (f.column === 'Title') titleMapped = true;
           });
           if (row) {
@@ -2750,13 +3250,24 @@
               var srcCol = fa.rowColumns[col];
               var v = isIdCol(srcCol) ? Number(row.id) : row.data[srcCol];
               if (v == null || v === '') return;
-              payload[col] = v;
+              payload[ekey(col)] = v;
               if (col === 'Title') titleMapped = true;
             });
-            payload[fa.column] = row.value;
+            payload[ekey(fa.column)] = row.value;
           }
           if (!titleMapped && cfg.target.titleTemplate) {
             payload.Title = self.renderTemplate(cfg.target.titleTemplate, row);
+          }
+          // explicit empties (verified live: null saves empty for every
+          // scalar type, { results: [] } for multi-value ones)
+          if (cfg.target.sendEmpty) {
+            empties.forEach(function (f) {
+              var key = ekey(f.column);
+              var multi = f.type === 'multichoice' || (f.type === 'person' && f.multiple);
+              var pk = (f.type === 'person' || f.type === 'lookup') ? key + 'Id' : key;
+              if (pk in payload) return;
+              payload[pk] = multi ? { results: [] } : null;
+            });
           }
           return payload;
         });
@@ -2788,7 +3299,9 @@
           if (tok === 'time') return now.toLocaleTimeString();
           if (tok.indexOf('field:') === 0) {
             var fk = cfg._keyOfId[tok.slice(6)];
-            var v = fk ? (store.snap || self.values)[fk] : undefined;
+            // a field on a skipped page reads as empty (branching)
+            var v = !fk ? undefined : (cfg._pageRules && !self.pageActive(cfg._byKey[fk].page)) ? ''
+              : (store.snap || self.values)[fk];
             if (Array.isArray(v)) return v.map(function (p) { return p && p.text ? p.text : p; }).join(', ');
             if (v && typeof v === 'object') return v.text || v.url || '';
             return v == null ? '' : String(v);
@@ -2797,7 +3310,9 @@
         });
       },
       validateAll: function () {
-        for (var i = 0; i < cfg.pages.length; i++) {
+        var pages = this.activePages();
+        for (var j = 0; j < pages.length; j++) {
+          var i = pages[j];
           if (!this.validatePage(i)) { this.page = i; this.pageError = S.pageError; this.focusFirstError(); return false; }
         }
         this.pageError = '';
@@ -2834,8 +3349,7 @@
           return cfg._asg ? true : self.uploadAttachments();
         }).then(function (allOk) {
           if (cfg.afterSubmit && allOk) return self.runAfterSubmit();
-          self.view = allOk ? 'done' : 'attachRetry';
-          self.scrollTop();
+          if (allOk) self.showDone(); else { self.view = 'attachRetry'; self.scrollTop(); }
         }).catch(function (e) {
           if (cfg.afterSubmit && cfg.afterSubmit.continueOnSaveError) {
             // the save is a by-product here; the user still gets their result
@@ -2900,13 +3414,13 @@
         this.uploadAttachments().then(function (allOk) {
           if (allOk) {
             if (cfg.afterSubmit) return self.runAfterSubmit();
-            self.view = 'done'; self.scrollTop();
+            self.showDone();
           }
         }).finally(function () { self.busy = false; });
       },
       skipAttachments: function () {
         if (cfg.afterSubmit) { this.runAfterSubmit(); return; }
-        this.view = 'done'; this.scrollTop();
+        this.showDone();
       },
       resetForm: function () {
         var self = this;
@@ -2921,6 +3435,10 @@
         store.snap = null; store.rowsUncertain = false;
         this.promptAck = {}; this.dlg.open = false; this.dlg.k = null;
         this.page = 0; this.pageError = ''; this.view = 'form';
+        // a confirmation countdown stops when they choose to submit another
+        if (store.redirTimer) { clearInterval(store.redirTimer); store.redirTimer = null; }
+        this.redir.url = ''; this.redir.left = 0; this.redir.paused = false;
+        this.fillMe();
         // the rows just saved now count as submitted and drop out
         if (cfg._asg) this.loadAssignments();
         this.scrollTop();
@@ -3106,6 +3624,37 @@
     if (existing) existing.remove();
     mount.insertBefore(box, mount.firstChild);
   }
+  /* ------------------------------------------------------------------
+     Public API for the form builder (0.6.0)
+     ------------------------------------------------------------------ */
+  // the exact validation a page runs: "valid" here means "loads on the page"
+  NS.normalize = function (raw, lang) {
+    try {
+      var lg = lang || activeLang(raw);
+      return { errors: normalizeConfig(raw, lg).errors };
+    } catch (e) {
+      return { errors: ['config could not be read: ' + (e && e.message)] };
+    }
+  };
+  // read-only SharePoint access for the builder: lists of a web and a list's
+  // schema. Nothing here writes; the calls live in makeAdapter (and the mock).
+  var listsFacade = null;
+  NS.lists = function () {
+    if (listsFacade) return listsFacade;
+    var a = makeAdapter({ target: {} });
+    listsFacade = {
+      ready: function () { return a.ready ? a.ready() : Promise.resolve(); },
+      userInfo: function () { return a.userInfo ? a.userInfo() : {}; },
+      getWebLists: function (webUrl) { return a.getWebLists(webUrl); },
+      getListSchema: function (spec) { return a.getListSchema(spec); }
+    };
+    return listsFacade;
+  };
+  // the doctor's compatibility table (form type → SharePoint TypeAsString)
+  NS.compat = JSON.parse(JSON.stringify(TYPE_COMPAT));
+  // the engine script's ?v= (for generated web part stubs)
+  NS.assetVersion = engineVer;
+
   NS.validate = function (mountEl) {
     var uid = mountEl && mountEl.querySelector('[data-bspf-uid]') && mountEl.querySelector('[data-bspf-uid]').getAttribute('data-bspf-uid');
     if (uid && NS._defs[uid]) runDoctor(NS._defs[uid]);

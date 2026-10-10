@@ -47,7 +47,54 @@
     { InternalName: 'SourceTeam', Title: 'Source team', TypeAsString: 'Text', Required: false, ReadOnlyField: false },
     { InternalName: 'IsRecurring', Title: 'Recurring', TypeAsString: 'Boolean', Required: false, ReadOnlyField: false },
     { InternalName: 'RecurrenceEnd', Title: 'Recurring until', TypeAsString: 'DateTime', Required: false, ReadOnlyField: false },
-    { InternalName: 'ManagerAware', Title: 'Manager aware', TypeAsString: 'Boolean', Required: false, ReadOnlyField: false }
+    { InternalName: 'ManagerAware', Title: 'Manager aware', TypeAsString: 'Boolean', Required: false, ReadOnlyField: false },
+    { InternalName: 'AccessLevel', Title: 'Access level', TypeAsString: 'Choice', Required: false, ReadOnlyField: false },
+    { InternalName: 'Quantity', Title: 'Quantity', TypeAsString: 'Number', Required: false, ReadOnlyField: false },
+    { InternalName: 'ImpactScore', Title: 'Impact score', TypeAsString: 'Number', Required: false, ReadOnlyField: false }
+  ];
+  /* The builder's reads (BSPForms.lists()): a small mock tenant. The schema
+     mirrors the dev list BSPF Builder Test (dev/live/live-builder-list.ps1),
+     as the real adapter returns it after B0's probe — unbounded Number limits
+     already null, Choices as arrays. */
+  var MOCK_LISTS = [
+    { id: 'c279b324-0000-4000-8000-000000000001', title: 'BSPF Builder Test', url: '/sites/FCUPortal/Lists/BSPFBuilderTest', enableAttachments: true, itemCount: 6 },
+    { id: 'c279b324-0000-4000-8000-000000000002', title: 'IT Requests', url: '/sites/FCUPortal/Lists/IT Requests', enableAttachments: true, itemCount: 42 },
+    { id: 'c279b324-0000-4000-8000-000000000003', title: 'No Attachments', url: '/sites/FCUPortal/Lists/NoAttachments', enableAttachments: false, itemCount: 0 }
+  ];
+  function sf(name, type, extra) {
+    var o = { InternalName: name, EntityPropertyName: name.charAt(0) === '_' ? 'OData_' + name : name, Title: name,
+      TypeAsString: type, Required: false, ReadOnlyField: false, FromBaseType: false, Sealed: false, Hidden: false, EnforceUniqueValues: false };
+    Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
+    return o;
+  }
+  var BUILDER_TEST_FIELDS = [
+    sf('Title', 'Text', { Required: true, FromBaseType: true, MaxLength: 255 }),
+    sf('TxtShort', 'Text', { MaxLength: 50 }),
+    sf('TxtReq', 'Text', { Required: true, MaxLength: 255 }),
+    sf('TxtDefault', 'Text', { DefaultValue: 'Hello', MaxLength: 255 }),
+    sf('NotePlain', 'Note', { RichText: false, AppendOnly: false, NumberOfLines: 6 }),
+    sf('NoteRich', 'Note', { RichText: true, AppendOnly: false, NumberOfLines: 6 }),
+    sf('NumPlain', 'Number', { DisplayFormat: 0, MinimumValue: 0, MaximumValue: 100, ShowAsPercentage: false }),
+    sf('NumDefault', 'Number', { DefaultValue: '7', DisplayFormat: -1, MinimumValue: null, MaximumValue: null, ShowAsPercentage: false }),
+    sf('NumPct', 'Number', { DisplayFormat: -1, MinimumValue: null, MaximumValue: null, ShowAsPercentage: true }),
+    sf('Money', 'Currency', { DisplayFormat: -1, MinimumValue: null, MaximumValue: null }),
+    sf('ChoiceA', 'Choice', { DefaultValue: 'Medium', Choices: ['Low', 'Medium', 'High'], FillInChoice: false }),
+    sf('ChoiceFill', 'Choice', { Choices: ['Alpha', 'Beta'], FillInChoice: true }),
+    sf('ChoiceReqDef', 'Choice', { Required: true, DefaultValue: 'Standard', Choices: ['Standard', 'Urgent'], FillInChoice: false }),
+    sf('Multi', 'MultiChoice', { Choices: ['Red', 'Green', 'Blue'], FillInChoice: false }),
+    sf('DateOnlyCol', 'DateTime', { DisplayFormat: 0 }),
+    sf('DateTimeCol', 'DateTime', { DisplayFormat: 1 }),
+    sf('YesNo', 'Boolean', { DefaultValue: '0' }),
+    sf('Person', 'User', { AllowMultipleValues: false, SelectionMode: 0 }),
+    sf('People', 'UserMulti', { AllowMultipleValues: true, SelectionMode: 0 }),
+    sf('LinkCol', 'URL', { DisplayFormat: 0 }),
+    sf('PicCol', 'URL', { DisplayFormat: 1 }),
+    sf('UniqueCode', 'Text', { MaxLength: 255, EnforceUniqueValues: true }),
+    sf('EvenNum', 'Number', { DisplayFormat: -1, MinimumValue: null, MaximumValue: null, ValidationFormula: '=MOD(EvenNum,2)=0' }),
+    sf('CalcCol', 'Calculated', { ReadOnlyField: true }),
+    sf('_Under', 'Text', { MaxLength: 255 }),
+    sf('LookupCol', 'Lookup', { AllowMultipleValues: false, LookupList: '{eae80cf6-e4fd-4b50-b006-80242686d744}' }),
+    sf('_x0032_Num', 'Number', { DisplayFormat: -1, MinimumValue: null, MaximumValue: null })
   ];
 
   var writes = window.__BSPF_MOCK_WRITES__ = [];
@@ -133,6 +180,27 @@
     getLookupItems: function () {
       return maybeFail('getLookupItems') || delay(LOOKUP_ITEMS, 400);
     },
+    // builder reads — same shapes as the real adapter
+    getWebLists: function (webUrl) {
+      var fail = maybeFail('getWebLists');
+      if (fail) return fail;
+      writes.push({ op: 'getWebLists', webUrl: webUrl || null });
+      return delay(JSON.parse(JSON.stringify(MOCK_LISTS)), 200);
+    },
+    getListSchema: function (spec) {
+      var fail = maybeFail('getListSchema');
+      if (fail) return fail;
+      writes.push({ op: 'getListSchema', listId: spec.listId || null, listUrl: spec.listUrl || null });
+      var l = MOCK_LISTS.filter(function (x) { return x.id === spec.listId || x.url === spec.listUrl; })[0];
+      if (!l) return Promise.reject(new Error('mock: list not found'));
+      var fields = l.title === 'BSPF Builder Test' ? BUILDER_TEST_FIELDS
+        : l.title === 'IT Requests' ? LIST_FIELDS.map(function (f) { return sf(f.InternalName, f.TypeAsString, { Required: f.Required, RichText: f.RichText }); })
+          : [sf('Title', 'Text', { Required: true, FromBaseType: true, MaxLength: 255 }), sf('Notes', 'Note', { RichText: false })];
+      return delay({
+        list: { id: l.id, title: l.title, url: l.url, enableAttachments: l.enableAttachments, validationFormula: '' },
+        fields: JSON.parse(JSON.stringify(fields))
+      }, 250);
+    },
     // assignments: window.BSPF_MOCK_ASSIGNMENTS (rows, each with ID + the
     // source columns and the user column) filtered like the real adapter —
     // userColumn equal to any of the user's addresses, case-insensitive
@@ -192,6 +260,9 @@
   ];
   // per-list schemas for the doctor (window.BSPF_MOCK_FIELDS[listTitle] wins)
   var ZONE_FIELDS = {
+    'Workplace Requests': ['Title:Text', 'Requester:User', 'RequestType:Choice', 'OtherDetails:Note', 'HasDeadline:Boolean',
+      'Ergonomic:Boolean', 'Item:Choice', 'Quantity:Number', 'Attendees:Number', 'BookingDate:DateTime', 'Deadline:DateTime',
+      'Notes:Note', '_Ref:Text'],
     'PS_Zone-Attestation-Assignments': ['UserEmail:Text', 'UserDescription:Text', 'AreaName:Text'],
     'PS_Zone-Attestation-Responses': ['Title:Text', 'LookupID:Number', 'UserName:Text', 'UserEmail:Text', 'UserDescription:Text',
       'AreaName:Text', 'ZoneSelection:Text', 'Attestation:Text', 'AttestationTime:DateTime']

@@ -26,16 +26,24 @@ guess what it says.
 | `gsi-digital-creative-intake.json` | A real one-page intake form running in production. It writes to an existing list with odd internal column names (`field_6`, `Pillar_x002f_Partner`), and it uses business-hours rules. | PASTE-LINK |
 | `ps-zone-attestation.json` | A real bilingual (English/French) form: `assignments` (one saved item per row), `currentUser`, `headerCard`, `submitConfirm`, `target.set`. Use it for anything bilingual or "confirm each item assigned to you". | PASTE-LINK |
 | `classic-url-request.json` | A real form that reads values from the page URL (`query`, `hidden`), looks something up after submit, and redirects (`afterSubmit`, `form.vars`). | PASTE-LINK |
+| `example-branching.json` | Branching: pages that show only for some answers (`visibleWhen` on a page), ending early (`endWhen`), choices limited by a yes/no answer (`choicesWhen`), a number dropdown and slider, business-day date rules, `sendEmpty`, a person defaulting to the user (`"@me"`), and a redirect after submit. Start from it when what's asked depends on earlier answers. | PASTE-LINK |
 
 ## 2. What the engine can and can't do
 
 **Can:** one or more pages with a step indicator; sections, optionally in two
-columns; these field types: text, textarea, email, phone, number, currency,
-choice, multichoice, yes/no (switch or checkbox), date, date+time, person,
-multi-person, hyperlink, lookup, hidden, plus display-only heading, note and
-current-user card; show/hide rules; date rules (block or warn); business-hours
-rules; file attachments on the item; English/French; save one item per
-assigned row; a lookup and a redirect after submit; values from the page URL.
+columns; these field types: text, textarea, email, phone, number (typed, or a
+dropdown or slider), currency, choice, multichoice, yes/no (switch or
+checkbox), date, date+time, person, multi-person, hyperlink, lookup, hidden,
+plus display-only heading, note and current-user card; show/hide rules for
+fields and sections; **page branching** (skip a page, or end the form early,
+based on an earlier answer); **choices that depend on an earlier answer**
+(`choicesWhen`); date rules (block or warn), including business-day limits
+("at least 2 business days out", "weekdays only"); business-hours rules; file
+attachments on the item; English/French; save one item per assigned row; a
+lookup after submit; a redirect after submit (an automatic one with a
+countdown, or one from `afterSubmit`); values from the page URL; a person
+field pre-filled with the signed-in user. Optional fields get a clear button
+(×) automatically; no config needed.
 
 **Can't.** Don't fake these. Tell the person plainly, and suggest the usual
 way instead:
@@ -44,7 +52,8 @@ way instead:
 | --- | --- |
 | Emails or Teams messages on submit, approvals | Not in the form. Use a Power Automate flow on the list ("When an item is created"). |
 | Saving a draft, resuming later | Not supported. |
-| Skipping to a different page based on an answer | No page branching. Use `visibleWhen` to show or hide sections and fields instead. That usually covers it. |
+| Jumping to a specific page, or going back to an earlier one, based on an answer | Branching can only skip pages or end the form early, always moving forward. Put the pages in the order people reach them, and use page `visibleWhen` / `endWhen`. |
+| Holidays in a business-day limit | Not modeled. Business days are weekdays (per `form.businessHours.days`) only. |
 | Calculated fields, totals, scoring | Not supported. A calculated column on the list can do it after saving. |
 | Editing an existing item, or a form that reads someone's past answers | Not supported, except `assignments` (it hides rows the user already answered). |
 | Anonymous responses | No. Users are signed in to SharePoint, and SharePoint records who created the item. |
@@ -107,8 +116,17 @@ These are the mistakes that break forms. Check every one.
   one field to `"column": "Title"`, or set `target.titleTemplate` (e.g.
   `"{form:title} — {user:name} — {date}"`).
 - **Two fields can't save to one column** unless that column is listed in the
-  top-level `"sharedColumns"`. That's for "different choice lists depending on
-  an earlier answer", with only one variant visible at a time.
+  top-level `"sharedColumns"`. That's for variants of one question that differ
+  in more than their options (different label, hint, type or `required`),
+  with only one variant visible at a time. If only the **choices** change with
+  an earlier answer, don't use shared columns; use `choicesWhen` (below). It's
+  simpler: one field, one column.
+- **Column names starting with `_`:** write the internal name as it is. The
+  engine saves it as `OData_<name>` itself.
+- **Suggest `"sendEmpty": true`** in `target` for every new form. Without it,
+  a field the user left empty or cleared isn't sent, and SharePoint fills in
+  the column's default (clearing a Priority that defaults to `Standard` would
+  save `Standard`). With it, the column is saved empty.
 - **Choice values must match the list exactly**: spelling, case and
   punctuation. Copy them; don't tidy them.
 - Column type has to match field type. See the table in section 5.
@@ -121,7 +139,34 @@ These are the mistakes that break forms. Check every one.
 - A field hidden by a rule isn't checked and isn't saved. So `required: true`
   on a conditional field means "required when shown". That's usually what
   people want.
-- `withinBusinessDays` rules and date `prompt`s need `form.businessHours`.
+- `withinBusinessDays` rules, date `prompt`s and the date rule ops
+  `minBusinessDays` / `businessDay` need `form.businessHours`.
+- **Page branching.** The first page can't have `visibleWhen`. A page's
+  `visibleWhen` may only use fields on **earlier** pages. A page's `endWhen`
+  may use fields on that page or earlier pages. Answers on a skipped page
+  count as empty for every rule, and aren't saved. Hidden **sections** are
+  different: their values still count for rules.
+- **`choicesWhen`** (on `choice` / `multichoice` only):
+  `{ "field": "<id>", "map": { "<value>": ["<choice>", …] }, "else": [ … ] }`.
+  The driver `field` must be a `choice` or yes/no (`boolean`) field that comes
+  **before** this one (for yes/no, the map keys are `"true"` and `"false"`).
+  Every map key must be one of the driver's choices, and every listed choice
+  must be one of this field's own `choices`. With no choices to show, the field
+  is hidden (and not saved), which is also what happens while the driver is
+  unanswered. Don't use it when the options aren't a subset of one list.
+- **Number `display`:** `"dropdown"` or `"slider"` needs whole-number
+  `validation.min` and `validation.max` (max above min). A dropdown lists
+  every value, so at most 200 values (use a slider beyond that). Only on
+  `number`, never `currency`. A slider starts "Not set" until it's moved.
+- **Date rule `op`** must be one of `after`, `onOrAfter`, `before`,
+  `onOrBefore`, `minBusinessDays`, `businessDay`.
+  `minBusinessDays` takes `days` (a whole number above 0): the date must be at
+  least that many **whole** business days after today; today never counts.
+  `businessDay` means the date must fall on a business day. To block
+  weekends and also enforce a minimum, **pair** them: `minBusinessDays` alone
+  lets a far-off Saturday through. Holidays aren't modeled.
+- **`"default": "@me"`** is for `person` fields only. It pre-fills the
+  signed-in user, who can still change it.
 
 ### Text
 - Plain text everywhere. **No HTML.** Links are written `[text](url)` and only
@@ -164,7 +209,14 @@ These are the mistakes that break forms. Check every one.
 - **Redirect URLs** go in `form.vars` and are used as `{var:name}`. Never take
   a redirect URL from the page URL.
 - **Attachments:** keep `maxFileSizeMb` at 25 or less. `attachments.section`
-  can't name a section that has `visibleWhen`.
+  can't name a section that has `visibleWhen`. Attachments also can't be on a
+  page that has `visibleWhen`, or on a page after one with `endWhen`. Put them
+  on a page every path reaches.
+- **`target.sendEmpty`** must be `true` or `false`, not a string.
+- **Redirect after submit without a lookup:** `confirmation.redirect` is
+  `{ "url": "…", "seconds": 5 }`. It needs a `url`. `seconds` is 0 to 60.
+  Same URL rules as above: from the config or `form.vars` only, `http(s)` or
+  server-relative.
 
 ## 5. Designing new list columns
 
@@ -247,7 +299,25 @@ In this order:
 - [ ] Choice values match the list exactly. Bilingual forms translate labels
       only.
 - [ ] No HTML, no hex colors, no invented icon names, no made-up keys.
-- [ ] `businessHours` is present if any `withinBusinessDays` or `prompt` is
-      used.
+- [ ] `businessHours` is present if any `withinBusinessDays`, `prompt`,
+      `minBusinessDays` or `businessDay` is used.
+- [ ] Every date rule `op` is one of `after`, `onOrAfter`, `before`,
+      `onOrBefore`, `minBusinessDays`, `businessDay`. A `minBusinessDays` that
+      should exclude weekends is paired with `businessDay`.
+- [ ] The first page has no `visibleWhen`. Each page `visibleWhen` uses only
+      fields on earlier pages; each `endWhen` uses fields on that page or
+      earlier.
+- [ ] Each `choicesWhen` driver is an earlier `choice` or yes/no field. Every
+      map key is one of the driver's choices, and every mapped value is one of
+      this field's own `choices`. It's used only when just the options differ
+      (otherwise `sharedColumns`).
+- [ ] Every number `dropdown` / `slider` has whole-number `validation.min` and
+      `validation.max`, and a dropdown has at most 200 values. None is on a
+      `currency` field.
+- [ ] `"default": "@me"` appears only on `person` fields.
+- [ ] Attachments are not on a page with `visibleWhen` or after a page with
+      `endWhen`.
+- [ ] `target.sendEmpty` is `true` (recommended) or `false`, not a string.
+- [ ] `confirmation.redirect`, if used, has a `url`.
 - [ ] Anything the person asked for that the engine can't do was told to
       them, not faked.

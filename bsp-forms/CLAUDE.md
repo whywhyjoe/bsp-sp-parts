@@ -37,6 +37,10 @@ contract. Read both before changing behavior.
 | `bsp-forms.js` | The whole engine: settings/base resolution → asset loader → pnpjs v2 adapter (+mock seam) → config normalize/validate → rule engine → validators → markup builders → Alpine instance factory → doctor → boot/scan. Sections are banner-commented in that order. |
 | `bsp-forms.css` | The `.bspf-*` layer: pills, combo, people picker, attachments, nav, done screen, edit note, doctor. Also owns the `[x-cloak]` rule (kept out of inline `<style>` for CSP). |
 | `forms/example-it-request.json` | Reference config — exercises every field type and rule. Keep it exercising anything you add. |
+| `forms/example-branching.json` | Reference config for what can't live in the IT request without changing its flow: page `visibleWhen`/`endWhen`, `choicesWhen` on a boolean, business-day date rules, `target.sendEmpty`, a `_`-prefixed column, `confirmation.redirect`. Harness: `?form=example-branching`. |
+| `docs/BUILDER-PLAN.md` | The form builder's build plan (decisions D1–D21, engine 0.6.0 spec E1–E10, builder B1–B7, phases, review log, B0 results). Live until the builder lands. |
+| `dev/live/live-builder-list.ps1` + `live-builder-probe.js` | The dev list **BSPF Builder Test** (one column of every type, incl. ones the builder must refuse) and the B0 probe of schema shape, empty/default saves and `OData_` keys against it. |
+| `dev/live/live-v06.json` + `live-v06.ps1` + `live-v06.js` | Engine 0.6.0 live test on that list: `sendEmpty` vs real column defaults, `@me` with a real login, branching/`endWhen`, dropdown/slider, `choicesWhen`, business days, `OData__Under`. |
 | `webpart/bsp-forms.webpart.html` | The insert snippet users paste/point the web part at. |
 | `forms/gsi-digital-initiatives-intake.json` | Live form: FCU GSI Digital Initiatives Technology Intake → the Creative Digital Solutions intake list (internal column names; see its `$comment`). |
 | `forms/gsi-digital-creative-intake.json` | Live form: FCU GSI Digital & Creative Solutions Intake → the same list. Uses business time: urgent prompt + locked Urgent/Standard switch. |
@@ -200,6 +204,32 @@ contract. Read both before changing behavior.
 - **Assignments filter ≠ security.** It's a browser-side `$filter`. Privacy
   needs item permissions on the source list (README, *Caveats*). Don't
   describe the filter as protecting anything.
+- **An omitted column gets the list's default; REST doesn't enforce
+  Required.** Both verified live (B0, 0.6.0). So the payload leaving out an
+  empty field silently saves the column default, and `target.sendEmpty`
+  (explicit `null` / `{ results: [] }`) is the only way a cleared field saves
+  empty. It's opt-in so existing forms' payloads stay byte-identical — don't
+  flip the default. Empties are written in a second pass, only for keys no
+  field wrote (shared columns).
+- **Page activity is built front to back** (`pageStates`): page rules read
+  only earlier pages (normalize enforces it), so the array built so far
+  answers every read and nothing recurses. `_get` returns `emptyOf(f)` for a
+  field on a skipped page — for every rule, `choicesWhen` and `{field:}`
+  token. Forms without page rules skip all of it (`cfg._pageRules`). Hidden
+  *sections* keep raw values; don't extend the emptiness there without a
+  decision (it would change existing forms).
+- **`choicesWhen` prunes in a `$watch` on the driver**, not in the click
+  handler, so a prompt's `set`, a reset or a language carry can't leave a
+  stale pick behind. With no allowed options the field is hidden (`vis()`).
+- **A native range can't be empty.** The slider's value stays `''` until an
+  `input` or `click` on it; the thumb sits at the midpoint meanwhile.
+  Arrow keys from "unset" start at the midpoint.
+- **`_`-prefixed internal names save as `OData_<name>`** (`ekey()`); the raw
+  name 400s with "property does not exist". The doctor and `column` stay the
+  internal name.
+- **`BSPForms.lists()` is read-only by construction** — a facade exposing
+  four methods over `makeAdapter({ target: {} })`. The builder must never get
+  the full adapter (it has `addItem`, `ensureUser`).
 
 ## Verifying a change
 
@@ -231,6 +261,7 @@ inspect `__BSPF_MOCK_WRITES__` for the exact payload.
 
 - Don't edit the design-system repos from here; extend via `bsp-forms.css`.
 - Deployed artifacts are only `bsp-forms.js`, `bsp-forms.css`, `forms/*.json`.
-- Next phases (not built, don't scaffold speculatively): branching, drafts,
-  builder UI, and post-submit actions beyond `afterSubmit`'s single lookup +
-  result screen.
+- The form builder (`builder/`) is being built per `docs/BUILDER-PLAN.md`;
+  follow that plan's phases. Still not planned (don't scaffold
+  speculatively): drafts, and post-submit actions beyond `afterSubmit`'s
+  single lookup + result screen.

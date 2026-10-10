@@ -25,6 +25,7 @@ Everything else it reads already exists in this repo.
    | `gsi-digital-creative-intake.json` | `bsp-forms/forms/` |
    | `ps-zone-attestation.json` | `bsp-forms/forms/` |
    | `classic-url-request.json` | `bsp-forms/forms/` |
+   | `example-branching.json` | `bsp-forms/forms/` |
 
    Any of the configs already live on prod are in `Code/bsp-forms/forms/`. You
    can link to those copies instead of uploading them again. They stay current

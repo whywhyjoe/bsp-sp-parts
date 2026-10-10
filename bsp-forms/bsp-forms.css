@@ -482,6 +482,88 @@
 .bspf-combo__option--clear .icon { color: var(--fg-secondary); }
 
 /* ---------------------------------------------------------------------
+   0.6.0 — clear buttons beside inputs, number dropdown, slider.
+   --------------------------------------------------------------------- */
+/* an input with its × beside it (date, number, link) */
+.bspf-clearable { display: flex; align-items: center; gap: var(--space-40); }
+.bspf-clearable > .input { flex: 1; min-width: 0; }
+
+/* Number dropdown: the combo, its values as a grid of number chips */
+.bspf-numdrop__pill { font-variant-numeric: tabular-nums; }
+.bspf-numdrop__grid {
+  display: grid; gap: var(--space-40);
+  grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+  padding: var(--space-20);
+}
+.bspf-numdrop__opt {
+  justify-content: center;
+  padding: var(--space-60) var(--space-40);
+  border: var(--stroke-thin) solid var(--stroke-divider);
+  border-radius: var(--radius-medium);
+  font: var(--type-body1-strong); font-variant-numeric: tabular-nums;
+  transition: background var(--motion-fast) var(--ease-out), border-color var(--motion-fast) var(--ease-out);
+}
+.bspf-numdrop__opt:hover { border-color: var(--stroke-accent); background: var(--surface-info-tint); }
+.bspf-numdrop__opt[aria-selected="true"] {
+  background: var(--accent-rest); border-color: var(--accent-rest); color: var(--bmo-white);
+}
+
+/* Slider: a tinted card holding the range, its ends and the value pill.
+   The track fills to --bspf-pct (set inline); unset = no fill, dim thumb,
+   "Not set" in a neutral pill. */
+.bspf-slider {
+  display: flex; flex-direction: column; gap: var(--space-80);
+  padding: var(--space-120) var(--space-160);
+  border: var(--stroke-thin) solid var(--stroke-divider);
+  border-radius: var(--radius-large);
+  background: color-mix(in srgb, var(--surface-info-tint) 45%, var(--surface-raised));
+  transition: background var(--motion-normal) var(--ease-out), border-color var(--motion-normal) var(--ease-out);
+}
+.bspf-slider.is-unset { background: var(--surface-raised); border-style: dashed; }
+.bspf-slider:has(.bspf-slider__input[aria-invalid="true"]) { border-color: var(--fg-danger); }
+.bspf-slider__row { display: flex; align-items: center; gap: var(--space-120); }
+.bspf-slider__end {
+  flex: none; min-width: 3ch; text-align: center;
+  font: var(--type-caption1-strong); color: var(--fg-secondary); font-variant-numeric: tabular-nums;
+}
+.bspf-slider__input {
+  flex: 1; min-width: 0; height: 6px; margin: var(--space-80) 0;
+  -webkit-appearance: none; appearance: none;
+  border-radius: 999px; cursor: pointer;
+  background: linear-gradient(to right, var(--accent-rest) 0 var(--bspf-pct, 50%), var(--f2-grey-88) var(--bspf-pct, 50%) 100%);
+}
+.bspf-slider.is-unset .bspf-slider__input { background: var(--f2-grey-88); }
+.bspf-slider__input::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 20px; height: 20px; border-radius: var(--radius-circle);
+  background: var(--surface-raised); border: 2px solid var(--accent-rest);
+  box-shadow: var(--shadow-4);
+  transition: transform var(--motion-fast) var(--ease-out), border-color var(--motion-fast) var(--ease-out);
+}
+.bspf-slider__input::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: var(--radius-circle);
+  background: var(--surface-raised); border: 2px solid var(--accent-rest);
+  box-shadow: var(--shadow-4);
+}
+.bspf-slider__input:hover::-webkit-slider-thumb { transform: scale(1.12); }
+.bspf-slider.is-unset .bspf-slider__input::-webkit-slider-thumb { border-color: var(--f2-grey-74); }
+.bspf-slider.is-unset .bspf-slider__input::-moz-range-thumb { border-color: var(--f2-grey-74); }
+.bspf-slider__input:focus-visible { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: 6px; }
+.bspf-slider__meta { display: flex; align-items: center; gap: var(--space-80); min-height: 28px; }
+.bspf-slider__value {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 4ch; padding: var(--space-20) var(--space-120);
+  border-radius: 999px;
+  background: var(--accent-rest); color: var(--bmo-white);
+  font: var(--type-body1-strong); font-variant-numeric: tabular-nums;
+}
+.bspf-slider.is-unset .bspf-slider__value { background: var(--surface-neutral-tint); color: var(--fg-secondary); font: var(--type-caption1-strong); }
+.bspf-slider__clear .icon { width: 14px; height: 14px; }
+@media (prefers-reduced-motion: reduce) {
+  .bspf-slider, .bspf-numdrop__opt, .bspf-slider__input::-webkit-slider-thumb { transition: none; }
+}
+
+/* ---------------------------------------------------------------------
    Assignments (type "assignments") — the user's rows as a two-column
    table: row label | dot-choice dropdown. A chosen row picks up its
    hue as a left accent and a whisper of tint; rows rise in once on load
