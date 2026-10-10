@@ -2288,7 +2288,7 @@
         var drivers = Object.create(null);
         cfg._ordered.forEach(function (f) { if (f._cw) (drivers[f._cw.k] = drivers[f._cw.k] || []).push(f.k); });
         Object.keys(drivers).forEach(function (dk) {
-          self.$watch('values.' + dk, function () { drivers[dk].forEach(function (k) { self.pruneChoices(k); }); });
+          self.$watch('values.' + dk, function () { drivers[dk].forEach(function (k) { self.pruneChoices(k, !!store.resetting); }); });
         });
         // a default, URL value or carried answer the driver doesn't allow
         // goes now (a typed "Other" value is kept: no driver changed)
@@ -3472,6 +3472,12 @@
         // a confirmation countdown stops when they choose to submit another
         if (store.redirTimer) { clearInterval(store.redirTimer); store.redirTimer = null; }
         this.redir.url = ''; this.redir.left = 0; this.redir.paused = false;
+        // the restored defaults pass the same init prune (a default the
+        // driver's default disallows stays out); while the driver watchers
+        // react to the reset itself, typed "Other" defaults are kept too
+        store.resetting = true;
+        cfg._ordered.forEach(function (f) { if (f._cw) self.pruneChoices(f.k, true); });
+        this.$nextTick(function () { store.resetting = false; });
         this.fillMe();
         // the rows just saved now count as submitted and drop out
         if (cfg._asg) this.loadAssignments();

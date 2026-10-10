@@ -692,3 +692,19 @@ Also adopted from its "missing gotchas": every redirect path guarded in
 preview (E9b), type-specific `DisplayFormat` (E9a, gotcha 16), and
 "semantic, not byte-for-byte" preservation (B7). Review cost: 1.41M input
 tokens / 9.8K output.
+
+**xo turn 8 — Codex, Phase 1 code (engine 0.6.0, 1cad24c).** 6 findings, all
+accepted and fixed in 90c8803: a disallowed default choice survived load
+(high — `choicesWhen` now prunes at init); lax `choicesWhen` map validation;
+a language switch lost a pending `@me` fill and left a redirect countdown
+running unseen; a date+time `min` ignored the viewer's zone; the stepper's
+accessible total counted skipped pages. No regression found for the four
+live forms. 23 regression checks added (11 fail on the pre-fix engine).
+Cost 1.13M input / 7.4K output.
+
+**xo turn 9 — Codex re-review of those fixes.** 5 of 6 resolved; #1 was
+partial ("Submit another" restored the pre-prune defaults) — fixed: reset runs
+the same prune, and driver watchers keep typed defaults while reacting to a
+reset. Regression check added (smoke 320/320). No new issues found. Cost
+0.32M input / 4.3K output. This was the second and last review round for
+Phase 1.

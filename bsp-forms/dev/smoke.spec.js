@@ -1546,6 +1546,13 @@ async function testReviewFixes(browser) {
   await page.waitForSelector('.bspf-done', { state: 'visible', timeout: 5000 });
   let p = (await adds(page))[0] || {};
   check('…and absent from the payload', !('AccessLevel' in p) && p.Category === 'Hardware' && p.SubCategory === 'Dock', JSON.stringify(p));
+  // "Submit another" restores the defaults; the driver doesn't change, so
+  // only the reset's own prune keeps the disallowed default out (xo turn 9)
+  await navClick(page, 'Submit another');
+  await page.waitForTimeout(300);
+  s = await state(page);
+  check('reset: the disallowed default stays pruned after "Submit another"', s.values.category === 'Hardware' && s.values.accessLevel === '',
+    JSON.stringify([s.values.category, s.values.accessLevel]));
   check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
   await ctx.close();
   ({ ctx, page } = await openForm(browser, {
