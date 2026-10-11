@@ -2461,6 +2461,51 @@ async function validBase(page) {
   await ev(page, s => { s.doc.form.title = 'Xo 12'; s.doc.target.titleTemplate = '{form:title}'; });
   await addCtl(page, 'section1', 'text', 'req', { label: 'Request', col: 'TxtReq' });
 }
+/* Codex re-review (xo 13): the last gaps in the xo 12 fixes, checked on the
+   pure core (computeIssues / ruleRows) with hand-made docs */
+async function testXo13(browser) {
+  console.log('xo 13 · stale choices by effective op, redirect token prefixes, value shapes:');
+  const { ctx, page } = await openBuilder(browser);
+  const r = await page.evaluate(() => {
+    const core = BSPFormsBuilder.core;
+    const mk = (rule, extra) => ({
+      form: Object.assign({ title: 'T' }, extra && extra.form), target: { listUrl: '/sites/x/Lists/L' }, confirmation: Object.assign({}, extra && extra.confirmation),
+      pages: [{ id: 'p1', sections: [{ id: 's1', fields: [
+        { id: 'kind', type: 'choice', label: 'Kind', choices: [{ value: 'Option 1' }, { value: '0' }, { value: '1' }], fillIn: !!(extra && extra.fillIn), $builder: { kind: 'choice', logicOnly: true } },
+        { id: 'dep', type: 'text', label: 'Dep', visibleWhen: rule, $builder: { kind: 'text', logicOnly: true } }
+      ] }] }]
+    });
+    const iss = (doc) => core.computeIssues(doc, { state: 'none' }).filter(i => /compares “Kind”|redirect/i.test(i.msg)).map(i => i.level + ':' + i.msg);
+    return {
+      noOp: iss(mk({ field: 'kind', value: 'Option 2' })),
+      notEq: iss(mk({ field: 'kind', op: 'notEquals', value: 'Option 2' })),
+      notIn: iss(mk({ field: 'kind', op: 'notIn', value: ['Option 2'] })),
+      inSome: iss(mk({ field: 'kind', op: 'in', value: ['Option 1', 'Option 2'] })),
+      inAll: iss(mk({ field: 'kind', op: 'in', value: ['Option 2', 'Option 3'] })),
+      eqFill: iss(mk({ field: 'kind', value: 'Option 2' }, { fillIn: true })),
+      jsTok: iss(mk(null, { confirmation: { redirect: { url: 'javascript:{field:dep}', seconds: 3 } } })),
+      okTok: iss(mk(null, { confirmation: { redirect: { url: '/sites/x/{field:dep}', seconds: 3 } } })),
+      leadTok: iss(mk(null, { confirmation: { redirect: { url: '{field:dep}', seconds: 3 } } })),
+      shapeNum: core.ruleRows({ field: 'kind', op: 'equals', value: 1 }, mk(null)).editable,
+      shapeStr: core.ruleRows({ field: 'kind', op: 'equals', value: '1' }, mk(null)).editable,
+      shapeMany: core.ruleRows({ field: 'kind', op: 'in', value: ['0', 1] }, mk(null)).editable
+    };
+  });
+  check('no op (= equals) on a missing choice → error "can never be true"', r.noOp.some(x => /^error:.*can never be true/.test(x)), r.noOp);
+  check('notEquals a missing choice → warning "always passes", not an error', r.notEq.length === 1 && /^warn:.*always passes/.test(r.notEq[0]), r.notEq);
+  check('notIn with a missing choice → warning, not an error', r.notIn.length === 1 && /^warn:/.test(r.notIn[0]), r.notIn);
+  check('in [valid, missing] → warning "never matches"', r.inSome.length === 1 && /^warn:.*never matches/.test(r.inSome[0]), r.inSome);
+  check('in [missing, missing] → error', r.inAll.some(x => /^error:/.test(x)), r.inAll);
+  check('…with "Other" on the driver → warning', r.eqFill.length === 1 && /^warn:/.test(r.eqFill[0]), r.eqFill);
+  check('redirect javascript:{field:x} → error', r.jsTok.some(x => /^error:.*https:\/\/ or a site path/.test(x)), r.jsTok);
+  check('redirect /sites/x/{field:x} → no issue (safe fixed start)', r.okTok.length === 0, r.okTok);
+  check('redirect starting with a token → "can’t check" warning', r.leadTok.length === 1 && /^warn:.*can’t check/.test(r.leadTok[0]), r.leadTok);
+  check('imported equals 1 (number) where choices are strings → read-only', r.shapeNum === false);
+  check('…equals "1" (string) stays editable', r.shapeStr === true);
+  check('…in ["0", 1] (a number inside) → read-only', r.shapeMany === false);
+  await ctx.close();
+}
+
 async function testXo12(browser) {
   console.log('xo 12 · 1. preview links never navigate:');
   let { ctx, page } = await openBuilder(browser);
@@ -2651,7 +2696,9 @@ async function testXo12(browser) {
   await ev(page, s => { s.doc.form.vars.next = 'javascript:alert(1)'; s.doc.confirmation.redirect.url = '{var:next}'; });
   iss = await issuesOf(page);
   check('a var that resolves to javascript: → error', has(iss, /The redirect after submit needs a web address/, 'error'), issueLine(iss));
-  await ev(page, s => { s.doc.confirmation.redirect.url = '/x/{field:req}'; });
+  // xo 13: a token after a safe fixed start ("/x/{field:req}") is fine now;
+  // only a LEADING token can't be checked
+  await ev(page, s => { s.doc.confirmation.redirect.url = '{field:req}/x'; });
   iss = await issuesOf(page);
   check('an unknown token ({field:req}) → WARNING "can’t check"', iss.some(i => i.level === 'warn' && /token the builder can’t check/.test(i.msg)) && !has(iss, /redirect/, 'error'), issueLine(iss));
   await ctx.close();
@@ -2688,7 +2735,7 @@ async function testXo12(browser) {
 (async () => {
   const browser = await launch();
   const only = process.env.ONLY ? process.env.ONLY.split(',') : null;
-  const suite = [testBootAndCatalog, testControls, testSwitchAndLogicOnly, testChecks, testIds, testOrdering, testUndoAndDraft, testDownload, testEndToEnd, testReviewFixes, testRules, testChoiceLimitsDatesSettings, testPreview, testXo12];
+  const suite = [testBootAndCatalog, testControls, testSwitchAndLogicOnly, testChecks, testIds, testOrdering, testUndoAndDraft, testDownload, testEndToEnd, testReviewFixes, testRules, testChoiceLimitsDatesSettings, testPreview, testXo12, testXo13];
   try {
     for (const t of suite) {
       if (only && !only.includes(t.name)) continue;

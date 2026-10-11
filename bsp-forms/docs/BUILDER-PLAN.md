@@ -741,3 +741,31 @@ after it:
 
 Regression checks fail on the pre-fix build. Builder suite 380/380. Cost
 0.49M / 6.2K. This was the second and last review round for Phase 2.
+
+**Phase 3 (rules editor, form settings, preview), 2026-10-11.** One problem
+surfaced while building, before any review: `x-ignore` on the preview stage
+stops Alpine from ever initializing the engine's root, so every `x-show` in
+the preview was dead. It was replaced by an isolated data stack plus
+mutation-observer opt-out (see CLAUDE.md).
+
+**xo turn 12 — Codex, Phase 3 code (c109429).** 7 findings, all accepted:
+- High: preview new-tab and middle-click links could still navigate; a
+  deleted choice left a scalar rule that could never be true; `destroy()`
+  hit the old root after a language switch.
+- Medium: builder teardown left timers running; a reorder could push a
+  date's `compareTo` later unflagged; `__proto__` as a choice-limit key;
+  redirect `{var:}` was never validated.
+- Phase 4 note: imported ops the editor can't show are now read-only.
+
+The suite then caught two bugs in those fixes (the `__proto__` write wasn't
+reactive; a preview destroyed while Alpine loaded still got initialized).
+Both were fixed in 2ae2e68. Cost 1.51M / 11.5K.
+
+**xo turn 13 — Codex re-review.** 5 resolved, 3 partial, all fixed after it:
+- the stale-choice check now uses the effective op (none = equals);
+- negative ops (notEquals/notIn) are warnings, not errors;
+- the fixed start of a tokenized redirect is validated;
+- imported values must match the editor's value shape.
+
+Builder suite 594/594, engine 351/351. This was the second and last review
+round for Phase 3. Cost 0.66M / 6.9K.

@@ -493,7 +493,20 @@
     if (!f) return true; // a dangling driver is its own error; still editable
     var k = kindOf(f), op = r.op || 'equals';
     if (k === 'boolean') return (op === 'equals' || op === 'notEquals') && typeof r.value === 'boolean';
-    return (RULE_OPS[k] || [['notEmpty'], ['isEmpty']]).some(function (o) { return o[0] === op; });
+    var o = (RULE_OPS[k] || [['notEmpty'], ['isEmpty']]).filter(function (x) { return x[0] === op; })[0];
+    if (!o) return false;
+    // ...and its value has the shape the editor shows (an imported 1 where
+    // the choices are "0"/"1" matches loosely in the engine but would show
+    // as the first option here — Codex xo 13)
+    var v = r.value;
+    function str(x) { return typeof x === 'string'; }
+    switch (o[2]) {
+      case 'one': case 'text': return str(v);
+      case 'many': return Array.isArray(v) && v.every(str);
+      case 'number': case 'bizdays': return typeof v === 'number';
+      case 'date': return str(r.compareTo) && (r.days == null || typeof r.days === 'number');
+      default: return true;
+    }
   }
   // { mode, rows, editable } — rows are the doc's own condition objects
   function ruleRows(rule, doc) {
@@ -746,16 +759,26 @@
     // be true (a deleted choice — Codex xo 12); with "Other" on, it still can
     var byId = Object.create(null);
     eachField(doc, function (x) { byId[x.id] = x; });
+    // The effective op is the engine's (no op = equals — Codex xo 13). A
+    // positive test on a missing value can never be true (error); a
+    // negative one (notEquals / notIn) still works, it just always passes
+    // for that value (warning); "any of" is only dead when every value is.
     refSites(doc).forEach(function (s) {
-      if (s.key !== 'field' || !s.obj || !('op' in s.obj) || !('value' in s.obj)) return;
+      if (s.key !== 'field' || !s.obj || !('value' in s.obj)) return;
       var d = byId[s.obj.field], dk = d && kindOf(d);
       if (dk !== 'choice' && dk !== 'multichoice') return;
+      var op = s.obj.op || 'equals';
       var vals = (d.choices || []).map(function (c) { return typeof c === 'string' ? c : c.value; });
-      var bad = (Array.isArray(s.obj.value) ? s.obj.value : [s.obj.value]).filter(function (v) { return vals.indexOf(v) < 0; });
+      var given = Array.isArray(s.obj.value) ? s.obj.value : [s.obj.value];
+      var bad = given.filter(function (v) { return vals.indexOf(String(v)) < 0; });
       if (!bad.length) return;
       var where = s.where.replace(/^(\w+) "([^"]+)"/, function (m, t, id) { return t + ' “' + id + '”'; });
-      add(d.fillIn ? 'warn' : 'error', 'schema', where + ' compares “' + (d.label || d.id) + '” with “' + bad.join('”, “') + '”, which ' +
-        (bad.length > 1 ? 'aren’t' : 'isn’t') + ' one of its choices' + (d.fillIn ? ' (only a typed “Other” could match).' : ' — so it can never be true.'));
+      var what = where + ' compares “' + (d.label || d.id) + '” with “' + bad.join('”, “') + '”, which ' + (bad.length > 1 ? 'aren’t' : 'isn’t') + ' one of its choices';
+      var negative = op === 'notEquals' || op === 'notIn';
+      var dead = !negative && ((op === 'in' || op === 'includesAny') ? bad.length === given.length : true);
+      if (negative) add('warn', 'schema', what + ' — that part always passes.');
+      else if (dead) add(d.fillIn ? 'warn' : 'error', 'schema', what + (d.fillIn ? ' (only a typed “Other” could match).' : ' — so it can never be true.'));
+      else add('warn', 'schema', what + ' — that value never matches.');
     });
 
     // the redirect, with {var:…} resolved the way the engine will
@@ -767,11 +790,18 @@
         missingVars.push(n);
         return '';
       });
+      var badShape = 'The redirect after submit needs a web address starting with https:// or a site path starting with /.';
       if (missingVars.length) add('error', 'schema', 'The redirect uses {var:' + missingVars.join('}, {var:') + '}, which the form doesn’t define.');
-      else if (/\{[^}]*\}/.test(u)) add('warn', 'schema', 'The redirect address has a token the builder can’t check; make sure it ends up as https://… or /….');
-      else if (!/^https?:\/\/[^\s]+$/i.test(u) && !/^\/(?!\/)[^\s]*$/.test(u)) {
-        add('error', 'schema', 'The redirect after submit needs a web address starting with https:// or a site path starting with /.');
+      else if (/\{[^}]*\}/.test(u)) {
+        // a token whose value isn't known yet: the fixed part before it must
+        // already be a safe start (javascript:{field:x} is never — Codex xo 13)
+        var pre = u.split('{')[0];
+        if (/^https?:\/\/./i.test(pre) || /^\/(?!\/)/.test(pre)) { /* safe start */ }
+        else if (pre === '' || 'https://'.indexOf(pre.toLowerCase()) === 0 || 'http://'.indexOf(pre.toLowerCase()) === 0) {
+          add('warn', 'schema', 'The redirect address starts with a token the builder can’t check; make sure it ends up as https://… or /….');
+        } else add('error', 'schema', badShape);
       }
+      else if (!/^https?:\/\/[^\s]+$/i.test(u) && !/^\/(?!\/)[^\s]*$/.test(u)) add('error', 'schema', badShape);
     }
 
     danglingRefs(doc).forEach(function (d) { add('error', 'schema', d.where + ' refers to “' + d.id + '”, which no control has.'); });
