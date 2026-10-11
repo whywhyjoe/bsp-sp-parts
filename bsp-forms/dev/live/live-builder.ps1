@@ -5,7 +5,9 @@
 #   live-builder.ps1 -Publish -Ver <n>   upload the JSON live-builder.js downloaded
 #                                        (%TEMP%\bspf-dev\builder-live.json) as forms/builder-live.json
 #                                        and build its form page, bsp-forms-builder-live-test.aspx
-param([string]$Ver = '1', [switch]$Publish)
+param([string]$Ver = '1', [switch]$Publish, [string]$Name = 'builder-live')
+# -Name: which downloaded config to publish (%TEMP%\bspf-dev\<name>.json → forms/<name>.json,
+# page bsp-forms-<name>-test.aspx); live-builder-rules.js uses builder-rules
 $ErrorActionPreference = 'Stop'
 . "$HOME\.claude\skills\sp-env\scripts\sp-env-common.ps1"
 $t = Get-SpEnvTenants
@@ -16,11 +18,11 @@ $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $devDir = Join-Path ([IO.Path]::GetTempPath()) 'bspf-dev'
 
 if ($Publish) {
-  $json = Join-Path $devDir 'builder-live.json'
-  if (-not (Test-Path $json)) { throw "no $json - run node live-builder.js first" }
+  $json = Join-Path $devDir "$Name.json"
+  if (-not (Test-Path $json)) { throw "no $json - run the live builder script first" }
   Add-PnPFile -Path $json -Folder "$($t.dev.roots.code)/bsp-forms/forms" -Connection $conn | Out-Null
-  Write-Host "uploaded builder-live.json"
-  & (Join-Path $PSScriptRoot 'live-page.ps1') -PageName 'bsp-forms-builder-live-test' -Config 'builder-live.json' -Title 'BSP Forms - builder output (test)' -Ver $Ver
+  Write-Host "uploaded $Name.json"
+  & (Join-Path $PSScriptRoot 'live-page.ps1') -PageName "bsp-forms-$Name-test" -Config "$Name.json" -Title "BSP Forms - $Name (test)" -Ver $Ver
   return
 }
 

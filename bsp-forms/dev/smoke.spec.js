@@ -1673,6 +1673,137 @@ async function testListsApi(browser) {
   await page.close();
 }
 
+/* E9b: BSPForms.mountConfig — the builder's preview. A config object into an
+   element of its own; with preview: true every write is simulated (handle
+   .writes) and no redirect path navigates. */
+const PV_CFG = {
+  form: { title: 'Preview test' },
+  target: { listTitle: 'Preview list' },
+  confirmation: { redirect: { url: '/sites/FCUPortal/SitePages/Home.aspx', seconds: 1 } },
+  attachments: { enabled: true },
+  pages: [{ id: 'p1', sections: [{ id: 's1', fields: [
+    { id: 'name', type: 'text', label: 'Name', column: 'Title', required: true },
+    { id: 'who', type: 'person', label: 'Who', column: 'Who' }
+  ] }] }]
+};
+// mount cfg into a fresh <div id>, wait for ready; returns { uid, errors }
+function pvMount(page, id, cfg, preview) {
+  return page.evaluate(({ id, cfg, preview }) => {
+    const el = document.createElement('div');
+    el.id = id;
+    document.querySelector('.harness-canvas').appendChild(el);
+    const h = window['__h_' + id] = BSPForms.mountConfig(el, cfg, preview ? { preview: true } : {});
+    return h.ready.then(() => new Promise(r => setTimeout(r, 150))).then(() => ({ uid: h.uid, errors: h.errors.slice() }));
+  }, { id, cfg, preview });
+}
+const pvWrites = (page, id) => page.evaluate(id => JSON.parse(JSON.stringify(window['__h_' + id].writes)), id);
+async function pvFillSubmit(page, id, file) {
+  await page.evaluate(({ id, SOFIA }) => {
+    const s = document.querySelector('#' + id + ' .bspf')._x_dataStack[0];
+    s.values.name = 'Preview item';
+    s.addPerson('who', SOFIA);
+  }, { id, SOFIA });
+  if (file) await page.setInputFiles('#' + id + ' input[type="file"]', [{ name: 'a.txt', mimeType: 'text/plain', buffer: Buffer.from('preview file') }]);
+  await page.waitForTimeout(200);
+  await page.evaluate(id => document.querySelector('#' + id + ' .bspf')._x_dataStack[0].submitForm(), id);
+  await page.waitForSelector('#' + id + ' .bspf-done', { state: 'visible', timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(200);
+}
+async function testMountConfig(browser) {
+  console.log('mountConfig (E9b preview):');
+  const ctx = await browser.newContext({ viewport: { width: 1100, height: 1600 } });
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on('pageerror', e => errs.push(e.message));
+  let homeHits = 0, convHits = 0;
+  await page.route('**/sites/FCUPortal/SitePages/Home.aspx', r => { homeHits++; return r.fulfill({ contentType: 'text/html', body: '<title>home</title>home' }); });
+  await page.route('https://converter.test/**', r => { convHits++; return r.fulfill({ contentType: 'text/html', body: '<title>converter</title>converter' }); });
+  await page.addInitScript(() => {
+    window.BSPF_MOCK_ADD_MS = 50;
+    window.BSPF_MOCK_LOOKUP = { 'Policy Library & Forms': { Url: 'https://example.com/policy-new' } };
+  });
+  const countEnsureUser = () => page.evaluate(() => {
+    const M = window.BSPF_MOCK_SP, eu = M.ensureUser;
+    window.__eu = 0;
+    M.ensureUser = function () { window.__eu++; return eu.apply(M, arguments); };
+  });
+  const harnessReady = () => page.waitForFunction(() => /ready|error/.test((document.querySelector('[data-bsp-form]') || { getAttribute: () => '' }).getAttribute('data-bspf-state') || ''), null, { timeout: 8000 });
+  await page.goto(BASE);
+  await harnessReady();
+  await countEnsureUser();
+  const url0 = page.url();
+
+  // preview: renders, writes simulated
+  let m = await pvMount(page, 'pv1', PV_CFG, true);
+  const info = await page.evaluate(uid => ({ form: !!document.querySelector('#pv1 .bspf'), attr: document.getElementById('pv1').hasAttribute('data-bsp-form'),
+    def: !!(BSPForms._defs[uid] && BSPForms._defs[uid].preview), harness: Object.keys(BSPForms._defs).length }), m.uid);
+  check('preview mount renders into its own element (no data-bsp-form, own _defs entry)', info.form && !info.attr && info.def && info.harness >= 2 && !m.errors.length, info);
+  await pvFillSubmit(page, 'pv1', true);
+  let w = await pvWrites(page, 'pv1');
+  const ops = w.map(x => x.op);
+  check('handle.writes records ensureUser, addItem, addAttachment', ops.includes('ensureUser') && ops.includes('addItem') && ops.includes('addAttachment'), ops);
+  const add = w.find(x => x.op === 'addItem') || {};
+  check('…addItem payload with a stand-in person id', add.payload && add.payload.Title === 'Preview item' && add.payload.WhoId >= 900000, add.payload);
+  check('…addAttachment names the file, on the synthetic item', w.some(x => x.op === 'addAttachment' && x.name === 'a.txt' && x.itemId === add.id));
+  let mock = await page.evaluate(() => ({ w: window.__BSPF_MOCK_WRITES__.map(x => x.op), eu: window.__eu }));
+  check('no write reached the mock (no addItem / addAttachment / ensureUser)', !mock.w.includes('addItem') && !mock.w.includes('addAttachment') && mock.eu === 0, mock);
+  const cnt = await page.locator('#pv1 .bspf-result__count').textContent().catch(() => '');
+  check('confirmation.redirect → "Preview: after 1 seconds this would go to …"', /^Preview: after 1 seconds this would go to \S*\/sites\/FCUPortal\/SitePages\/Home\.aspx\./.test(cnt.trim()), cnt);
+  await page.waitForTimeout(2300);
+  check('…never navigates (waited past the seconds)', page.url() === url0 && homeHits === 0, page.url());
+  await page.evaluate(() => { const a = [...document.querySelectorAll('#pv1 a')].find(x => x.textContent.trim() === 'Go now'); a.click(); });
+  await page.waitForTimeout(700);
+  check('…clicking "Go now" in the preview doesn\'t navigate', page.url() === url0 && homeHits === 0, page.url());
+  // destroy
+  const d = await page.evaluate(uid => { window.__h_pv1.destroy(); const el = document.getElementById('pv1'); return { html: el.innerHTML, def: !!BSPForms._defs[uid] }; }, m.uid);
+  check('destroy() empties the element and removes its _defs entry', d.html === '' && !d.def, d);
+
+  // without preview: the normal adapter (writes reach the mock); destroy stops the redirect timer
+  m = await pvMount(page, 'pv2', PV_CFG, false);
+  await pvFillSubmit(page, 'pv2', false);
+  w = await pvWrites(page, 'pv2');
+  mock = await page.evaluate(() => ({ adds: window.__BSPF_MOCK_WRITES__.filter(x => x.op === 'addItem').map(x => x.payload), eu: window.__eu }));
+  check('without preview: the save reaches the mock (addItem, ensureUser), handle.writes empty', mock.adds.length === 1 && mock.adds[0].Title === 'Preview item' && mock.eu > 0 && w.length === 0, { mock, w });
+  check('…its countdown is the real one', /Redirecting in/.test(await page.locator('#pv2 .bspf-result__count').textContent().catch(() => '')));
+  const d2 = await page.evaluate(uid => { const t = BSPForms._defs[uid] && BSPForms._defs[uid].store.redirTimer; window.__h_pv2.destroy(); return { hadTimer: !!t, def: !!BSPForms._defs[uid] }; }, m.uid);
+  await page.waitForTimeout(2300);
+  check('destroy() stops a running redirect timer (no navigation after)', d2.hadTimer && !d2.def && page.url() === url0 && homeHits === 0, { d2, url: page.url() });
+
+  // an invalid config
+  m = await pvMount(page, 'pv3', { form: { title: 'Bad' }, target: {}, pages: [{ id: 'p', sections: [{ id: 's', columns: 3, fields: [] }] }] }, true);
+  check('invalid config → handle.errors + an error card in the element', m.errors.length > 0 && await page.locator('#pv3 [data-bspf-fatal]').count() === 1 && !m.uid, m);
+
+  // the classic config: afterSubmit notFound redirect, and queryError
+  const classic = await page.evaluate(() => fetch('../forms/classic-url-request.json').then(r => r.json()));
+  classic.form.vars = { converterUrl: CONVERTER, redirectSeconds: 1 };
+  await page.goto(BASE + '?Link=' + encodeURIComponent('https://old.example/a.aspx') + '&ResourceName=' + encodeURIComponent('Something Unknown'));
+  await harnessReady();
+  const url1 = page.url();
+  m = await pvMount(page, 'pv4', classic, true);
+  await page.evaluate(() => { const s = document.querySelector('#pv4 .bspf')._x_dataStack[0]; s.values.sourceDescription = 'From the hub.'; s.submitForm(); });
+  await page.waitForSelector('#pv4 .bspf-result', { state: 'visible', timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  const ct4 = await page.locator('#pv4 .bspf-result__count').textContent().catch(() => '');
+  check('classic, not found (afterSubmit redirect) → preview text naming the converter', /Preview: after 1 seconds this would go to https:\/\/converter\.test\/convert/.test(ct4), ct4);
+  const w4 = await pvWrites(page, 'pv4');
+  const mw = await page.evaluate(() => window.__BSPF_MOCK_WRITES__.map(x => x.op));
+  check('…its save is simulated; the lookup (a read) went through', w4.some(x => x.op === 'addItem') && !mw.includes('addItem') && mw.includes('lookup'), { w4: w4.map(x => x.op), mw });
+  await page.waitForTimeout(2300);
+  check('…never navigates', page.url() === url1 && convHits === 0, page.url());
+  await page.evaluate(() => window.__h_pv4.destroy());
+  await page.goto(BASE);
+  await harnessReady();
+  const url2 = page.url();
+  m = await pvMount(page, 'pv5', classic, true);
+  await page.waitForSelector('#pv5 .bspf-result', { state: 'visible', timeout: 5000 }).catch(() => {});
+  const ct5 = await page.locator('#pv5 .bspf-result__count').textContent().catch(() => '');
+  check('classic, no Link (queryError redirect) → preview text', /Preview: after 1 seconds this would go to https:\/\/converter\.test\/convert/.test(ct5), ct5);
+  await page.waitForTimeout(2300);
+  check('…never navigates', page.url() === url2 && convHits === 0, page.url());
+  check('no page errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
 (async () => {
   const browser = await launch();
   // ONLY=testBranching,testSendEmpty runs a subset (iterating on one area)
@@ -1681,7 +1812,9 @@ async function testListsApi(browser) {
     testDoctorRichText, testZoneAttestation, testFullFlow,
     // engine 0.6.0
     testBranching, testNormalizeErrors, testChoicesWhen, testNumberControls, testClearButtons, testBusinessDays,
-    testSendEmpty, testAtMe, testConfirmationRedirect, testListsApi, testReviewFixes];
+    testSendEmpty, testAtMe, testConfirmationRedirect, testListsApi, testReviewFixes,
+    // builder preview (E9b)
+    testMountConfig];
   try {
     for (const t of suite) if (!only || only.includes(t.name)) await t(browser);
   } finally {

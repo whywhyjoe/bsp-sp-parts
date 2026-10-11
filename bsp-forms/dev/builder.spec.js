@@ -1697,10 +1697,759 @@ async function testEndToEnd(browser) {
   await ctx.close();
 }
 
+/* ==================================================================
+   Phase 3 — rules (B5), form settings (B6), the preview pane (E9b)
+   ================================================================== */
+// add a control through the state with a chosen id/label; logic: not saved
+function addCtl(page, sec, kind, id, opts) {
+  return ev(page, (s, a) => {
+    s.addField(a.sec, a.kind);
+    const f = s.curField();
+    f.id = a.id; f.label = a.label || a.id; f.$builder.autoId = false;
+    if (a.logic) f.$builder.logicOnly = true;
+    Object.assign(f, a.extra || {});
+    s.select('field', a.id);
+    if (a.col) s.setColumn(a.col);
+    return a.id;
+  }, { sec, kind, id, label: opts && opts.label, logic: opts && opts.logic, extra: opts && opts.extra, col: opts && opts.col });
+}
+// mark the properties-pane card with this title; returns its selector
+async function cardSel(page, title) {
+  const tag = 'c' + Math.random().toString(36).slice(2, 9);
+  const ok = await page.evaluate(({ title, tag }) => {
+    const c = [...document.querySelectorAll('.bfb-props .bfb-card')].find(x => x.querySelector('.bfb-card__title span').textContent.trim() === title);
+    if (!c) return false;
+    c.setAttribute('data-test', tag);
+    return true;
+  }, { title, tag });
+  if (!ok) throw new Error('cardSel: no card "' + title + '"');
+  return '[data-test="' + tag + '"]';
+}
+const ruleOf = (page, t, id, key) => ev(page, (s, a) => {
+  const l = s.loc(a.t, a.id);
+  const o = l && (a.t === 'field' ? l.f : a.t === 'section' ? l.sec : l.pg);
+  return o && o[a.key] !== undefined ? JSON.parse(JSON.stringify(o[a.key])) : null;
+}, { t, id, key });
+const condCount = (page, c) => page.evaluate(c => document.querySelectorAll(c + ' .bfb-cond').length, c);
+const condOpts = (page, c, i, cls) => page.evaluate(({ c, i, cls }) => {
+  const row = document.querySelectorAll(c + ' .bfb-cond')[i];
+  const sel = row && row.querySelector('select.' + cls);
+  return sel ? [...sel.options].map(o => o.value) : null;
+}, { c, i, cls });
+async function condPick(page, c, i, cls, value) {
+  await page.locator(c + ' .bfb-cond').nth(i).locator('select.' + cls).selectOption(value);
+  await page.waitForTimeout(80);
+}
+async function setNum(loc, v) {
+  await loc.fill(String(v));
+  await loc.dispatchEvent('change');
+  await loc.page().waitForTimeout(80);
+}
+// a segmented option inside the properties-pane row labelled rowLabel
+async function segIn(page, rowLabel, opt) {
+  const ok = await page.evaluate(({ rowLabel, opt }) => {
+    const row = [...document.querySelectorAll('.bfb-props .bfb-prop')].find(r => { const l = r.querySelector(':scope > label.field__label'); return l && l.textContent.trim() === rowLabel; });
+    const b = row && [...row.querySelectorAll('.bfb-seg__opt')].find(x => x.textContent.trim() === opt);
+    if (!b) return false;
+    b.click();
+    return true;
+  }, { rowLabel, opt });
+  if (!ok) throw new Error('segIn: no "' + opt + '" in "' + rowLabel + '"');
+  await page.waitForTimeout(80);
+}
+const noteOf = page => ev(page, s => s.note);
+
+async function testRules(browser) {
+  console.log('P3 · show-when (rule editor):');
+  const { ctx, page } = await openBuilder(browser);
+  await pickList(page, 'BSPF Builder Test');
+  await ev(page, s => { s.doc.target.titleTemplate = '{form:title}'; s.doc.form.title = 'Rules'; });
+  await addCtl(page, 'section1', 'text', 'req', { col: 'TxtReq' });
+  await addCtl(page, 'section1', 'boolean', 'drvB', { logic: true });
+  await addCtl(page, 'section1', 'choice', 'drvC', { logic: true });
+  await addCtl(page, 'section1', 'multichoice', 'drvM', { logic: true });
+  await addCtl(page, 'section1', 'text', 'drvT', { logic: true });
+  await addCtl(page, 'section1', 'number', 'drvN', { logic: true });
+  await addCtl(page, 'section1', 'date', 'drvD', { logic: true });
+  await addCtl(page, 'section1', 'date', 'drvD2', { logic: true });
+  await addCtl(page, 'section1', 'text', 'tgt', { logic: true });
+  await addCtl(page, 'section1', 'text', 'later', { logic: true });
+  await selectNode(page, 'field', 'tgt');
+  let c = await cardSel(page, 'Show this control when');
+  check('field: no rule → "Always shown…", no conditions', (await condCount(page, c)) === 0 &&
+    /Always shown/.test(await page.locator(c + ' .bfb-rule__empty').textContent()));
+  await clickIn(page, c + ' .bfb-rule__add');
+  c = await cardSel(page, 'Show this control when');
+  let r = await ruleOf(page, 'field', 'tgt', 'visibleWhen');
+  check('"Add a condition" → one condition = a plain object (last earlier question, date → is answered)', same(r, { field: 'drvD2', op: 'notEmpty' }), r);
+  let drv = await condOpts(page, c, 0, 'bfb-cond__field');
+  check('driver list = only EARLIER questions (not itself, not later ones)', same(drv, ['req', 'drvB', 'drvC', 'drvM', 'drvT', 'drvN', 'drvD', 'drvD2']), drv);
+  // ops per driver kind
+  const OPS = {
+    drvB: ['on', 'off'],
+    drvC: ['equals', 'notEquals', 'in', 'notIn', 'notEmpty', 'isEmpty'],
+    drvM: ['includes', 'includesAny', 'includesAll', 'notEmpty', 'isEmpty'],
+    drvT: ['equals', 'notEquals', 'notEmpty', 'isEmpty'],
+    drvN: ['equals', 'notEquals', 'notEmpty', 'isEmpty'],
+    drvD: ['onOrAfter', 'after', 'before', 'onOrBefore', 'withinBusinessDays', 'notEmpty', 'isEmpty']
+  };
+  for (const id of Object.keys(OPS)) {
+    await condPick(page, c, 0, 'bfb-cond__field', id);
+    const ops = await condOpts(page, c, 0, 'bfb-cond__op');
+    check('ops for ' + id + ' (' + id.slice(3) + '): ' + OPS[id].join(', '), same(ops, OPS[id]), ops);
+  }
+  check('core.RULE_OPS has the same op lists', await page.evaluate(o => {
+    const R = BSPFormsBuilder.core.RULE_OPS, k = { drvB: 'boolean', drvC: 'choice', drvM: 'multichoice', drvT: 'text', drvN: 'number', drvD: 'date' };
+    return Object.keys(o).every(id => JSON.stringify(R[k[id]].map(x => x[0])) === JSON.stringify(o[id]));
+  }, OPS));
+  // boolean on/off → equals true/false
+  await condPick(page, c, 0, 'bfb-cond__field', 'drvB');
+  r = await ruleOf(page, 'field', 'tgt', 'visibleWhen');
+  check('boolean driver → { op: equals, value: true }', same(r, { field: 'drvB', op: 'equals', value: true }), r);
+  await condPick(page, c, 0, 'bfb-cond__op', 'off');
+  r = await ruleOf(page, 'field', 'tgt', 'visibleWhen');
+  check('…"is off" → equals false', same(r, { field: 'drvB', op: 'equals', value: false }), r);
+  // choice: one / many
+  await condPick(page, c, 0, 'bfb-cond__field', 'drvC');
+  r = await ruleOf(page, 'field', 'tgt', 'visibleWhen');
+  check('choice driver → equals its first choice', same(r, { field: 'drvC', op: 'equals', value: 'Option 1' }), r);
+  await page.locator(c + ' .bfb-cond').nth(0).locator('select.bfb-cond__val').selectOption('Option 2');
+  check('…value select writes the string', (await ruleOf(page, 'field', 'tgt', 'visibleWhen')).value === 'Option 2');
+  await condPick(page, c, 0, 'bfb-cond__op', 'in');
+  r = await ruleOf(page, 'field', 'tgt', 'visibleWhen');
+  check('…"is one of" → value becomes an array [Option 2]', same(r, { field: 'drvC', op: 'in', value: ['Option 2'] }), r);
+  await clickText(page, c + ' .bfb-cond__chips .bfb-chip-toggle', /^Option 1$/);
+  r = await ruleOf(page, 'field', 'tgt', 'visibleWhen');
+  check('…chips toggle values in', same(r.value, ['Option 2', 'Option 1']), r);
+  await clickText(page, c + ' .bfb-cond__chips .bfb-chip-toggle', /^Option 2$/);
+  check('…and out', same((await ruleOf(page, 'field', 'tgt', 'visibleWhen')).value, ['Option 1']));
+  await condPick(page, c, 0, 'bfb-cond__op', 'equals');
+  check('…back to "is" → the first picked value as a string', (await ruleOf(page, 'field', 'tgt', 'visibleWhen')).value === 'Option 1');
+  // multichoice
+  await condPick(page, c, 0, 'bfb-cond__field', 'drvM');
+  r = await ruleOf(page, 'field', 'tgt', 'visibleWhen');
+  check('multichoice driver → includes its first choice', same(r, { field: 'drvM', op: 'includes', value: 'Option 1' }), r);
+  await condPick(page, c, 0, 'bfb-cond__op', 'includesAll');
+  check('…includesAll → array', same((await ruleOf(page, 'field', 'tgt', 'visibleWhen')).value, ['Option 1']));
+  // text
+  await condPick(page, c, 0, 'bfb-cond__field', 'drvT');
+  check('text driver → is answered', same(await ruleOf(page, 'field', 'tgt', 'visibleWhen'), { field: 'drvT', op: 'notEmpty' }));
+  await condPick(page, c, 0, 'bfb-cond__op', 'equals');
+  await page.locator(c + ' .bfb-cond input.bfb-cond__val').fill('abc');
+  await page.waitForTimeout(80);
+  r = await ruleOf(page, 'field', 'tgt', 'visibleWhen');
+  check('…"is" + typed text → value "abc"', same(r, { field: 'drvT', op: 'equals', value: 'abc' }), r);
+  // number
+  await condPick(page, c, 0, 'bfb-cond__field', 'drvN');
+  await condPick(page, c, 0, 'bfb-cond__op', 'equals');
+  check('number "is" → value 0 (a number)', (await ruleOf(page, 'field', 'tgt', 'visibleWhen')).value === 0);
+  await setNum(page.locator(c + ' .bfb-cond input.bfb-cond__num'), 7);
+  r = await ruleOf(page, 'field', 'tgt', 'visibleWhen');
+  check('…typed 7 → value 7 (number)', r.value === 7 && typeof r.value === 'number', r);
+  // date
+  await condPick(page, c, 0, 'bfb-cond__field', 'drvD2');
+  await condPick(page, c, 0, 'bfb-cond__op', 'onOrAfter');
+  r = await ruleOf(page, 'field', 'tgt', 'visibleWhen');
+  check('date "on or after" → compareTo @today, no value', same(r, { field: 'drvD2', op: 'onOrAfter', compareTo: '@today' }), r);
+  const cmpOpts = await page.evaluate(c => [...document.querySelector(c + ' .bfb-cond .bfb-cond__date select').options].map(o => o.value), c);
+  check('…compared with: today or another EARLIER date (not itself)', same(cmpOpts, ['@today', 'drvD']), cmpOpts);
+  await page.locator(c + ' .bfb-cond .bfb-cond__date select').selectOption('drvD');
+  await setNum(page.locator(c + ' .bfb-cond .bfb-cond__date input.bfb-cond__num'), 3);
+  r = await ruleOf(page, 'field', 'tgt', 'visibleWhen');
+  check('…another date + 3 days → compareTo drvD, days 3', same(r, { field: 'drvD2', op: 'onOrAfter', compareTo: 'drvD', days: 3 }), r);
+  await setNum(page.locator(c + ' .bfb-cond .bfb-cond__date input.bfb-cond__num'), 0);
+  check('…0 days removes "days"', !('days' in (await ruleOf(page, 'field', 'tgt', 'visibleWhen'))));
+  check('no businessHours yet', !(await docOf(page)).form.businessHours);
+  await condPick(page, c, 0, 'bfb-cond__op', 'withinBusinessDays');
+  r = await ruleOf(page, 'field', 'tgt', 'visibleWhen');
+  const bh = (await docOf(page)).form.businessHours;
+  check('withinBusinessDays → value 2 (no compareTo)', same(r, { field: 'drvD2', op: 'withinBusinessDays', value: 2 }), r);
+  check('…adds form.businessHours (America/Toronto, Mon–Fri 09–17)', same(bh, { timeZone: 'America/Toronto', days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00' }), bh);
+  // two conditions, mode, removal
+  await condPick(page, c, 0, 'bfb-cond__field', 'drvB');
+  await clickIn(page, c + ' .bfb-rule__add');
+  r = await ruleOf(page, 'field', 'tgt', 'visibleWhen');
+  check('2 conditions → { all: [ … ] }', r && Array.isArray(r.all) && r.all.length === 2 && r.all[0].field === 'drvB', r);
+  check('…mode toggle shown; second row reads "and"', await isVisible(page, c + ' .bfb-rule__mode') &&
+    (await page.locator(c + ' .bfb-cond .bfb-cond__lead').nth(1).textContent()) === 'and');
+  await clickText(page, c + ' .bfb-rule__mode .bfb-seg__opt', /^Any of these$/);
+  r = await ruleOf(page, 'field', 'tgt', 'visibleWhen');
+  check('"Any of these" → { any: [ … ] }', r && Array.isArray(r.any) && r.any.length === 2 && !r.all, r);
+  await page.evaluate(c => document.querySelectorAll(c + ' .bfb-cond .bfb-cond__drop')[1].click(), c);
+  await page.waitForTimeout(80);
+  r = await ruleOf(page, 'field', 'tgt', 'visibleWhen');
+  check('removing to 1 → a plain object again', same(r, { field: 'drvB', op: 'equals', value: true }), r);
+  await page.evaluate(c => document.querySelector(c + ' .bfb-cond .bfb-cond__drop').click(), c);
+  await page.waitForTimeout(80);
+  check('removing the last → the key is deleted', !('visibleWhen' in (await fieldOf(page, 'tgt'))));
+  // read-only imported rules
+  for (const [name, rule] of [['not', { not: { field: 'drvB', op: 'equals', value: true } }], ['nested', { all: [{ field: 'drvB', op: 'equals', value: true }, { any: [{ field: 'drvT', op: 'notEmpty' }] }] }]]) {
+    await ev(page, (s, rl) => { s.loc('field', 'tgt').f.visibleWhen = rl; }, rule);
+    await page.waitForTimeout(100);
+    c = await cardSel(page, 'Show this control when');
+    const ro = await page.evaluate(c => ({ conds: document.querySelectorAll(c + ' .bfb-cond').length, json: (document.querySelector(c + ' .bfb-rulejson') || {}).textContent,
+      btn: !![...document.querySelectorAll(c + ' .btn')].find(b => b.textContent.trim() === 'Replace it') }), c);
+    check('imported ' + name + ' rule → read-only JSON + "Replace it", no editor rows', ro.conds === 0 && ro.btn && ro.json === JSON.stringify(rule), ro);
+    check('…kept unchanged', same((await fieldOf(page, 'tgt')).visibleWhen, rule));
+  }
+  await clickText(page, c + ' .btn', /^Replace it$/);
+  c = await cardSel(page, 'Show this control when');
+  check('"Replace it" clears it → the empty editor', !('visibleWhen' in (await fieldOf(page, 'tgt'))) && await page.locator(c + ' .bfb-rule__add').count() === 1);
+
+  console.log('P3 · section + page rules:');
+  await ev(page, s => s.addSection('page1'));
+  const s2 = await ev(page, s => s.sel.id);
+  await addCtl(page, s2, 'text', 'inS2', { logic: true });
+  await selectNode(page, 'section', s2);
+  c = await cardSel(page, 'Show this section when');
+  await clickIn(page, c + ' .bfb-rule__add');
+  drv = await condOpts(page, c, 0, 'bfb-cond__field');
+  check('section: drivers = questions before its first control (not its own)', same(drv, ['req', 'drvB', 'drvC', 'drvM', 'drvT', 'drvN', 'drvD', 'drvD2', 'tgt', 'later']), drv);
+  await condPick(page, c, 0, 'bfb-cond__field', 'drvB');
+  r = await ruleOf(page, 'section', s2, 'visibleWhen');
+  check('section show-when written', same(r, { field: 'drvB', op: 'equals', value: true }), r);
+  await ev(page, s => s.addPage());
+  const p2 = await ev(page, s => s.sel.id);
+  const p2s = await ev(page, (s, p) => s.loc('page', p).pg.sections[0].id, p2);
+  await addCtl(page, p2s, 'boolean', 'onP2', { logic: true });
+  await selectNode(page, 'page', 'page1');
+  check('page 1: "The first page always shows", no show-when editor', await page.evaluate(() => {
+    const c = [...document.querySelectorAll('.bfb-props .bfb-card')].find(x => x.querySelector('.bfb-card__title span').textContent.trim() === 'Show this page when');
+    return !!c && /The first page always shows/.test(c.textContent) && !c.querySelector('.bfb-rule__add');
+  }));
+  c = await cardSel(page, 'End the form after this page when');
+  await clickIn(page, c + ' .bfb-rule__add');
+  drv = await condOpts(page, c, 0, 'bfb-cond__field');
+  check('page 1 end-when: drivers = this page\'s questions', drv && drv.includes('drvB') && drv.includes('inS2') && !drv.includes('onP2'), drv);
+  await condPick(page, c, 0, 'bfb-cond__field', 'drvB');
+  r = await ruleOf(page, 'page', 'page1', 'endWhen');
+  check('end-when written on page 1', same(r, { field: 'drvB', op: 'equals', value: true }), r);
+  await selectNode(page, 'page', p2);
+  c = await cardSel(page, 'Show this page when');
+  await clickIn(page, c + ' .bfb-rule__add');
+  drv = await condOpts(page, c, 0, 'bfb-cond__field');
+  check('page 2 show-when: earlier pages only (not its own question)', drv && drv.includes('drvB') && drv.includes('inS2') && !drv.includes('onP2'), drv);
+  await condPick(page, c, 0, 'bfb-cond__field', 'drvC');
+  c = await cardSel(page, 'End the form after this page when');
+  await clickIn(page, c + ' .bfb-rule__add');
+  drv = await condOpts(page, c, 0, 'bfb-cond__field');
+  check('page 2 end-when: this page or earlier (its own question offered)', drv && drv.includes('onP2') && drv.includes('drvB'), drv);
+  await page.evaluate(c => document.querySelector(c + ' .bfb-cond .bfb-cond__drop').click(), c);
+  // a page with no earlier questions
+  await ev(page, s => { s.addPage(); });
+  const p3 = await ev(page, s => s.sel.id);
+  await ev(page, (s, p) => { s.move('page', p, -1); s.move('page', p, -1); s.select('page', p); }, p3);
+  await page.waitForTimeout(100);
+  check('(a new page moved first)', (await ev(page, s => s.doc.pages[0].id)) === p3);
+  await ev(page, (s, p) => { s.select('page', 'page1'); }, p3);
+  c = await cardSel(page, 'Show this page when');
+  await clickIn(page, c + ' .bfb-rule__add');
+  check('page 1 (now second) can depend only on the empty first page → note, no rule', /earlier pages — there aren’t any yet/.test(await noteOf(page)) && !(await ruleOf(page, 'page', 'page1', 'visibleWhen')));
+  await ev(page, (s, p) => { s.move('page', p, 1); s.move('page', p, 1); }, p3);
+  await settle(page);
+  await ev(page, s => s.select('page', 'page2'));
+  await page.waitForTimeout(150);
+  await page.screenshot({ path: path.join(SHOTS, 'bfb-p3-rules.png'), fullPage: true });
+
+  console.log('P3 · end-the-form + attachments:');
+  let iss = await issuesOf(page);
+  check('rules built so far: no errors', (await ev(page, s => s.nErr)) === 0, issueLine(iss.filter(i => i.level === 'error')));
+  const j = await ev(page, s => JSON.parse(s.jsonText()));
+  check('JSON: page1.endWhen, page2.visibleWhen, section show-when', same(j.pages[0].endWhen, { field: 'drvB', op: 'equals', value: true }) &&
+    j.pages[1].visibleWhen && j.pages[1].visibleWhen.field === 'drvC' && j.pages[0].sections[1].visibleWhen.field === 'drvB', [j.pages[0].endWhen, j.pages[1].visibleWhen]);
+  check('…BSPForms.normalize accepts it', (await page.evaluate(cfg => BSPForms.normalize(cfg).errors, j)).length === 0);
+  // attachments on a later page: unreachable once page 1 can end the form
+  await ev(page, (s) => { s.doc.attachments = { enabled: true, label: 'Attachments', maxFiles: 5, maxFileSizeMb: 10, section: s.doc.pages[2].sections[0].id }; });
+  iss = await issuesOf(page);
+  check('attachments on a page after page 1\'s end-when → error (engine)', iss.some(i => i.level === 'error' && /attachments are on a page after "page1"/.test(i.msg)), issueLine(iss));
+  await selectNode(page, 'form');
+  const reach = await ev(page, s => s.reachableSections().map(x => x.id));
+  check('…reachableSections = page 1\'s unconditional section only', same(reach, ['section1']), reach);
+  check('…the section select shows "pick a section every path reaches"', await page.evaluate(() => {
+    const sel = [...document.querySelectorAll('.bfb-props select')].find(x => [...x.options].some(o => /every path reaches/.test(o.textContent)));
+    return !!sel && sel.value === '';
+  }));
+  await ev(page, s => { delete s.doc.attachments; });
+
+  console.log('P3 · rename / delete through rules:');
+  await addCtl(page, 'section1', 'date', 'dEnd', { logic: true });
+  await ev(page, s => { // after drvD2 in form order: move it right behind drvD2
+    const l = s.loc('field', 'dEnd'); l.sec.fields.splice(l.fi, 1);
+    const at = s.loc('field', 'drvD2'); at.sec.fields.splice(at.fi + 1, 0, l.f);
+  });
+  await selectNode(page, 'field', 'dEnd');
+  await clickText(page, '.bfb-props .btn', /Compare with another date/);
+  check('compare rule on dEnd → compareTo drvD2', (await fieldOf(page, 'dEnd')).rules[0].compareTo === 'drvD2');
+  await addCtl(page, 'section1', 'choice', 'lim', { logic: true });
+  await ev(page, s => { s.setCwOn(true); s.setCwDriver('drvB'); });
+  await ev(page, s => { s.loc('field', 'tgt').f.visibleWhen = { any: [{ field: 'drvB', op: 'equals', value: true }, { field: 'drvD2', op: 'after', compareTo: 'drvD' }] }; });
+  await selectNode(page, 'field', 'drvB');
+  const idBox = page.locator('.bfb-props input.bfb-mono');
+  await idBox.fill('agreed');
+  await idBox.press('Enter');
+  await page.waitForTimeout(100);
+  const d6 = await docOf(page);
+  const fx = id => { let x = null; d6.pages.forEach(p => p.sections.forEach(s => s.fields.forEach(f => { if (f.id === id) x = f; }))); return x; };
+  check('rename drvB → agreed: page1 end-when, section show-when, field show-when, choice limit', d6.pages[0].endWhen.field === 'agreed' &&
+    d6.pages[0].sections[1].visibleWhen.field === 'agreed' && fx('tgt').visibleWhen.any[0].field === 'agreed' && fx('lim').choicesWhen.field === 'agreed',
+  [d6.pages[0].endWhen, fx('lim').choicesWhen]);
+  await selectNode(page, 'field', 'drvD2');
+  await page.locator('.bfb-props input.bfb-mono').fill('startDate');
+  await page.locator('.bfb-props input.bfb-mono').press('Enter');
+  await page.waitForTimeout(100);
+  check('rename drvD2 → startDate: date rule compareTo + the rule field', (await fieldOf(page, 'dEnd')).rules[0].compareTo === 'startDate' &&
+    (await fieldOf(page, 'tgt')).visibleWhen.any[1].field === 'startDate');
+  await selectNode(page, 'field', 'drvD');
+  await page.locator('.bfb-props input.bfb-mono').fill('baseDate');
+  await page.locator('.bfb-props input.bfb-mono').press('Enter');
+  await page.waitForTimeout(100);
+  check('rename drvD → baseDate: a condition\'s compareTo', (await fieldOf(page, 'tgt')).visibleWhen.any[1].compareTo === 'baseDate');
+  await clickIn(page, '[data-bfb-node="field:agreed"] [aria-label="Delete control"]');
+  let note = await noteOf(page);
+  check('deleting a rule driver is blocked; the note lists its uses', !(await ev(page, s => s.ask.open)) && /Can’t delete yet/.test(note) &&
+    /end-when/.test(note) && /show-when/.test(note) && /choicesWhen/.test(note), note);
+  await clickIn(page, '[data-bfb-node="field:startDate"] [aria-label="Delete control"]');
+  note = await noteOf(page);
+  check('deleting a date compared with is blocked ("date rule")', /Can’t delete yet/.test(note) && /date rule/.test(note), note);
+
+  console.log('P3 · rule checks:');
+  await ev(page, s => { s.loc('field', 'tgt').f.visibleWhen = { field: 'later', op: 'notEmpty' }; });
+  iss = await issuesOf(page);
+  check('a control depending on a LATER question → warning', iss.some(i => i.level === 'warn' && i.sel.id === 'tgt' && /shows depending on “later”, which comes after it/.test(i.msg)), issueLine(iss));
+  await selectNode(page, 'field', 'tgt');
+  c = await cardSel(page, 'Show this control when');
+  check('…the editor marks it "(comes later)"', /\(comes later\)/.test(await page.locator(c + ' select.bfb-cond__field').textContent()));
+  await ev(page, (s, a) => { s.loc('section', a).sec.visibleWhen = { field: 'onP2', op: 'equals', value: true }; }, s2);
+  iss = await issuesOf(page);
+  check('a section depending on a LATER question → warning', iss.some(i => i.level === 'warn' && i.sel.t === 'section' && /comes after it/.test(i.msg)), issueLine(iss));
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+}
+
+async function testChoiceLimitsDatesSettings(browser) {
+  console.log('P3 · choice limits:');
+  let { ctx, page } = await openBuilder(browser);
+  await pickList(page, 'BSPF Builder Test');
+  await addCtl(page, 'section1', 'boolean', 'yn', { logic: true });
+  await addCtl(page, 'section1', 'choice', 'kind', { col: 'TxtShort' });          // a free list (Text column)
+  await addCtl(page, 'section1', 'choice', 'level', { col: 'ChoiceA' });          // column choices
+  await addCtl(page, 'section1', 'multichoice', 'tags', { logic: true });         // free list, unmapped
+  await addCtl(page, 'section1', 'text', 'ruled', { logic: true, extra: { visibleWhen: { all: [{ field: 'kind', op: 'in', value: ['Option 1', 'Option 2'] }, { field: 'kind', op: 'equals', value: 'Option 1' }] } } });
+  await selectNode(page, 'field', 'tags');
+  let c = await cardSel(page, 'Limit the choices');
+  await page.evaluate(c => [...document.querySelectorAll(c + ' label.switch')].find(l => /Depends on an earlier answer/.test(l.textContent)).querySelector('input').click(), c);
+  await page.waitForTimeout(100);
+  let cw = (await fieldOf(page, 'tags')).choicesWhen;
+  check('on → choicesWhen on the last earlier choice/yes-no (level), every choice per answer', same(cw, { field: 'level', map: { Low: ['Option 1', 'Option 2'], Medium: ['Option 1', 'Option 2'], High: ['Option 1', 'Option 2'] } }), cw);
+  c = await cardSel(page, 'Limit the choices');
+  const dOpts = await page.evaluate(c => [...document.querySelector(c + ' .bfb-cw select').options].map(o => o.value), c);
+  check('"Depends on" offers only earlier Choice / Yes-No controls', same(dOpts, ['yn', 'kind', 'level']), dOpts);
+  await page.locator(c + ' .bfb-cw select').selectOption('kind');
+  await page.waitForTimeout(100);
+  cw = (await fieldOf(page, 'tags')).choicesWhen;
+  check('driver → kind: one row per kind answer, every choice allowed', same(cw, { field: 'kind', map: { 'Option 1': ['Option 1', 'Option 2'], 'Option 2': ['Option 1', 'Option 2'] } }), cw);
+  c = await cardSel(page, 'Limit the choices');
+  // chips edit the map
+  await page.evaluate(c => { const row = [...document.querySelectorAll(c + ' .bfb-cw__row:not(.bfb-cw__head)')][0]; [...row.querySelectorAll('.bfb-chip-toggle')].find(b => b.textContent === 'Option 2').click(); }, c);
+  await page.waitForTimeout(80);
+  check('toggling a chip edits map[answer]', same((await fieldOf(page, 'tags')).choicesWhen.map['Option 1'], ['Option 1']));
+  // driver change resets
+  await page.locator(c + ' .bfb-cw select').selectOption('yn');
+  await page.waitForTimeout(100);
+  cw = (await fieldOf(page, 'tags')).choicesWhen;
+  check('driver → yn: table resets, boolean keys "true"/"false"', same(cw, { field: 'yn', map: { true: ['Option 1', 'Option 2'], false: ['Option 1', 'Option 2'] } }), cw);
+  c = await cardSel(page, 'Limit the choices');
+  const keys = await page.evaluate(c => [...document.querySelectorAll(c + ' .bfb-cw__row:not(.bfb-cw__head) .bfb-cw__key')].map(e => e.textContent), c);
+  check('…rows read Yes / No', same(keys, ['Yes', 'No']), keys);
+  for (const v of ['Option 1', 'Option 2']) {
+    await page.evaluate(({ c, v }) => { const row = [...document.querySelectorAll(c + ' .bfb-cw__row:not(.bfb-cw__head)')][1]; [...row.querySelectorAll('.bfb-chip-toggle')].find(b => b.textContent === v).click(); }, { c, v });
+    await page.waitForTimeout(60);
+  }
+  check('an answer with no choices → [] and "none — the control hides"', same((await fieldOf(page, 'tags')).choicesWhen.map.false, []) &&
+    await page.evaluate(c => { const row = [...document.querySelectorAll(c + ' .bfb-cw__row:not(.bfb-cw__head)')][1]; const n = row.querySelector('.bfb-cw__none'); return !!n && n.getClientRects().length > 0; }, c));
+  // a limit on the column-choice control, keyed on "kind"
+  await selectNode(page, 'field', 'level');
+  await ev(page, s => { s.setCwOn(true); s.setCwDriver('kind'); });
+  check('level limited by kind: every column choice per answer', same((await fieldOf(page, 'level')).choicesWhen.map, { 'Option 1': ['Low', 'Medium', 'High'], 'Option 2': ['Low', 'Medium', 'High'] }));
+  await ev(page, s => { s.loc('field', 'ruled').f.visibleWhen.all.push({ field: 'kind', op: 'equals', value: 'Option 2' }); });
+  // rename a free-list value on the driver
+  await selectNode(page, 'field', 'kind');
+  let vi = page.locator('.bfb-props .bfb-choice input.bfb-choice__value').first();
+  await vi.fill('Alpha');
+  await vi.dispatchEvent('change');
+  await page.waitForTimeout(100);
+  let lv = await fieldOf(page, 'level'), rl = await fieldOf(page, 'ruled');
+  check('rename "Option 1" → "Alpha" on the driver: maps keyed on it follow', same(Object.keys(lv.choicesWhen.map), ['Option 2', 'Alpha']) &&
+    same(lv.choicesWhen.map.Alpha, ['Low', 'Medium', 'High']), lv.choicesWhen.map);
+  check('…rule values naming it follow (in-array and equals)', same(rl.visibleWhen.all[0].value, ['Alpha', 'Option 2']) && rl.visibleWhen.all[1].value === 'Alpha', rl.visibleWhen);
+  // rename a free-list value on the limited control itself
+  await selectNode(page, 'field', 'tags');
+  vi = page.locator('.bfb-props .bfb-choice input.bfb-choice__value').nth(1);
+  await vi.fill('Beta');
+  await vi.dispatchEvent('change');
+  await page.waitForTimeout(100);
+  check('rename on the limited control: its own map arrays follow', same((await fieldOf(page, 'tags')).choicesWhen.map, { true: ['Option 1', 'Beta'], false: [] }), (await fieldOf(page, 'tags')).choicesWhen.map);
+  // a duplicate value is refused
+  vi = page.locator('.bfb-props .bfb-choice input.bfb-choice__value').nth(1);
+  await vi.fill('Option 1');
+  await vi.dispatchEvent('change');
+  await page.waitForTimeout(100);
+  check('renaming to an existing value is refused (note)', /already a choice/.test(await noteOf(page)) && (await fieldOf(page, 'tags')).choices[1].value === 'Beta');
+  // removing: column subset untick, free-list delete
+  await selectNode(page, 'field', 'level');
+  await page.evaluate(() => [...document.querySelectorAll('.bfb-props .bfb-choice')].find(r => /High/.test(r.textContent)).querySelector('input[type=checkbox]').click());
+  await page.waitForTimeout(100);
+  check('unticking "High" prunes it from the limit\'s arrays', same((await fieldOf(page, 'level')).choicesWhen.map, { 'Option 2': ['Low', 'Medium'], Alpha: ['Low', 'Medium'] }), (await fieldOf(page, 'level')).choicesWhen.map);
+  await selectNode(page, 'field', 'kind');
+  await page.evaluate(() => [...document.querySelectorAll('.bfb-props .bfb-choice')][1].querySelector('[aria-label="Remove"]').click());
+  await page.waitForTimeout(100);
+  lv = await fieldOf(page, 'level'); rl = await fieldOf(page, 'ruled');
+  check('deleting "Option 2" on the driver: its map key goes', same(Object.keys(lv.choicesWhen.map), ['Alpha']), lv.choicesWhen.map);
+  check('…pruned from rule arrays; an "equals" naming it raises a note', same(rl.visibleWhen.all[0].value, ['Alpha']) && /used “Option 2” — check it/.test(await noteOf(page)), [rl.visibleWhen, await noteOf(page)]);
+  // a new driver choice: the limit has no entry for it
+  await clickText(page, '.bfb-props .btn', /Add a choice/);
+  let iss = await issuesOf(page);
+  check('a driver answer missing from the map → "no entry" warning', iss.some(i => i.level === 'warn' && i.sel.id === 'level' && /the choice limit has no entry for “Option \d”/.test(i.msg)), issueLine(iss));
+  await selectNode(page, 'field', 'tags');
+  await page.screenshot({ path: path.join(SHOTS, 'bfb-p3-cw.png'), fullPage: true });
+  c = await cardSel(page, 'Limit the choices');
+  await page.evaluate(c => [...document.querySelectorAll(c + ' label.switch')].find(l => /Depends on/.test(l.textContent)).querySelector('input').click(), c);
+  await page.waitForTimeout(80);
+  check('switch off removes choicesWhen', !('choicesWhen' in (await fieldOf(page, 'tags'))));
+  // no earlier driver
+  await addCtl(page, 'section1', 'choice', 'first', { logic: true });
+  await ev(page, s => { const l = s.loc('field', 'first'); l.sec.fields.splice(l.fi, 1); l.sec.fields.unshift(l.f); s.select('field', 'first'); s.setCwOn(true); });
+  check('no earlier choice/yes-no → note, no limit', /Add an earlier Choice or Yes \/ No question/.test(await noteOf(page)) && !('choicesWhen' in (await fieldOf(page, 'first'))));
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+
+  console.log('P3 · date rules:');
+  ({ ctx, page } = await openBuilder(browser));
+  await pickList(page, 'BSPF Builder Test');
+  await addCtl(page, 'section1', 'date', 'd1', { logic: true });
+  await addCtl(page, 'section1', 'date', 'd2', { logic: true });
+  await addCtl(page, 'section1', 'date', 'd3', { logic: true });
+  await selectNode(page, 'field', 'd1');
+  await clickText(page, '.bfb-props .btn', /Compare with another date/);
+  check('first date: "Compare with another date" → note, no rules', /no earlier date to compare with/.test(await noteOf(page)) && !('rules' in (await fieldOf(page, 'd1'))));
+  await selectNode(page, 'field', 'd2');
+  check('no businessHours before a business rule', !(await docOf(page)).form.businessHours);
+  await clickText(page, '.bfb-props .btn', /Business days ahead/);
+  let f = await fieldOf(page, 'd2');
+  check('"Business days ahead" → minBusinessDays 2 + a blocking businessDay', same(f.rules, [{ op: 'minBusinessDays', days: 2, mode: 'block' }, { op: 'businessDay', mode: 'block' }]), f.rules);
+  check('…adds form.businessHours (America/Toronto, Mon–Fri)', same((await docOf(page)).form.businessHours, { timeZone: 'America/Toronto', days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00' }));
+  const segs = await page.evaluate(() => [...document.querySelectorAll('.bfb-props .bfb-daterule')].map(r => !!r.querySelector('.bfb-seg')));
+  check('Block/Warn on the lead time, none on "Weekdays only"', same(segs, [true, false]), segs);
+  await page.evaluate(() => document.querySelectorAll('.bfb-props .bfb-daterule [aria-label="Remove rule"]')[1].click());
+  await page.waitForTimeout(80);
+  check('"Weekdays only" can\'t be removed while the lead time exists (note)', (await fieldOf(page, 'd2')).rules.length === 2 && /goes with the business-day lead time/.test(await noteOf(page)));
+  await clickText(page, '.bfb-props .btn', /Weekdays only/);
+  check('adding "Weekdays only" again doesn\'t duplicate it', (await fieldOf(page, 'd2')).rules.filter(r => r.op === 'businessDay').length === 1);
+  const bizIn = page.locator('.bfb-props .bfb-daterule input.bfb-cond__num').first();
+  await setNum(bizIn, 99);
+  check('lead time clamps to 60', (await fieldOf(page, 'd2')).rules[0].days === 60);
+  await setNum(bizIn, 0);
+  check('…and to 1', (await fieldOf(page, 'd2')).rules[0].days === 1);
+  await clickText(page, '.bfb-props .btn', /Not in the past/);
+  f = await fieldOf(page, 'd2');
+  check('"Not in the past" → onOrAfter @today, block', same(f.rules[2], { op: 'onOrAfter', compareTo: '@today', mode: 'block' }), f.rules[2]);
+  await page.evaluate(() => [...document.querySelectorAll('.bfb-props .bfb-daterule')[2].querySelectorAll('.bfb-seg__opt')].find(b => b.textContent === 'Warn').click());
+  await page.waitForTimeout(80);
+  check('…Warn → mode warn', (await fieldOf(page, 'd2')).rules[2].mode === 'warn');
+  await clickText(page, '.bfb-props .btn', /Compare with another date/);
+  f = await fieldOf(page, 'd2');
+  check('"Compare with another date" → after the nearest earlier date (d1)', same(f.rules[3], { op: 'after', compareTo: 'd1', mode: 'block' }), f.rules[3]);
+  const cmpOpts = await page.evaluate(() => [...document.querySelectorAll('.bfb-props .bfb-daterule')[3].querySelectorAll('select')[1].options].map(o => o.value));
+  check('…"other date" offers only EARLIER dates (d1, not d3)', same(cmpOpts, ['d1']), cmpOpts);
+  await page.locator('.bfb-props .bfb-daterule').nth(3).locator('select').first().selectOption('onOrBefore');
+  check('…comparison select writes op', (await fieldOf(page, 'd2')).rules[3].op === 'onOrBefore');
+  const msg = page.locator('.bfb-props .bfb-daterule input.bfb-daterule__msg').nth(2);
+  await msg.fill('Pick today or later.');
+  await msg.dispatchEvent('change');
+  await page.waitForTimeout(60);
+  check('a message is saved on its rule', (await fieldOf(page, 'd2')).rules[2].message === 'Pick today or later.');
+  await msg.fill('');
+  await msg.dispatchEvent('change');
+  await page.waitForTimeout(60);
+  check('…and cleared', !('message' in (await fieldOf(page, 'd2')).rules[2]));
+  let iss2 = await issuesOf(page);
+  check('these rules: no errors on d2', !iss2.some(i => i.level === 'error' && i.sel.id === 'd2'), issueLine(iss2));
+  await page.screenshot({ path: path.join(SHOTS, 'bfb-p3-dates.png'), fullPage: true });
+  await page.evaluate(() => document.querySelectorAll('.bfb-props .bfb-daterule [aria-label="Remove rule"]')[0].click());
+  await page.waitForTimeout(80);
+  await page.evaluate(() => { const rows = [...document.querySelectorAll('.bfb-props .bfb-daterule')]; rows.find(r => /Weekdays only/.test(r.textContent)).querySelector('[aria-label="Remove rule"]').click(); });
+  await page.waitForTimeout(80);
+  check('after removing the lead time, "Weekdays only" removes', !(await fieldOf(page, 'd2')).rules.some(r => /business/i.test(r.op)));
+  // imported shapes the engine allows but D8 forbids
+  iss2 = await ev(page, s => { s.loc('field', 'd3').f.rules = [{ op: 'businessDay', mode: 'warn' }]; s.recheck(); return JSON.parse(JSON.stringify(s.issues)); });
+  check('imported businessDay mode "warn" → error', iss2.some(i => i.level === 'error' && i.sel.id === 'd3' && /“weekdays only” always blocks/.test(i.msg)), issueLine(iss2));
+  iss2 = await ev(page, s => { s.loc('field', 'd3').f.rules = [{ op: 'minBusinessDays', days: 3 }]; s.recheck(); return JSON.parse(JSON.stringify(s.issues)); });
+  check('minBusinessDays without a blocking weekday rule → error', iss2.some(i => i.level === 'error' && i.sel.id === 'd3' && /needs “weekdays only” to block/.test(i.msg)), issueLine(iss2));
+  iss2 = await ev(page, s => { s.loc('field', 'd3').f.rules = [{ op: 'minBusinessDays', days: 3 }, { op: 'businessDay' }]; s.recheck(); return JSON.parse(JSON.stringify(s.issues)); });
+  check('…a businessDay without a mode counts as blocking', !iss2.some(i => i.sel.id === 'd3' && /weekdays only/.test(i.msg)), issueLine(iss2));
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+
+  console.log('P3 · form settings:');
+  ({ ctx, page } = await openBuilder(browser));
+  await pickList(page, 'BSPF Builder Test');
+  await ev(page, s => { s.doc.target.titleTemplate = '{form:title}'; });
+  await addCtl(page, 'section1', 'text', 'req', { col: 'TxtReq' });
+  await addCtl(page, 'section1', 'boolean', 'yn', { logic: true });
+  await ev(page, s => s.addSection('page1'));
+  const sB = await ev(page, s => s.sel.id);
+  await ev(page, (s, id) => { s.loc('section', id).sec.visibleWhen = { field: 'yn', op: 'equals', value: true }; }, sB);
+  await ev(page, s => s.addPage());
+  const pB = await ev(page, s => s.sel.id);
+  const sC = await ev(page, (s, p) => s.loc('page', p).pg.sections[0].id, pB);
+  await ev(page, (s, p) => { s.loc('page', p).pg.endWhen = { field: 'yn', op: 'equals', value: true }; }, pB);
+  await ev(page, s => s.addPage());
+  const pC = await ev(page, s => s.sel.id);
+  await selectNode(page, 'form');
+  // look
+  await segIn(page, 'Frame', 'Plain');
+  await segIn(page, 'Header', 'Plain');
+  await segIn(page, 'Tint', 'Neutral');
+  const icon = propInput(page, 'Brand icon');
+  await icon.fill('abacus-icons/digital-form-48.svg');
+  await icon.dispatchEvent('change');
+  await page.waitForTimeout(60);
+  check('look → form.appearance { frame plain, header plain, tint neutral, icon }', same((await docOf(page)).form.appearance,
+    { frame: 'plain', header: 'plain', tint: 'neutral', icon: 'abacus-icons/digital-form-48.svg' }), (await docOf(page)).form.appearance);
+  await icon.fill('');
+  await icon.dispatchEvent('change');
+  await page.waitForTimeout(60);
+  check('…clearing the icon removes it', !('icon' in (await docOf(page)).form.appearance));
+  // submit confirm
+  await toggleSwitch(page, 'Ask “are you sure?” first');
+  let sc = (await docOf(page)).submitConfirm;
+  check('"are you sure?" on → submitConfirm with Yes / No', sc && sc.confirm === 'Yes' && sc.cancel === 'No' && !!sc.title && !!sc.message, sc);
+  await propInput(page, 'Dialog title').fill('Really send?');
+  await page.locator('.bfb-props .field').filter({ has: page.locator('label.field__label', { hasText: /^Confirm button$/ }) }).locator('input').fill('Send it');
+  await page.waitForTimeout(60);
+  sc = (await docOf(page)).submitConfirm;
+  check('…title and buttons editable', sc.title === 'Really send?' && sc.confirm === 'Send it', sc);
+  // after saving
+  await propInput(page, 'Success title').fill('All done');
+  await propInput(page, 'Success message').fill('We got it.');
+  await toggleSwitch(page, 'Offer “Submit another response”');
+  let cf = (await docOf(page)).confirmation;
+  check('success title/message; "Submit another" off → allowAnother false', cf.title === 'All done' && cf.message === 'We got it.' && cf.allowAnother === false, cf);
+  await toggleSwitch(page, 'Then go to another page');
+  cf = (await docOf(page)).confirmation;
+  check('redirect on → { url: "", seconds: 5 }', same(cf.redirect, { url: '', seconds: 5 }), cf.redirect);
+  iss = await issuesOf(page);
+  check('…empty URL → error', has(iss, /The redirect after submit needs a web address/, 'error'), issueLine(iss));
+  const url = propInput(page, 'Page address');
+  const secs = page.locator('.bfb-props .field').filter({ has: page.locator('label.field__label', { hasText: /^After \(seconds\)$/ }) }).locator('input');
+  for (const [u, ok] of [['/sites/FCUPortal/SitePages/Home.aspx', true], ['https://ok.example/x?y=1', true], ['javascript:x', false], ['//evil.example/x', false], ['http://', false], ['{var:next}', true]]) {
+    await url.fill(u);
+    await page.waitForTimeout(40);
+    iss = await issuesOf(page);
+    check('redirect URL "' + u + '" → ' + (ok ? 'accepted' : 'error'), has(iss, /The redirect after submit needs a web address/, 'error') === !ok, issueLine(iss));
+  }
+  await url.fill('/sites/FCUPortal/SitePages/Home.aspx');
+  await setNum(secs, 99);
+  check('seconds 99 → 60', (await docOf(page)).confirmation.redirect.seconds === 60);
+  await setNum(secs, -5);
+  check('seconds -5 → 0', (await docOf(page)).confirmation.redirect.seconds === 0);
+  await setNum(secs, 3);
+  // attachments
+  const reach = await ev(page, s => s.reachableSections().map(x => x.id));
+  check('reachable sections: not a show-when section, not after an end-when page', same(reach, ['section1', sC]), reach);
+  await toggleSwitch(page, 'Let people attach files');
+  let at = (await docOf(page)).attachments;
+  check('attachments on → enabled, 5 files, 10 MB, last reachable section', at && at.enabled === true && at.maxFiles === 5 && at.maxFileSizeMb === 10 && at.section === sC, at);
+  const secOpts = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('.bfb-props .bfb-prop')].find(r => { const l = r.querySelector(':scope > label.field__label'); return l && l.textContent.trim() === 'Shown at the end of'; });
+    return [...row.querySelector('select').options].map(o => o.value);
+  });
+  check('…section select offers only reachable sections', same(secOpts, ['section1', sC]), secOpts);
+  const nf = page.locator('.bfb-props .field').filter({ has: page.locator('label.field__label', { hasText: /^Max files/ }) }).locator('input');
+  const mb = page.locator('.bfb-props .field').filter({ has: page.locator('label.field__label', { hasText: /^Max MB/ }) }).locator('input');
+  await setNum(nf, 9); const a1 = (await docOf(page)).attachments.maxFiles;
+  await setNum(nf, 0); const a2 = (await docOf(page)).attachments.maxFiles;
+  await setNum(mb, 50); const a3 = (await docOf(page)).attachments.maxFileSizeMb;
+  await setNum(mb, 0); const a4 = (await docOf(page)).attachments.maxFileSizeMb;
+  check('clamps: files 9→5, 0→1; MB 50→10, 0→1', a1 === 5 && a2 === 1 && a3 === 10 && a4 === 1, [a1, a2, a3, a4]);
+  const acc = propInput(page, 'File types');
+  await acc.fill('pdf, .DOCX png');
+  await acc.dispatchEvent('change');
+  await page.waitForTimeout(60);
+  check('accept "pdf, .DOCX png" → [".pdf", ".docx", ".png"]', same((await docOf(page)).attachments.accept, ['.pdf', '.docx', '.png']), (await docOf(page)).attachments.accept);
+  await page.screenshot({ path: path.join(SHOTS, 'bfb-p3-settings.png'), fullPage: true });
+  await acc.fill('');
+  await acc.dispatchEvent('change');
+  await page.waitForTimeout(60);
+  check('…cleared → no accept key', !('accept' in (await docOf(page)).attachments));
+  await settle(page);
+  iss = await issuesOf(page);
+  check('settings form: no errors; downloaded JSON carries them', (await ev(page, s => s.nErr)) === 0, issueLine(iss.filter(i => i.level === 'error')));
+  const j = await ev(page, s => JSON.parse(s.jsonText()));
+  check('JSON: submitConfirm, confirmation.redirect { url, seconds 3 }, attachments, appearance', j.submitConfirm && j.submitConfirm.title === 'Really send?' &&
+    same(j.confirmation.redirect, { url: '/sites/FCUPortal/SitePages/Home.aspx', seconds: 3 }) && j.attachments && j.attachments.section === sC && j.form.appearance.frame === 'plain', [j.confirmation, j.attachments]);
+  check('…normalize accepts it', (await page.evaluate(cfg => BSPForms.normalize(cfg).errors, j)).length === 0);
+  await toggleSwitch(page, 'Ask “are you sure?” first');
+  await toggleSwitch(page, 'Then go to another page');
+  await toggleSwitch(page, 'Let people attach files');
+  const d5 = await docOf(page);
+  check('switches off remove submitConfirm, redirect, attachments', !d5.submitConfirm && !d5.confirmation.redirect && !d5.attachments);
+  check('(page ' + pC + ' exists after the end-when page)', !!(await ev(page, (s, p) => !!s.loc('page', p), pC)));
+  await ctx.close();
+  // a list without attachments
+  ({ ctx, page } = await openBuilder(browser));
+  await pickList(page, 'No Attachments');
+  await selectNode(page, 'form');
+  const sw0 = await switchOf(page, 'Let people attach files');
+  check('"No Attachments" list: the attachments switch is disabled', sw0 && sw0.disabled && !sw0.checked, sw0);
+  check('…with the "turned off" hint', await page.evaluate(() => [...document.querySelectorAll('.bfb-props .field__hint')].some(p => /attachments turned off/.test(p.textContent) && p.getClientRects().length > 0)));
+  await ev(page, s => s.setAttachOn(true));
+  check('…setAttachOn(true) anyway → a note, nothing set', /attachments turned off/.test(await noteOf(page)) && !(await docOf(page)).attachments);
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+}
+
+/* the preview pane (E9b) */
+const PV = '.bfb-preview__stage';
+async function pvReady(page, timeout) {
+  await page.waitForFunction(() => { const r = document.querySelector('.bfb-preview__stage .bspf'); return !!(r && r._x_dataStack); }, null, { timeout: timeout || 5000 });
+  await page.waitForTimeout(150);
+}
+async function pvClick(page, text) {
+  const ok = await page.evaluate(t => {
+    const b = [...document.querySelectorAll('.bfb-preview__stage .bspf button')].find(x => x.textContent.trim().startsWith(t) && x.getClientRects().length > 0);
+    if (!b) return false;
+    b.click();
+    return true;
+  }, text);
+  if (!ok) throw new Error('pvClick: no visible preview button "' + text + '"');
+  await page.waitForTimeout(200);
+}
+async function testPreview(browser) {
+  console.log('P3 · preview pane:');
+  // narrow: off
+  let ctx = await browser.newContext({ viewport: { width: 1100, height: 1000 } });
+  let page = await ctx.newPage();
+  page.__errors = []; page.on('pageerror', e => page.__errors.push(e.message));
+  await gotoBuilder(page, true);
+  check('below 1280 px: preview off by default', !(await ev(page, s => s.pv.on)) && !(await isVisible(page, '.bfb-preview')));
+  await clickIn(page, '.bfb-pvtoggle');
+  check('…the toggle shows it (in place of the properties)', await ev(page, s => s.pv.on) && await isVisible(page, '.bfb-preview'));
+  await selectNode(page, 'form');
+  check('…selecting something to edit brings the properties back (preview off)', !(await ev(page, s => s.pv.on)));
+  await ctx.close();
+
+  const o = await openBuilder(browser);
+  ctx = o.ctx; page = o.page;
+  await page.route('**/SitePages/Home.aspx', r => r.fulfill({ contentType: 'text/html', body: '<title>home</title>home' }));
+  await page.evaluate(() => { const M = window.BSPF_MOCK_SP, eu = M.ensureUser; window.__eu = 0; M.ensureUser = function () { window.__eu++; return eu.apply(M, arguments); }; });
+  check('at 1400 px: preview on by default, three panes', await ev(page, s => s.pv.on) && await isVisible(page, '.bfb-preview') && await isVisible(page, '.bfb-outline') && await isVisible(page, '.bfb-props') &&
+    await page.evaluate(() => document.querySelector('.bfb').classList.contains('bfb--pv')));
+  check('no list → "Pick a list to preview"', /Pick a list to preview/.test(await page.locator(PV).textContent()));
+  await pickList(page, 'BSPF Builder Test');
+  await ev(page, s => { s.doc.form.title = 'Preview form'; s.doc.target.titleTemplate = '{form:title}'; });
+  await addCtl(page, 'section1', 'text', 'req', { label: 'Request', col: 'TxtReq' });
+  await addCtl(page, 'section1', 'person', 'who', { label: 'Who', col: 'People' });
+  await addCtl(page, 'section1', 'boolean', 'more', { label: 'More pages', logic: true });
+  await ev(page, s => { s.addPage(); });
+  const p2 = await ev(page, s => s.sel.id);
+  const p2s = await ev(page, (s, p) => s.loc('page', p).pg.sections[0].id, p2);
+  await ev(page, (s, p) => { s.loc('page', p).pg.visibleWhen = { field: 'more', op: 'equals', value: true }; }, p2);
+  await addCtl(page, p2s, 'text', 'extra', { label: 'Extra', col: 'TxtShort' });
+  await ev(page, s => { s.select('form'); s.setConfirmOn(true); s.setRedirectOn(true); s.doc.confirmation.redirect.url = '/sites/FCUPortal/SitePages/Home.aspx'; s.doc.confirmation.redirect.seconds = 1; s.setAttachOn(true); });
+  await ev(page, s => { s.doc.attachments.section = 'section1'; });
+  await settle(page, 1100);
+  check('valid preview form: 0 errors', (await ev(page, s => s.nErr)) === 0, issueLine((await issuesOf(page)).filter(i => i.level === 'error')));
+  await pvReady(page);
+  check('the preview renders the form (title, Request field)', /Preview form/.test(await page.locator(PV).textContent()) && await page.locator(PV + ' [data-bspf-field="req"]').count() === 1);
+  const scope = await page.evaluate(() => {
+    const r = document.querySelector('.bfb-preview__stage .bspf');
+    const d = r._x_dataStack[0];
+    return { n: r._x_dataStack.length, leak: ['doc', 'pv', 'schema', 'issues', 'sel', 'nErr'].filter(k => k in d), own: 'values' in d };
+  });
+  check('preview root has its OWN Alpine scope (one data object, no builder names)', scope.n === 1 && !scope.leak.length && scope.own, scope);
+  // re-mount after an edit
+  const t0 = Date.now();
+  await ev(page, s => { s.doc.form.title = 'Preview form v2'; });
+  await page.waitForTimeout(150);
+  const early = /Preview form v2/.test(await page.locator(PV).textContent());
+  await page.waitForFunction(() => /Preview form v2/.test(document.querySelector('.bfb-preview__stage').textContent), null, { timeout: 3000 }).catch(() => {});
+  const took = Date.now() - t0;
+  check('an edit re-mounts the preview (~300 ms debounce + ~400 ms)', !early && /Preview form v2/.test(await page.locator(PV).textContent()) && took >= 500 && took < 2500, took + ' ms');
+  // toggle
+  await clickIn(page, '.bfb-pvtoggle');
+  check('toggle off → unmounted (stage empty, pane hidden)', !(await ev(page, s => s.pv.on)) && (await page.locator(PV).innerHTML()) === '' && !(await isVisible(page, '.bfb-preview')));
+  await clickIn(page, '.bfb-pvtoggle');
+  await pvReady(page);
+  check('toggle on → mounted again', await page.locator(PV + ' .bspf').count() === 1);
+  // engine errors → warning bar
+  await ev(page, s => { s.doc.pages[0].sections[0].columns = 3; });
+  await page.waitForFunction(() => { const e = document.querySelector('.bfb-preview__err'); return e && e.getClientRects().length > 0; }, null, { timeout: 3000 }).catch(() => {});
+  check('an engine error → the preview\'s warning bar + the engine\'s error card', await isVisible(page, '.bfb-preview__err') && await page.locator(PV + ' [data-bspf-fatal]').count() > 0);
+  await ev(page, s => { delete s.doc.pages[0].sections[0].columns; });
+  await page.waitForFunction(() => document.querySelector('.bfb-preview__stage .bspf') && !document.querySelector('.bfb-preview__err').getClientRects().length, null, { timeout: 3000 }).catch(() => {});
+  await pvReady(page);
+  check('…fixed → the bar goes, the form is back', !(await isVisible(page, '.bfb-preview__err')));
+  // branching live
+  let act = await page.evaluate(() => document.querySelector('.bfb-preview__stage .bspf')._x_dataStack[0].activePages().length);
+  await page.evaluate(() => document.querySelector('.bfb-preview__stage [data-bspf-field="more"] input[type=checkbox]').click());
+  await page.waitForTimeout(150);
+  const act2 = await page.evaluate(() => document.querySelector('.bfb-preview__stage .bspf')._x_dataStack[0].activePages().length);
+  check('branching is live in the preview (page show-when: 1 → 2 active pages)', act === 1 && act2 === 2, [act, act2]);
+  await page.evaluate(() => document.querySelector('.bfb-preview__stage [data-bspf-field="more"] input[type=checkbox]').click());
+  await page.waitForTimeout(100);
+  // fill: text, a person (search + pick), a file
+  await page.fill(PV + ' [data-bspf-field="req"] input', 'A laptop, please');
+  await page.fill(PV + ' [data-bspf-field="who"] .bspf-people__input', 'sof');
+  await page.waitForSelector(PV + ' [data-bspf-field="who"] .bspf-people__option', { state: 'visible', timeout: 4000 });
+  await page.evaluate(() => document.querySelector('.bfb-preview__stage [data-bspf-field="who"] .bspf-people__option').click());
+  await page.waitForTimeout(300);
+  await page.setInputFiles(PV + ' input[type="file"]', [{ name: 'spec.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 preview test') }]);
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: path.join(SHOTS, 'bfb-p3-preview.png'), fullPage: true });
+  await pvClick(page, 'Submit');
+  check('submitConfirm → the dialog appears in the preview with Yes / No', await page.evaluate(() => {
+    const btns = [...document.querySelectorAll('.bfb-preview__stage .bspf button')].filter(b => b.getClientRects().length > 0).map(b => b.textContent.trim());
+    return btns.includes('Yes') && btns.includes('No');
+  }));
+  const url0 = page.url();
+  await pvClick(page, 'Yes');
+  await page.waitForSelector(PV + ' .bspf-done', { state: 'visible', timeout: 5000 }).catch(() => {});
+  check('preview submit → the done screen', await isVisible(page, PV + ' .bspf-done'));
+  const cnt = await page.locator(PV + ' .bspf-result__count').textContent().catch(() => '');
+  check('redirect → "Preview: after 1 seconds this would go to …Home.aspx"', /Preview: after 1 seconds this would go to \S*\/sites\/FCUPortal\/SitePages\/Home\.aspx/.test(cnt), cnt);
+  await page.waitForTimeout(2500);
+  check('…and the page never navigates (waited past the seconds)', page.url() === url0, page.url());
+  await page.evaluate(() => { const a = [...document.querySelectorAll('.bfb-preview__stage a')].find(x => x.textContent.trim() === 'Go now'); if (a) a.click(); });
+  await page.waitForTimeout(700);
+  check('clicking the same-tab "Go now" link inside the preview doesn\'t navigate', page.url() === url0, page.url());
+  await page.waitForTimeout(700); // the 600 ms poll
+  await clickText(page, '.bfb-preview__bar .bfb-seg__opt', /^What would be saved$/);
+  await page.waitForTimeout(100);
+  let saved = null;
+  try { saved = JSON.parse(await page.locator('.bfb-preview__payload .bfb-pre').textContent()); } catch (e) { /* checked below */ }
+  const ops = (saved || []).map(w => w.op);
+  check('"What would be saved" lists ensureUser, addItem, addAttachment', ops.includes('ensureUser') && ops.includes('addItem') && ops.includes('addAttachment'), ops);
+  const add = (saved || []).find(w => w.op === 'addItem');
+  check('…the payload: TxtReq, PeopleId (stand-in id), Title', add && add.payload.TxtReq === 'A laptop, please' && add.payload.Title === 'Preview form v2' &&
+    add.payload.PeopleId && add.payload.PeopleId.results && add.payload.PeopleId.results[0] >= 900000, add && add.payload);
+  check('…the attachment recorded by name', (saved || []).some(w => w.op === 'addAttachment' && w.name === 'spec.pdf'));
+  await page.screenshot({ path: path.join(SHOTS, 'bfb-p3-saved.png'), fullPage: true });
+  const mock = await page.evaluate(() => ({ w: window.__BSPF_MOCK_WRITES__.map(w => w.op), eu: window.__eu }));
+  check('the mock saw NO addItem / addAttachment / ensureUser (reads only)', !mock.w.includes('addItem') && !mock.w.includes('addAttachment') && mock.eu === 0, mock);
+  await clickText(page, '.bfb-preview__bar .bfb-seg__opt', /^Form$/);
+  await clickText(page, '.bfb-preview__bar .btn', /^Start over$/);
+  await pvReady(page);
+  check('"Start over" → a fresh form (no done screen, empty answer, payload cleared)', !(await isVisible(page, PV + ' .bspf-done')) &&
+    (await page.inputValue(PV + ' [data-bspf-field="req"] input')) === '' && (await ev(page, s => s.pv.n)) === 0);
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+}
+
 (async () => {
   const browser = await launch();
   const only = process.env.ONLY ? process.env.ONLY.split(',') : null;
-  const suite = [testBootAndCatalog, testControls, testSwitchAndLogicOnly, testChecks, testIds, testOrdering, testUndoAndDraft, testDownload, testEndToEnd, testReviewFixes];
+  const suite = [testBootAndCatalog, testControls, testSwitchAndLogicOnly, testChecks, testIds, testOrdering, testUndoAndDraft, testDownload, testEndToEnd, testReviewFixes, testRules, testChoiceLimitsDatesSettings, testPreview];
   try {
     for (const t of suite) {
       if (only && !only.includes(t.name)) continue;
@@ -1709,7 +2458,7 @@ async function testEndToEnd(browser) {
   } finally {
     await browser.close();
   }
-  console.log('\nscreenshots: ' + ['bfb-outline.png', 'bfb-choice.png', 'bfb-catalog.png', 'bfb-download.png'].map(n => path.join(SHOTS, n)).join(', '));
+  console.log('\nscreenshots: ' + ['bfb-outline.png', 'bfb-choice.png', 'bfb-catalog.png', 'bfb-download.png', 'bfb-p3-rules.png', 'bfb-p3-cw.png', 'bfb-p3-dates.png', 'bfb-p3-settings.png', 'bfb-p3-preview.png', 'bfb-p3-saved.png'].map(n => path.join(SHOTS, n)).join(', '));
   console.log(failures ? '\nFAILED: ' + failures + ' of ' + total + ' check(s)' : '\nALL ' + total + ' CHECKS PASSED');
   process.exit(failures ? 1 : 0);
 })().catch(e => { console.error('SUITE ERROR:', e); process.exit(1); });

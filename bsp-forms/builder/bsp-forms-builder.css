@@ -163,8 +163,15 @@
 .bfb-node__title > span:first-child { overflow: hidden; text-overflow: ellipsis; }
 .bfb-node__sub { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-60); font: var(--type-caption1); color: var(--fg-secondary); }
 .bfb-node--page .bfb-node__title { font: var(--type-subtitle2); }
-.bfb-node__tools { display: inline-flex; opacity: 0; transition: opacity var(--motion-fast) var(--ease-out); }
-.bfb-node:hover .bfb-node__tools, .bfb-node:focus-within .bfb-node__tools, .bfb-node.is-sel .bfb-node__tools { opacity: 1; }
+/* row tools float over the row's end (titles get the full width) and show
+   on hover, keyboard focus or selection */
+.bfb-node__tools {
+  position: absolute; right: var(--space-40); top: 50%; transform: translateY(-50%);
+  display: inline-flex; padding: 2px;
+  border-radius: var(--radius-medium); background: var(--surface-raised); box-shadow: var(--shadow-4);
+  opacity: 0; pointer-events: none; transition: opacity var(--motion-fast) var(--ease-out);
+}
+.bfb-node:hover .bfb-node__tools, .bfb-node:focus-within .bfb-node__tools, .bfb-node.is-sel .bfb-node__tools { opacity: 1; pointer-events: auto; }
 .bfb-node__tools .icon-btn { width: 26px; height: 26px; }
 .bfb-grip { cursor: grab; color: var(--fg-secondary); opacity: .45; font-size: 11px; letter-spacing: -2px; padding-left: var(--space-40); user-select: none; }
 .bfb-node:hover .bfb-grip { opacity: 1; }
