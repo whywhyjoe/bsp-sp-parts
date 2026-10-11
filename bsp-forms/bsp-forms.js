@@ -313,7 +313,8 @@
     numberPlaceholder: 'Select a number',
     sliderUnset: 'Not set',
     dateMinBusinessDays: 'Pick a date at least {days} business day(s) from today.',
-    dateBusinessDay: 'Pick a business day, not a weekend.'
+    dateBusinessDay: 'Pick a business day, not a weekend.',
+    redirectPreview: 'Preview: after {n} seconds this would go to {url}.'
   };
 
   /* French defaults (form.languages includes "fr"). Same keys as above;
@@ -409,7 +410,8 @@
     numberPlaceholder: 'Sélectionnez un nombre',
     sliderUnset: 'Non défini',
     dateMinBusinessDays: 'Choisissez une date au moins {days} jour(s) ouvrable(s) après aujourd’hui.',
-    dateBusinessDay: 'Choisissez un jour ouvrable, pas une fin de semaine.'
+    dateBusinessDay: 'Choisissez un jour ouvrable, pas une fin de semaine.',
+    redirectPreview: 'Aperçu : après {n} secondes, la page irait à {url}.'
   };
 
   /* ------------------------------------------------------------------
@@ -2260,7 +2262,7 @@
       promptAck: {},
       // result screen (afterSubmit / queryError) + its optional countdown redirect
       result: { title: '', html: '', href: '', linkText: '', lookup: '', copyText: '', copyFailed: false, copied: false },
-      redir: { url: '', left: 0, paused: false },
+      redir: { url: '', left: 0, paused: false, preview: false },
       // assignments load state ('idle' | 'loading' | 'ready' | 'error' |
       // 'empty' | 'done'), and the signed-in user for currentUser fields
       asg: { state: 'idle', msg: '', skipped: 0, warn: [] },
@@ -2496,6 +2498,9 @@
         var self = this;
         this.redir.url = url; this.redir.left = secs; this.redir.paused = !!paused;
         if (store.redirTimer) clearInterval(store.redirTimer);
+        // a preview (BSPForms.mountConfig) never navigates: every redirect
+        // path — confirmation, afterSubmit, queryError — ends here
+        if (def.preview) { this.redir.preview = true; store.redirTimer = null; return; }
         store.redirTimer = setInterval(function () {
           if (self.redir.paused) return;
           if (self.redir.left > 0) { self.redir.left--; return; }
@@ -2504,6 +2509,7 @@
         }, 1000);
       },
       countdownText: function () {
+        if (this.redir.preview) return fmtStr(S.redirectPreview, { url: this.redir.url, n: this.redir.left });
         return this.redir.paused ? S.redirectPaused : fmtStr(S.redirectCountdown, { n: this.redir.left });
       },
       // the plain confirmation, plus its optional countdown redirect
@@ -3909,6 +3915,94 @@
       fatalCard(mount, DEFAULT_STRINGS, e && e.message);
     });
   }
+
+  /* ------------------------------------------------------------------
+     Preview mount (E9b) — the form builder renders a config object into
+     an element of its own. With preview: true the adapter is a distinct
+     object: reads go through to SharePoint (people search, the current
+     user, lookups); everything that writes is simulated and recorded —
+     ensureUser too, which adds a person to the site's user list and runs
+     on every pick. No preview ever navigates (startRedirect + a click
+     guard). The element has no data-bsp-form, so scan() never touches it.
+     ------------------------------------------------------------------ */
+  function previewAdapter(real, writes) {
+    var seq = 0;
+    function pass(name) {
+      return typeof real[name] === 'function' ? function () { return real[name].apply(real, arguments); } : undefined;
+    }
+    var a = { isMock: !!real.isMock, preview: true };
+    ['webUrl', 'ready', 'userInfo', 'photoUrl', 'searchPeople', 'getLookupItems', 'lookupValue', 'getAssignments',
+      'getRowKeys', 'getRowKeysFor', 'getListFields'].forEach(function (n) { var f = pass(n); if (f) a[n] = f; });
+    a.ensureUser = function (key) {
+      var id = 900000 + (++seq);
+      writes.push({ op: 'ensureUser', key: key, id: id });
+      return Promise.resolve(id);
+    };
+    a.addItem = function (payload) {
+      var id = 'preview-' + (++seq);
+      writes.push({ op: 'addItem', id: id, payload: JSON.parse(JSON.stringify(payload)) });
+      return Promise.resolve({ id: id, item: { __preview: id } });
+    };
+    a.addAttachment = function (item, name, file) {
+      writes.push({ op: 'addAttachment', itemId: item && item.__preview, name: name, size: file && file.size });
+      return Promise.resolve();
+    };
+    return a;
+  }
+  NS.mountConfig = function (el, raw, opts) {
+    opts = opts || {};
+    var handle = { writes: [], errors: [], uid: null, ready: null, destroy: null };
+    var root = null, uid = null, dead = false;
+    // links that would leave the page do nothing in a preview (new-tab
+    // links still open: they can't lose the builder)
+    function guard(e) {
+      var a = e.target && e.target.closest && e.target.closest('a[href]');
+      if (a && a.target !== '_blank') e.preventDefault();
+    }
+    handle.destroy = function () {
+      dead = true;
+      if (opts.preview) el.removeEventListener('click', guard, true);
+      var def = uid && NS._defs[uid];
+      if (def && def.store.redirTimer) { clearInterval(def.store.redirTimer); def.store.redirTimer = null; }
+      try { if (root && window.Alpine && window.Alpine.destroyTree) window.Alpine.destroyTree(root); } catch (e) { /* best effort */ }
+      if (uid) delete NS._defs[uid];
+      el.innerHTML = '';
+    };
+    if (opts.preview) el.addEventListener('click', guard, true);
+    ensureStyles();
+    var spriteReady = ensureSprite();
+    handle.ready = whenIntl(raw).then(function () {
+      if (dead) return;
+      var norm = normalizeConfig(raw, activeLang(raw));
+      if (norm.errors.length) {
+        handle.errors = norm.errors;
+        el.innerHTML = '';
+        fatalCard(el, DEFAULT_STRINGS, norm.errors.join('; '));
+        return;
+      }
+      var cfg = norm.cfg;
+      uid = handle.uid = nextUid();
+      cfg._ordered.forEach(function (f) { f.domId = uid + '-' + f.k; });
+      var real = makeAdapter(cfg);
+      var def = NS._defs[uid] = {
+        uid: uid, cfg: cfg, raw: raw, mount: el, adapter: opts.preview ? previewAdapter(real, handle.writes) : real,
+        root: null, carry: null, preview: !!opts.preview,
+        multiLang: (formLangs(raw) || []).length > 1,
+        store: { files: {}, fileSeq: 0, itemId: null, itemRef: null, pSeq: {}, state: null, submitAt: null, snap: null, rowsUncertain: false }
+      };
+      if (def.multiLang) wireIntl();
+      return spriteReady.then(function () {
+        if (dead) return;
+        el.innerHTML = '';
+        var host = document.createElement('div');
+        host.innerHTML = renderForm(uid, cfg);
+        root = def.root = host.firstChild;
+        el.appendChild(root);
+        return activateAlpine(root);
+      });
+    });
+    return handle;
+  };
 
   NS.scan = function () {
     document.querySelectorAll('[data-bsp-form]').forEach(function (m) {

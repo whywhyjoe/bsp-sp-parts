@@ -437,6 +437,75 @@
   }
 
   /* ------------------------------------------------------------------
+     Rules (B5). The editor edits the engine's own rule objects: no rule,
+     one condition, or { all | any: [conditions] } one level deep. Anything
+     else (nesting, "not") is shown read-only until replaced.
+     ------------------------------------------------------------------ */
+  // ops the editor offers, by the driver's kind: [op, label, value shape]
+  var RULE_OPS = {
+    boolean:     [['on', 'is on'], ['off', 'is off']],
+    choice:      [['equals', 'is', 'one'], ['notEquals', 'is not', 'one'], ['in', 'is one of', 'many'], ['notIn', 'is none of', 'many'],
+                  ['notEmpty', 'is answered'], ['isEmpty', 'is not answered']],
+    multichoice: [['includes', 'includes', 'one'], ['includesAny', 'includes any of', 'many'], ['includesAll', 'includes all of', 'many'],
+                  ['notEmpty', 'is answered'], ['isEmpty', 'is not answered']],
+    text:        [['equals', 'is', 'text'], ['notEquals', 'is not', 'text'], ['notEmpty', 'is answered'], ['isEmpty', 'is not answered']],
+    textarea:    [['notEmpty', 'is answered'], ['isEmpty', 'is not answered']],
+    url:         [['notEmpty', 'is answered'], ['isEmpty', 'is not answered']],
+    number:      [['equals', 'is', 'number'], ['notEquals', 'is not', 'number'], ['notEmpty', 'is answered'], ['isEmpty', 'is not answered']],
+    person:      [['notEmpty', 'has someone'], ['isEmpty', 'is empty']],
+    date:        [['onOrAfter', 'is on or after', 'date'], ['after', 'is after', 'date'], ['before', 'is before', 'date'],
+                  ['onOrBefore', 'is on or before', 'date'], ['withinBusinessDays', 'is within N business days', 'bizdays'],
+                  ['notEmpty', 'is answered'], ['isEmpty', 'is not answered']]
+  };
+  function isCond(r) { return !!(r && typeof r === 'object' && typeof r.field === 'string' && !r.all && !r.any && !r.not); }
+  // { mode, rows, editable } — rows are the doc's own condition objects
+  function ruleRows(rule) {
+    if (!rule) return { mode: 'all', rows: [], editable: true };
+    if (isCond(rule)) return { mode: 'all', rows: [rule], editable: true };
+    var mode = Array.isArray(rule.all) ? 'all' : Array.isArray(rule.any) ? 'any' : null;
+    var rows = mode ? rule[mode] : null;
+    if (rows && rows.every(isCond)) return { mode: mode, rows: rows, editable: true };
+    return { mode: 'all', rows: [], editable: false };
+  }
+  function rowsRule(mode, rows) {
+    if (!rows.length) return undefined;
+    if (rows.length === 1) return rows[0];
+    var r = {}; r[mode] = rows; return r;
+  }
+  // the editor's op for a condition (a boolean's equals true/false reads as on/off)
+  function condOp(row, kind) {
+    if (kind === 'boolean') return row.op === 'equals' || !row.op ? (row.value === false ? 'off' : 'on') : row.op === 'notEquals' ? (row.value === false ? 'on' : 'off') : 'on';
+    return row.op || 'equals';
+  }
+  function isDriver(f) { var k = kindOf(f); return isValueKind(k); }
+  // who may drive a rule on target: { t: 'field'|'section'|'page', id, key }
+  function driversFor(doc, t, id, key) {
+    // cut = how many fields come before the target (a section: before its
+    // first field, even when it's empty); pages compare page indexes
+    var idx = 0, cut = -1, pageCut = -1, out = [], i = 0;
+    (doc.pages || []).forEach(function (pg, pi) {
+      if (t === 'page' && pg.id === id) pageCut = pi;
+      (pg.sections || []).forEach(function (sec) {
+        if (t === 'section' && sec.id === id) cut = idx;
+        (sec.fields || []).forEach(function (f) { if (t === 'field' && f.id === id) cut = idx; idx++; });
+      });
+    });
+    eachField(doc, function (f, pg, sec, pi) {
+      var ok = t === 'page' ? (key === 'endWhen' ? pi <= pageCut : pi < pageCut) : i < cut;
+      if (ok && isDriver(f)) out.push(f);
+      i++;
+    });
+    return out;
+  }
+  // the current form-order position of every field id (for "later" checks)
+  function positions(doc) {
+    var at = Object.create(null), i = 0;
+    eachField(doc, function (f) { at[f.id] = i++; });
+    return at;
+  }
+  var BIZ_HOURS = { timeZone: 'America/Toronto', days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00' };
+
+  /* ------------------------------------------------------------------
      Shared columns are the builder's to maintain: a column mapped by more
      than one control is declared, nothing else is.
      ------------------------------------------------------------------ */
@@ -594,6 +663,48 @@
       if (cat.list.validationFormula) add('warn', 'schema', 'The list has a validation formula the form can’t check; a failing submit shows SharePoint’s message.');
     }
 
+    // rules (B5): what the engine allows but reads wrong, and D8
+    var at = positions(doc);
+    function laterRefs(rule, before, out) {
+      ruleRows(rule).rows.forEach(function (r) {
+        if (at[r.field] != null && at[r.field] >= before) out.push(r.field);
+      });
+      return out;
+    }
+    var idx = 0;
+    (doc.pages || []).forEach(function (pg) {
+      (pg.sections || []).forEach(function (sec) {
+        var late = laterRefs(sec.visibleWhen, idx, []);
+        if (late.length) add('warn', 'schema', 'Section “' + (sec.title || sec.id) + '” shows depending on “' + late.join('”, “') + '”, which comes after it — people see the section change only once they get there.', { t: 'section', id: sec.id });
+        (sec.fields || []).forEach(function (f) {
+          var sel = { t: 'field', id: f.id }, name = '“' + (f.label || f.text || f.id) + '”';
+          var lf = laterRefs(f.visibleWhen, idx, []);
+          if (lf.length) add('warn', 'schema', name + ' shows depending on “' + lf.join('”, “') + '”, which comes after it.', sel);
+          var cw = f.choicesWhen;
+          if (cw && cw.field && at[cw.field] != null) {
+            var drv = null;
+            eachField(doc, function (x) { if (x.id === cw.field) drv = x; });
+            var keys = drv && drv.type === 'boolean' ? ['true', 'false'] : (drv && drv.choices || []).map(function (c) { return String(typeof c === 'string' ? c : c.value); });
+            var missing = keys.filter(function (k) { return !cw.map || !Object.prototype.hasOwnProperty.call(cw.map, k); });
+            if (missing.length) add('warn', 'schema', name + ': the choice limit has no entry for “' + missing.join('”, “') + '” — with that answer the control hides.', sel);
+          }
+          var rules = Array.isArray(f.rules) ? f.rules : [];
+          var hasBiz = rules.some(function (r) { return r && r.op === 'minBusinessDays'; });
+          var wk = rules.filter(function (r) { return r && r.op === 'businessDay'; });
+          if (hasBiz && !wk.some(function (r) { return (r.mode || 'block') === 'block'; })) add('error', 'schema', name + ': a business-day lead time needs “weekdays only” to block (weekends are rejected).', sel);
+          if (wk.some(function (r) { return r.mode === 'warn'; })) add('error', 'schema', name + ': “weekdays only” always blocks — weekends are rejected.', sel);
+          idx++;
+        });
+      });
+    });
+    var red = doc.confirmation && doc.confirmation.redirect;
+    if (red) {
+      var u = String(red.url || '').trim();
+      if (!/^https?:\/\/[^\s]+$/i.test(u) && !/^\/(?!\/)[^\s]*$/.test(u) && !/\{var:[^}]+\}/.test(u)) {
+        add('error', 'schema', 'The redirect after submit needs a web address starting with https:// or a site path starting with /.');
+      }
+    }
+
     danglingRefs(doc).forEach(function (d) { add('error', 'schema', d.where + ' refers to “' + d.id + '”, which no control has.'); });
 
     // the engine's own load check (E9a) — exactly what a page would reject
@@ -721,7 +832,8 @@
     KINDS: KINDS, FITS: FITS, kindOf: kindOf, classify: classify, buildCatalog: buildCatalog, fit: fit,
     newDoc: newDoc, newField: newField, applyColumn: applyColumn, refSites: refSites, refsTo: refsTo,
     renameRefs: renameRefs, danglingRefs: danglingRefs, sharedOf: sharedOf, computeIssues: computeIssues,
-    serialize: serialize, stubHtml: stubHtml, camelId: camelId, slugify: slugify, templateAlwaysFilled: templateAlwaysFilled
+    serialize: serialize, stubHtml: stubHtml, camelId: camelId, slugify: slugify, templateAlwaysFilled: templateAlwaysFilled,
+    RULE_OPS: RULE_OPS, ruleRows: ruleRows, rowsRule: rowsRule, driversFor: driversFor
   };
 
   /* ------------------------------------------------------------------
@@ -732,7 +844,7 @@
   var BLANK_FIELD = { id: '', type: 'heading', $builder: { kind: 'locked' } };
   window.bspFormsBuilder = function () {
     var hist = { past: [], future: [], last: null };
-    var timers = { change: null, schemaGen: 0 };
+    var timers = { change: null, schemaGen: 0, pv: null, pvHandle: null, pvPoll: null };
     var lists = window.BSPForms.lists();
     return {
       doc: newDoc(),
@@ -747,6 +859,8 @@
       full: false,
       drag: null, dropAt: null,
       idDraft: '', idErr: '', note: '',
+      // the preview pane: on by default when there's room for three panes
+      pv: { on: false, payload: false, errors: [], n: 0, json: '' },
 
       init: function () {
         var self = this;
@@ -755,6 +869,13 @@
         hist.last = JSON.stringify(this.doc);
         this.$watch('doc', function () { self.changed(); });
         this.recheck();
+        this.pv.on = this.$root.clientWidth >= 1280;
+        timers.pvPoll = setInterval(function () { self.pollPreview(); }, 600);
+        this.$nextTick(function () { self.mountPreview(); });
+      },
+      destroy: function () {
+        clearInterval(timers.pvPoll);
+        if (timers.pvHandle) timers.pvHandle.destroy();
       },
 
       /* ---- change tracking: undo history, autosave, checks ---- */
@@ -775,6 +896,7 @@
           hist.last = snap;
           this.nPast = hist.past.length; this.nFuture = 0;
           writeDraft(JSON.parse(snap));
+          this.schedulePreview();
         }
         this.recheck();
       },
@@ -808,6 +930,7 @@
         // restored one (Codex xo 11), and read this version's list afresh
         if (this.schema.state === 'loading') { timers.schemaGen++; this.ensureSchema(true); }
         else this.ensureSchema();
+        this.schedulePreview();
         var self = this;
         this.$nextTick(function () { self.recheck(); });
       },
@@ -888,6 +1011,9 @@
       fieldName: function (f) { return f.label || f.text || f.id; },
       isSel: function (t, id) { return this.sel.t === t && (t === 'form' || this.sel.id === id); },
       select: function (t, id) {
+        // narrow: the preview takes the properties' place, so picking
+        // something to edit brings the properties back
+        if (this.pv.on && this.$root && this.$root.clientWidth < 1280) this.togglePreview();
         this.sel = { t: t, id: id || null };
         this.palette = null;
         this.syncIdDraft();
@@ -1291,7 +1417,10 @@
       choiceFixed: function () { var c = this.curCol(); return !!(c && (c.type === 'Choice' || c.type === 'MultiChoice')); },
       toggleChoice: function (row) {
         var f = this.curField();
-        if (row.on) { if (f.choices.length > 1) f.choices.splice(row.i, 1); else this.note = 'Keep at least one choice.'; }
+        if (row.on) {
+          if (f.choices.length > 1) { f.choices.splice(row.i, 1); this.choiceValueChanged(f, row.c.value, null); }
+          else this.note = 'Keep at least one choice.';
+        }
         else f.choices.push({ value: row.c.value, color: COLORS[f.choices.length % COLORS.length] });
         if (f.default != null && !f.choices.some(function (c) { return c.value === f.default; })) delete f.default;
       },
@@ -1308,13 +1437,305 @@
       dropChoice: function (i) {
         var a = this.curField().choices;
         if (a.length < 2) { this.note = 'Keep at least one choice.'; return; }
-        a.splice(i, 1);
+        var gone = a.splice(i, 1)[0];
+        this.choiceValueChanged(this.curField(), gone.value, null);
       },
       setChoiceLabel: function (c, v) { if (v && v !== c.value) c.label = v; else delete c.label; },
       canFillIn: function () {
         var c = this.curCol();
         return !c || c.type === 'Text' || !!c.fd.FillInChoice;
       },
+
+      /* ---- rules editor (B5): show-when on fields/sections/pages, end-when ---- */
+      // the object a rule lives on, for the selected node (t = its kind)
+      ruleObj: function (t) {
+        var l = this.loc(t, this.sel.id);
+        return !l ? null : t === 'field' ? l.f : t === 'section' ? l.sec : l.pg;
+      },
+      rr: function (t, key) { var o = this.ruleObj(t); return ruleRows(o && o[key]); },
+      ruleDrivers: function (t, key) { return this.sel.id ? driversFor(this.doc, t, this.sel.id, key) : []; },
+      fieldById: function (id) { var l = id && this.loc('field', id); return l ? l.f : null; },
+      driverKind: function (row) { var f = this.fieldById(row.field); return f ? kindOf(f) : ''; },
+      driverLate: function (t, key, row) { return !this.ruleDrivers(t, key).some(function (d) { return d.id === row.field; }); },
+      opsFor: function (row) { return RULE_OPS[this.driverKind(row)] || [['notEmpty', 'is answered'], ['isEmpty', 'is not answered']]; },
+      rowOp: function (row) { return condOp(row, this.driverKind(row)); },
+      opShape: function (row) {
+        var op = this.rowOp(row), o = this.opsFor(row).filter(function (x) { return x[0] === op; })[0];
+        return (o && o[2]) || '';
+      },
+      setRule: function (t, key, mode, rows) {
+        var o = this.ruleObj(t);
+        if (!o) return;
+        var r = rowsRule(mode, rows);
+        if (r) o[key] = r; else delete o[key];
+      },
+      newCond: function (f) {
+        var k = kindOf(f), r = { field: f.id }, vals = this.choiceValues(f.id);
+        if (k === 'boolean') { r.op = 'equals'; r.value = true; }
+        else if (k === 'choice') { r.op = 'equals'; r.value = vals[0] || ''; }
+        else if (k === 'multichoice') { r.op = 'includes'; r.value = vals[0] || ''; }
+        else r.op = 'notEmpty';
+        return r;
+      },
+      addCond: function (t, key) {
+        var ds = this.ruleDrivers(t, key);
+        if (!ds.length) { this.note = t === 'page' && key === 'visibleWhen' ? 'A page can only depend on questions on earlier pages — there aren’t any yet.' : 'There’s no earlier question to depend on yet.'; return; }
+        var cur = this.rr(t, key);
+        this.setRule(t, key, cur.mode, cur.rows.concat([this.newCond(ds[ds.length - 1])]));
+      },
+      dropCond: function (t, key, i) {
+        var cur = this.rr(t, key), rows = cur.rows.slice();
+        rows.splice(i, 1);
+        this.setRule(t, key, cur.mode, rows);
+      },
+      setMode: function (t, key, m) { var cur = this.rr(t, key); this.setRule(t, key, m, cur.rows); },
+      clearRule: function (t, key) { var o = this.ruleObj(t); if (o) delete o[key]; },
+      setCondField: function (row, id) {
+        var f = this.fieldById(id);
+        if (!f) return;
+        var n = this.newCond(f);
+        Object.keys(row).forEach(function (k) { delete row[k]; });
+        Object.keys(n).forEach(function (k) { row[k] = n[k]; });
+      },
+      setCondOp: function (row, op) {
+        var k = this.driverKind(row);
+        delete row.compareTo; delete row.days;
+        if (k === 'boolean') { row.op = 'equals'; row.value = op !== 'off'; return; }
+        var vals = this.choiceValues(row.field);
+        var o = (RULE_OPS[k] || []).filter(function (x) { return x[0] === op; })[0], shape = o && o[2];
+        row.op = op;
+        if (shape === 'one') row.value = Array.isArray(row.value) ? (row.value[0] || vals[0] || '') : (typeof row.value === 'string' && row.value ? row.value : vals[0] || '');
+        else if (shape === 'many') row.value = Array.isArray(row.value) ? row.value : (row.value ? [row.value] : []);
+        else if (shape === 'text') row.value = typeof row.value === 'string' ? row.value : '';
+        else if (shape === 'number') row.value = typeof row.value === 'number' ? row.value : 0;
+        else if (shape === 'date') { delete row.value; row.compareTo = '@today'; }
+        else if (shape === 'bizdays') { row.value = 2; this.ensureBizHours(); }
+        else delete row.value;
+      },
+      condHas: function (row, v) { return Array.isArray(row.value) && row.value.indexOf(v) > -1; },
+      toggleCondValue: function (row, v) {
+        var a = Array.isArray(row.value) ? row.value.slice() : [], i = a.indexOf(v);
+        if (i > -1) a.splice(i, 1); else a.push(v);
+        row.value = a;
+      },
+      choiceValues: function (id) {
+        var f = this.fieldById(id);
+        return f ? (f.choices || []).map(function (c) { return typeof c === 'string' ? c : c.value; }) : [];
+      },
+      // date fields a date condition can compare with (not itself)
+      dateFields: function (t, key, row) {
+        return this.ruleDrivers(t, key).filter(function (f) { return kindOf(f) === 'date' && f.id !== row.field; });
+      },
+      ensureBizHours: function () {
+        this.doc.form = this.doc.form || {};
+        if (!this.doc.form.businessHours) this.doc.form.businessHours = clone(BIZ_HOURS);
+      },
+
+      /* ---- choice limits (choicesWhen, D10) ---- */
+      cwDrivers: function () {
+        var f = this.curField();
+        if (!f) return [];
+        return driversFor(this.doc, 'field', f.id, 'visibleWhen').filter(function (d) { var k = kindOf(d); return k === 'boolean' || k === 'choice'; });
+      },
+      setCwOn: function (on) {
+        var f = this.curField();
+        if (!f) return;
+        if (!on) { delete f.choicesWhen; return; }
+        var ds = this.cwDrivers();
+        if (!ds.length) { this.note = 'Add an earlier Choice or Yes / No question to limit these choices by.'; return; }
+        this.setCwDriver(ds[ds.length - 1].id);
+      },
+      // a new driver starts with every choice allowed for every answer
+      setCwDriver: function (id) {
+        var f = this.curField(), d = this.fieldById(id);
+        if (!f || !d) return;
+        var all = this.choiceValues(f.id), map = {};
+        this.cwKeys(d).forEach(function (k) { map[k.key] = all.slice(); });
+        f.choicesWhen = { field: id, map: map };
+      },
+      cwKeys: function (d) {
+        if (!d) { var f = this.curField(); d = f && f.choicesWhen && this.fieldById(f.choicesWhen.field); }
+        if (!d) return [];
+        if (kindOf(d) === 'boolean') return [{ key: 'true', label: 'Yes' }, { key: 'false', label: 'No' }];
+        return (d.choices || []).map(function (c) { var v = typeof c === 'string' ? c : c.value; return { key: String(v), label: (c && c.label) || v }; });
+      },
+      cwDriverFill: function () { var f = this.curField(), d = f && f.choicesWhen && this.fieldById(f.choicesWhen.field); return !!(d && d.fillIn); },
+      cwHas: function (key, v) {
+        var cw = this.curField() && this.curField().choicesWhen;
+        var a = !cw ? null : key === '__else' ? cw['else'] : cw.map && cw.map[key];
+        return !!(a && a.indexOf(v) > -1);
+      },
+      cwToggle: function (key, v) {
+        var cw = this.curField().choicesWhen;
+        cw.map = cw.map || {};
+        var a = ((key === '__else' ? cw['else'] : cw.map[key]) || []).slice(), i = a.indexOf(v);
+        if (i > -1) a.splice(i, 1); else a.push(v);
+        var order = this.choiceValues(this.curField().id);
+        a = order.filter(function (x) { return a.indexOf(x) > -1; }); // keep the field's own order
+        if (key === '__else') { if (a.length) cw['else'] = a; else delete cw['else']; } else cw.map[key] = a;
+      },
+      // a choice value changed or went away: keep every rule and limit that
+      // names it in step (this field's own limit, limits keyed on it, rules
+      // on it)
+      choiceValueChanged: function (f, from, to) {
+        var cw = f.choicesWhen;
+        if (cw) {
+          [cw['else']].concat(Object.keys(cw.map || {}).map(function (k) { return cw.map[k]; })).forEach(function (a) {
+            if (!Array.isArray(a)) return;
+            var i = a.indexOf(from);
+            if (i > -1) { if (to == null) a.splice(i, 1); else a[i] = to; }
+          });
+        }
+        var self = this;
+        eachField(this.doc, function (x) {
+          var c = x.choicesWhen;
+          if (c && c.field === f.id && c.map && Object.prototype.hasOwnProperty.call(c.map, from)) {
+            if (to != null) c.map[to] = c.map[from];
+            delete c.map[from];
+          }
+        });
+        refSites(this.doc).forEach(function (s) {
+          if (s.key !== 'field' || s.obj.field !== f.id || !('value' in s.obj)) return;
+          var v = s.obj.value;
+          if (Array.isArray(v)) {
+            var j = v.indexOf(from);
+            if (j > -1) { if (to == null) v.splice(j, 1); else v[j] = to; }
+          } else if (v === from) {
+            if (to == null) self.note = 'A rule on “' + (f.label || f.id) + '” used “' + from + '” — check it.'; else s.obj.value = to;
+          }
+        });
+      },
+      setChoiceValue: function (c, v) {
+        var f = this.curField();
+        v = String(v || '').trim();
+        if (!f || !v || v === c.value) return;
+        if (f.choices.some(function (x) { return x !== c && x.value === v; })) { this.note = '“' + v + '” is already a choice.'; return; }
+        var from = c.value;
+        c.value = v;
+        if (f.default === from) f.default = v;
+        this.choiceValueChanged(f, from, v);
+      },
+
+      /* ---- date rules (B5) ---- */
+      dateRules: function () { var f = this.curField(); return f && Array.isArray(f.rules) ? f.rules : []; },
+      dateRuleKind: function (r) {
+        if (r.op === 'minBusinessDays') return 'biz';
+        if (r.op === 'businessDay') return 'weekday';
+        if (r.compareTo === '@today' && !r.days && (r.op === 'onOrAfter')) return 'past';
+        if (['after', 'onOrAfter', 'before', 'onOrBefore'].indexOf(r.op) > -1 && r.compareTo) return 'cmp';
+        return 'other';
+      },
+      addDateRule: function (kind) {
+        var f = this.curField();
+        if (!f) return;
+        var rules = f.rules = Array.isArray(f.rules) ? f.rules : [];
+        var hasWk = rules.some(function (r) { return r.op === 'businessDay'; });
+        if (kind === 'past') rules.push({ op: 'onOrAfter', compareTo: '@today', mode: 'block' });
+        else if (kind === 'biz') {
+          // D8: a business-day lead time always comes with "weekdays only"
+          this.ensureBizHours();
+          rules.push({ op: 'minBusinessDays', days: 2, mode: 'block' });
+          if (!hasWk) rules.push({ op: 'businessDay', mode: 'block' });
+        } else if (kind === 'weekday') {
+          if (hasWk) return;
+          this.ensureBizHours();
+          rules.push({ op: 'businessDay', mode: 'block' });
+        } else if (kind === 'cmp') {
+          var ds = driversFor(this.doc, 'field', f.id, 'visibleWhen').filter(function (d) { return kindOf(d) === 'date'; });
+          if (!ds.length) { rules.length || delete f.rules; this.note = 'There’s no earlier date to compare with.'; return; }
+          rules.push({ op: 'after', compareTo: ds[ds.length - 1].id, mode: 'block' });
+        }
+      },
+      dropDateRule: function (i) {
+        var f = this.curField(), r = f.rules[i];
+        if (r.op === 'businessDay' && this.weekdayLocked()) { this.note = '“Weekdays only” goes with the business-day lead time — remove that first.'; return; }
+        f.rules.splice(i, 1);
+        if (!f.rules.length) delete f.rules;
+      },
+      weekdayLocked: function () { return this.dateRules().some(function (r) { return r.op === 'minBusinessDays'; }); },
+      earlierDates: function () {
+        var f = this.curField();
+        return f ? driversFor(this.doc, 'field', f.id, 'visibleWhen').filter(function (d) { return kindOf(d) === 'date'; }) : [];
+      },
+      setRuleMsg: function (r, v) { if (v) r.message = v; else delete r.message; },
+
+      /* ---- form settings (B6) ---- */
+      setConfirmOn: function (on) {
+        if (on) this.doc.submitConfirm = { title: 'Send this response?', message: 'It goes straight to the list and can’t be changed here afterwards.', confirm: 'Yes', cancel: 'No' };
+        else delete this.doc.submitConfirm;
+      },
+      setRedirectOn: function (on) {
+        this.doc.confirmation = this.doc.confirmation || {};
+        if (on) this.doc.confirmation.redirect = { url: '', seconds: 5 };
+        else delete this.doc.confirmation.redirect;
+      },
+      listAllowsAttach: function () { var c = this.schema.catalog; return !!(c && this.schema.listId === this.currentListId() && c.list.enableAttachments); },
+      // sections every path reaches: no show-when on them or their page,
+      // and not after a page that can end the form
+      reachableSections: function () {
+        var out = [], endAt = endIndex(this.doc);
+        (this.doc.pages || []).forEach(function (pg, pi) {
+          if (pg.visibleWhen || (endAt > -1 && pi > endAt)) return;
+          (pg.sections || []).forEach(function (sec) {
+            if (!sec.visibleWhen) out.push({ id: sec.id, label: (pg.title || pg.id) + ' › ' + (sec.title || sec.id) });
+          });
+        });
+        return out;
+      },
+      setAttachOn: function (on) {
+        if (!on) { delete this.doc.attachments; return; }
+        if (!this.listAllowsAttach()) { this.note = 'The list has attachments turned off (List settings → Advanced).'; return; }
+        var rs = this.reachableSections();
+        this.doc.attachments = { enabled: true, label: 'Attachments', maxFiles: 5, maxFileSizeMb: 10 };
+        if (rs.length) this.doc.attachments.section = rs[rs.length - 1].id;
+      },
+      acceptText: function () { var a = this.doc.attachments; return a && Array.isArray(a.accept) ? a.accept.join(', ') : ''; },
+      setAccept: function (v) {
+        var list = String(v || '').split(/[\s,;]+/).filter(Boolean).map(function (x) { x = x.toLowerCase(); return x.charAt(0) === '.' ? x : '.' + x; });
+        if (list.length) this.doc.attachments.accept = list; else delete this.doc.attachments.accept;
+      },
+      clampNum: function (obj, key, raw, lo, hi) {
+        var n = Math.round(Number(raw));
+        if (raw === '' || isNaN(n)) { delete obj[key]; return; }
+        obj[key] = Math.max(lo, Math.min(hi, n));
+      },
+
+      /* ---- preview (E9b): the real engine, nothing saved ---- */
+      schedulePreview: function () {
+        var self = this;
+        clearTimeout(timers.pv);
+        timers.pv = setTimeout(function () { self.mountPreview(); }, 400);
+      },
+      mountPreview: function () {
+        var el = this.$root.querySelector('.bfb-preview__stage');
+        if (timers.pvHandle) { timers.pvHandle.destroy(); timers.pvHandle = null; }
+        this.pv.n = 0; this.pv.json = ''; this.pv.errors = [];
+        if (!this.pv.on || !el) return;
+        // the preview is its own Alpine world inside the builder's: an empty
+        // data stack keeps the form's scope from inheriting the builder's,
+        // and the builder's mutation observer leaves the stage alone (the
+        // engine inits its root itself). Not x-ignore: Alpine then refuses
+        // to init anything under it, the engine's root included.
+        el._x_dataStack = [];
+        el._x_ignoreMutationObserver = true;
+        if (!this.currentListId()) { el.innerHTML = '<p class="bfb-preview__empty">Pick a list to preview the form.</p>'; return; }
+        var self = this, h = timers.pvHandle = window.BSPForms.mountConfig(el, serialize(this.doc), { preview: true });
+        h.ready.then(function () { if (timers.pvHandle === h) self.pv.errors = h.errors.slice(); });
+      },
+      togglePreview: function () {
+        this.pv.on = !this.pv.on;
+        if (this.pv.on) { var self = this; this.$nextTick(function () { self.mountPreview(); }); }
+        else if (timers.pvHandle) { timers.pvHandle.destroy(); timers.pvHandle = null; }
+      },
+      // what the preview would have saved (polled: the handle isn't reactive)
+      pollPreview: function () {
+        var h = timers.pvHandle;
+        var n = h ? h.writes.length : 0;
+        if (n === this.pv.n) return;
+        this.pv.n = n;
+        this.pv.json = JSON.stringify(h.writes, null, 2);
+      },
+      pvSaves: function () { var h = timers.pvHandle; return h ? h.writes.filter(function (w) { return w.op === 'addItem'; }).length : 0; },
 
       /* ---- download (B7) ---- */
       // both entry points re-check the document as it is right now — the
@@ -1393,6 +1814,50 @@
   }
   function card(title, iconName, inner, extra) {
     return '<section class="bfb-card"' + (extra || '') + '><h3 class="bfb-card__title">' + icon(iconName, 16) + '<span>' + esc(title) + '</span></h3>' + inner + '</section>';
+  }
+
+  /* the rule editor (B5): t = 'field' | 'section' | 'page', key = the rule
+     property; one level of conditions joined by all / any */
+  function renderRuleEditor(t, key, title, iconName, empty) {
+    var T = esc(jstr(t)), K = esc(jstr(key));
+    var ctx = T + ', ' + K;
+    var h = '<template x-if="!rr(' + ctx + ').editable"><div class="msgbar msgbar--info">' +
+      '<div class="msgbar__body">This rule is more involved than the editor handles (nested groups or “not”), so it’s kept exactly as it is: ' +
+      '<code class="bfb-rulejson" x-text="JSON.stringify(ruleObj(' + T + ')[' + K + '])"></code> ' +
+      '<button type="button" class="btn btn--sm" @click="clearRule(' + ctx + ')">Replace it</button></div></div></template>';
+    h += '<template x-if="rr(' + ctx + ').editable"><div class="bfb-rule">';
+    h += '<p class="bfb-rule__empty" x-show="!rr(' + ctx + ').rows.length">' + esc(empty) + '</p>';
+    h += '<div class="bfb-rule__mode" x-show="rr(' + ctx + ').rows.length > 1">' +
+      seg('rr(' + ctx + ').mode', [['all', 'All of these'], ['any', 'Any of these']], 'setMode(' + ctx + ', $v)') + '</div>';
+    h += '<template x-for="(row, ri) in rr(' + ctx + ').rows" :key="ri"><div class="bfb-cond">';
+    h += '<span class="bfb-cond__lead" x-text="ri === 0 ? \'When\' : (rr(' + ctx + ').mode === \'any\' ? \'or\' : \'and\')"></span>';
+    // driver
+    h += '<select class="select bfb-cond__field" aria-label="Question" @change="setCondField(row, $event.target.value)">' +
+      '<template x-for="d in ruleDrivers(' + ctx + ')" :key="d.id"><option :value="d.id" :selected="d.id === row.field" x-text="fieldName(d)"></option></template>' +
+      '<template x-if="driverLate(' + ctx + ', row)"><option :value="row.field" selected x-text="(fieldById(row.field) ? fieldName(fieldById(row.field)) : row.field) + \' (comes later)\'"></option></template>' +
+      '</select>';
+    // op
+    h += '<select class="select bfb-cond__op" aria-label="Test" @change="setCondOp(row, $event.target.value)">' +
+      '<template x-for="o in opsFor(row)" :key="o[0]"><option :value="o[0]" :selected="o[0] === rowOp(row)" x-text="o[1]"></option></template></select>';
+    // value, by shape
+    h += '<template x-if="opShape(row) === \'one\'"><select class="select bfb-cond__val" aria-label="Value" @change="row.value = $event.target.value">' +
+      '<template x-for="v in choiceValues(row.field)" :key="v"><option :value="v" :selected="v === row.value" x-text="v"></option></template></select></template>';
+    h += '<template x-if="opShape(row) === \'many\'"><span class="bfb-cond__chips">' +
+      '<template x-for="v in choiceValues(row.field)" :key="v"><button type="button" class="chip bfb-chip-toggle" :class="{ \'is-on\': condHas(row, v) }"' +
+      ' :aria-pressed="condHas(row, v) ? \'true\' : \'false\'" @click="toggleCondValue(row, v)" x-text="v"></button></template></span></template>';
+    h += '<template x-if="opShape(row) === \'text\'"><input class="input bfb-cond__val" type="text" aria-label="Value" :value="row.value" @input="row.value = $event.target.value"></template>';
+    h += '<template x-if="opShape(row) === \'number\'"><input class="input bfb-cond__num" type="number" aria-label="Value" :value="row.value" @change="num(row, \'value\', $event.target.value)"></template>';
+    h += '<template x-if="opShape(row) === \'date\'"><span class="bfb-cond__date">' +
+      '<select class="select" aria-label="Compared with" @change="row.compareTo = $event.target.value">' +
+      '<option value="@today" :selected="row.compareTo === \'@today\'">today</option>' +
+      '<template x-for="d in dateFields(' + ctx + ', row)" :key="d.id"><option :value="d.id" :selected="d.id === row.compareTo" x-text="fieldName(d)"></option></template></select>' +
+      '<span>+</span><input class="input bfb-cond__num" type="number" aria-label="Days" :value="row.days || 0" @change="num(row, \'days\', $event.target.value); if (!row.days) delete row.days"><span>days</span></span></template>';
+    h += '<template x-if="opShape(row) === \'bizdays\'"><span class="bfb-cond__date"><input class="input bfb-cond__num" type="number" min="1" aria-label="Business days" :value="row.value" @change="num(row, \'value\', $event.target.value)"><span>business days</span></span></template>';
+    h += '<button type="button" class="icon-btn bfb-cond__drop" aria-label="Remove condition" @click="dropCond(' + ctx + ', ri)">' + icon('dismiss') + '</button>';
+    h += '</div></template>';
+    h += '<button type="button" class="btn btn--sm bfb-rule__add" @click="addCond(' + ctx + ')">' + icon('add') + '<span>Add a condition</span></button>';
+    h += '</div></template>';
+    return card(title, iconName, h);
   }
 
   function renderOutline() {
@@ -1495,6 +1960,49 @@
       fieldRow('Item title', '<input class="input" type="text" x-model="doc.target.titleTemplate" placeholder="{form:title} — {user:name}">' +
         '<div class="bfb-tokens"><template x-for="t in tokens.concat(fieldTokens())" :key="t"><button type="button" class="chip bfb-chip" @click="addToken(t)" x-text="t"></button></template></div>',
         'Fills the list’s Title column when no control saves to it.'));
+    // B6: look, before saving, after saving, attachments
+    h += card('Look', 'star',
+      fieldRow('Frame', seg('(doc.form.appearance && doc.form.appearance.frame || \'card\')', [['card', 'Card'], ['plain', 'Plain']], 'doc.form.appearance = doc.form.appearance || {}; doc.form.appearance.frame = $v')) +
+      fieldRow('Header', seg('(doc.form.appearance && doc.form.appearance.header || \'band\')', [['band', 'Tinted band'], ['plain', 'Plain']], 'doc.form.appearance = doc.form.appearance || {}; doc.form.appearance.header = $v')) +
+      fieldRow('Tint', seg('(doc.form.appearance && doc.form.appearance.tint || \'sky\')', [['sky', 'Sky'], ['blue', 'Blue'], ['neutral', 'Neutral']], 'doc.form.appearance = doc.form.appearance || {}; doc.form.appearance.tint = $v')) +
+      fieldRow('Brand icon', '<input class="input bfb-mono" type="text" placeholder="abacus-icons/digital-form-48.svg" :value="doc.form.appearance && doc.form.appearance.icon || \'\'"' +
+        ' @change="doc.form.appearance = doc.form.appearance || {}; if ($event.target.value.trim()) doc.form.appearance.icon = $event.target.value.trim(); else delete doc.form.appearance.icon">',
+        'A path in the design system (e.g. abacus-icons/…-48.svg), shown at the right of the header.'));
+    h += card('Before saving', 'question',
+      '<div class="bfb-prop">' + sw('Ask “are you sure?” first', '!!doc.submitConfirm', 'setConfirmOn($event.target.checked)') +
+      '<p class="field__hint">A dialog after the form checks out and before anything is saved.</p></div>' +
+      '<template x-if="doc.submitConfirm"><div class="bfb-props__stack">' +
+      fieldRow('Dialog title', '<input class="input" type="text" x-model="doc.submitConfirm.title">') +
+      fieldRow('Message', '<textarea class="textarea" rows="2" x-model="doc.submitConfirm.message"></textarea>') +
+      '<div class="bfb-prop bfb-prop--row"><div class="field"><label class="field__label">Confirm button</label><input class="input" type="text" x-model="doc.submitConfirm.confirm"></div>' +
+      '<div class="field"><label class="field__label">Go-back button</label><input class="input" type="text" x-model="doc.submitConfirm.cancel"></div></div>' +
+      '</div></template>');
+    h += card('After saving', 'checkmark-circle',
+      fieldRow('Success title', '<input class="input" type="text" placeholder="Thank you — your response was submitted." :value="doc.confirmation.title || \'\'" @input="doc.confirmation.title = $event.target.value">') +
+      fieldRow('Success message', '<textarea class="textarea" rows="2" :value="doc.confirmation.message || \'\'" @input="doc.confirmation.message = $event.target.value"></textarea>', '[text](url) makes a link.') +
+      '<div class="bfb-prop">' + sw('Offer “Submit another response”', 'doc.confirmation.allowAnother !== false', 'if ($event.target.checked) doc.confirmation.allowAnother = true; else doc.confirmation.allowAnother = false') + '</div>' +
+      '<div class="bfb-prop">' + sw('Then go to another page', '!!doc.confirmation.redirect', 'setRedirectOn($event.target.checked)') + '</div>' +
+      '<template x-if="doc.confirmation.redirect"><div class="bfb-prop bfb-prop--row">' +
+      '<div class="field" style="flex: 3 1 260px"><label class="field__label">Page address</label><input class="input bfb-mono" type="text" placeholder="/sites/FCUPortal/SitePages/Home.aspx" x-model.trim="doc.confirmation.redirect.url"></div>' +
+      '<div class="field"><label class="field__label">After (seconds)</label><input class="input" type="number" min="0" max="60" :value="doc.confirmation.redirect.seconds" @change="clampNum(doc.confirmation.redirect, \'seconds\', $event.target.value, 0, 60)"></div>' +
+      '</div></template>');
+    h += card('Attachments', 'attach',
+      '<div class="bfb-prop">' + sw('Let people attach files', '!!(doc.attachments && doc.attachments.enabled)', 'setAttachOn($event.target.checked)', '!listAllowsAttach() && !(doc.attachments && doc.attachments.enabled)') +
+      '<p class="field__hint" x-show="!listAllowsAttach()">The list has attachments turned off, or isn’t picked yet.</p>' +
+      '<p class="field__hint" x-show="listAllowsAttach()">Files attach to the saved list item: at most 5, 10 MB each.</p></div>' +
+      '<template x-if="doc.attachments && doc.attachments.enabled"><div class="bfb-props__stack">' +
+      '<div class="bfb-prop bfb-prop--row">' +
+      '<div class="field"><label class="field__label">Max files (1–5)</label><input class="input" type="number" min="1" max="5" :value="doc.attachments.maxFiles" @change="clampNum(doc.attachments, \'maxFiles\', $event.target.value, 1, 5)"></div>' +
+      '<div class="field"><label class="field__label">Max MB each (1–10)</label><input class="input" type="number" min="1" max="10" :value="doc.attachments.maxFileSizeMb" @change="clampNum(doc.attachments, \'maxFileSizeMb\', $event.target.value, 1, 10)"></div>' +
+      '</div>' +
+      '<div class="bfb-prop">' + sw('At least one file is required', '!!doc.attachments.required', 'if ($event.target.checked) doc.attachments.required = true; else delete doc.attachments.required') + '</div>' +
+      fieldRow('Label', '<input class="input" type="text" x-model="doc.attachments.label">') +
+      fieldRow('File types', '<input class="input bfb-mono" type="text" placeholder=".pdf, .docx, .png (empty = any)" :value="acceptText()" @change="setAccept($event.target.value)">') +
+      fieldRow('Shown at the end of', '<select class="select" @change="doc.attachments.section = $event.target.value">' +
+        '<template x-for="s in reachableSections()" :key="s.id"><option :value="s.id" :selected="s.id === doc.attachments.section" x-text="s.label"></option></template>' +
+        '<template x-if="!reachableSections().some(function (s) { return s.id === doc.attachments.section; })"><option value="" selected>— pick a section every path reaches —</option></template>' +
+        '</select>', 'Only sections every answer path reaches are offered.') +
+      '</div></template>');
     // the column catalog
     h += card('List columns', 'grid',
       '<div class="bfb-state" x-show="schema.state===\'none\'">Pick a list to see its columns.</div>' +
@@ -1520,7 +2028,12 @@
       card('Page', 'edit',
         fieldRow('Title', '<input class="input" type="text" x-model="curPage.title">', 'Shown in the step indicator.') +
         fieldRow('Description', '<textarea class="textarea" rows="2" x-model="curPage.description"></textarea>')) +
-      '<p class="bfb-later">' + icon('info') + '<span>Show-when and end-the-form rules come with the rules editor.</span></p>';
+      // branching (E4): the first page always shows
+      '<template x-if="doc.pages[0] && doc.pages[0].id === sel.id">' +
+      card('Show this page when', 'filter', '<p class="bfb-rule__empty">The first page always shows — every path starts here.</p>') + '</template>' +
+      '<template x-if="!(doc.pages[0] && doc.pages[0].id === sel.id)">' +
+      renderRuleEditor('page', 'visibleWhen', 'Show this page when', 'filter', 'Always shown. Add a condition to skip it for some answers — it can use questions on earlier pages.') + '</template>' +
+      renderRuleEditor('page', 'endWhen', 'End the form after this page when', 'checkmark-circle', 'Never — the form goes on to the next page that applies. Add a condition to finish here for some answers.');
   }
   function renderSectionProps() {
     return '<div class="bfb-props__head"><span class="bfb-tile bfb-tile--neutral bfb-tile--lg">' + icon('grid', 20) + '</span>' +
@@ -1536,7 +2049,8 @@
             ' @click="if (' + esc(jstr(n)) + ') curSection.icon = ' + esc(jstr(n)) + '; else delete curSection.icon">' +
             (n ? icon(n, 16) : '<span class="bfb-iconpick__none">—</span>') + '</button>';
         }).join('') + '</div>', 'Shown in a tile beside the heading.') +
-        fieldRow('Background', seg('(curSection.tint || \'\')', [['', 'None'], ['sky', 'Sky'], ['blue', 'Blue'], ['neutral', 'Neutral']], 'if ($v) curSection.tint = $v; else delete curSection.tint')));
+        fieldRow('Background', seg('(curSection.tint || \'\')', [['', 'None'], ['sky', 'Sky'], ['blue', 'Blue'], ['neutral', 'Neutral']], 'if ($v) curSection.tint = $v; else delete curSection.tint'))) +
+      renderRuleEditor('section', 'visibleWhen', 'Show this section when', 'filter', 'Always shown. Add a condition to show it only for some answers.');
   }
 
   function renderFieldProps() {
@@ -1626,7 +2140,7 @@
       '<div class="bfb-choice" :class="{ \'is-off\': !row.on }">' +
       '<template x-if="row.fixed"><label class="check bfb-choice__on"><input type="checkbox" :checked="row.on" @change="toggleChoice(row)"><span class="bfb-sr">Include</span></label></template>' +
       '<span class="bspf-pill bfb-choice__pill" :class="\'bspf-pill--\' + (row.c.color || \'gray\')"><span x-text="row.c.label || row.c.value"></span></span>' +
-      '<template x-if="!row.fixed"><input class="input bfb-choice__value" type="text" :value="row.c.value" aria-label="Value" @change="row.c.value = $event.target.value"></template>' +
+      '<template x-if="!row.fixed"><input class="input bfb-choice__value" type="text" :value="row.c.value" aria-label="Value" @change="setChoiceValue(row.c, $event.target.value); $event.target.value = row.c.value"></template>' +
       '<template x-if="row.on"><input class="input bfb-choice__label" type="text" :value="row.c.label || \'\'" :placeholder="row.fixed ? \'Label (shown)\' : \'Label if different\'" aria-label="Label" @change="setChoiceLabel(row.c, $event.target.value)"></template>' +
       '<template x-if="row.on"><span class="bfb-swatches">' + COLORS.map(function (c) {
         return '<button type="button" class="bspf-dot bspf-dot--' + c + ' bfb-swatch" :class="{ \'is-on\': row.c.color === ' + esc(jstr(c)) + ' }" title="' + c + '" aria-label="' + c + '" @click="row.c.color = ' + esc(jstr(c)) + '"></button>';
@@ -1650,8 +2164,39 @@
       '</div>') + '</template>';
     h += '<template x-if="kindOf(cur)===\'date\'">' + card('Date', 'calendar-ltr',
       '<div class="bfb-prop">' + sw('Include a time', '!!cur.includeTime', 'setOpt(\'includeTime\', $event.target.checked)', 'colDateOnly()') +
-      '<p class="field__hint" x-show="colDateOnly()" x-cloak>The column is date-only.</p></div>' +
-      '<p class="bfb-later">' + icon('info') + '<span>Business-day and date-range rules come with the rules editor.</span></p>') + '</template>';
+      '<p class="field__hint" x-show="colDateOnly()" x-cloak>The column is date-only.</p></div>') + '</template>';
+    // date rules (B5): business days count whole days in Eastern time; a
+    // business-day lead always comes with a blocking "weekdays only" (D8)
+    h += '<template x-if="kindOf(cur)===\'date\'">' + card('Date rules', 'calendar-ltr',
+      '<p class="bfb-rule__empty" x-show="!dateRules().length">Any date is accepted. Add a rule to limit it.</p>' +
+      '<template x-for="(r, ri) in dateRules()" :key="ri"><div class="bfb-daterule">' +
+      '<div class="bfb-daterule__main">' +
+      '<template x-if="dateRuleKind(r)===\'past\'"><strong>Not in the past</strong></template>' +
+      '<template x-if="dateRuleKind(r)===\'biz\'"><span class="bfb-cond__date"><strong>At least</strong>' +
+      '<input class="input bfb-cond__num" type="number" min="1" aria-label="Business days" :value="r.days" @change="clampNum(r, \'days\', $event.target.value, 1, 60)">' +
+      '<strong>business days ahead</strong></span></template>' +
+      '<template x-if="dateRuleKind(r)===\'weekday\'"><strong>Weekdays only <span class="bfb-flag" x-show="weekdayLocked()">with the business-day rule</span></strong></template>' +
+      '<template x-if="dateRuleKind(r)===\'cmp\'"><span class="bfb-cond__date">' +
+      '<select class="select" aria-label="Comparison" @change="r.op = $event.target.value">' +
+      [['after', 'After'], ['onOrAfter', 'On or after'], ['before', 'Before'], ['onOrBefore', 'On or before']].map(function (o) {
+        return '<option value="' + o[0] + '" :selected="r.op===' + esc(jstr(o[0])) + '">' + o[1] + '</option>';
+      }).join('') + '</select>' +
+      '<select class="select" aria-label="Other date" @change="r.compareTo = $event.target.value">' +
+      '<template x-for="d in earlierDates()" :key="d.id"><option :value="d.id" :selected="d.id === r.compareTo" x-text="fieldName(d)"></option></template></select>' +
+      '<span>+</span><input class="input bfb-cond__num" type="number" aria-label="Days" :value="r.days || 0" @change="num(r, \'days\', $event.target.value); if (!r.days) delete r.days"><span>days</span></span></template>' +
+      '<template x-if="dateRuleKind(r)===\'other\'"><code class="bfb-rulejson" x-text="JSON.stringify(r)"></code></template>' +
+      '<span class="bfb-daterule__spacer"></span>' +
+      '<template x-if="dateRuleKind(r)!==\'weekday\' && dateRuleKind(r)!==\'other\'">' +
+      seg('(r.mode || \'block\')', [['block', 'Block'], ['warn', 'Warn']], 'r.mode = $v') + '</template>' +
+      '<button type="button" class="icon-btn" aria-label="Remove rule" @click="dropDateRule(ri)">' + icon('dismiss') + '</button></div>' +
+      '<input class="input bfb-daterule__msg" type="text" placeholder="Message (optional — a default is shown)" :value="r.message || \'\'" @change="setRuleMsg(r, $event.target.value)">' +
+      '</div></template>' +
+      '<div class="bfb-daterule__add">' +
+      '<button type="button" class="btn btn--sm" @click="addDateRule(\'past\')">' + icon('add') + '<span>Not in the past</span></button>' +
+      '<button type="button" class="btn btn--sm" @click="addDateRule(\'biz\')">' + icon('add') + '<span>Business days ahead</span></button>' +
+      '<button type="button" class="btn btn--sm" @click="addDateRule(\'weekday\')">' + icon('add') + '<span>Weekdays only</span></button>' +
+      '<button type="button" class="btn btn--sm" @click="addDateRule(\'cmp\')">' + icon('add') + '<span>Compare with another date</span></button></div>' +
+      '<p class="field__hint">Business days count whole days in Eastern time, Monday to Friday; holidays aren’t known. “Block” stops the form; “Warn” shows a note.</p>') + '</template>';
     h += '<template x-if="kindOf(cur)===\'person\'">' + card('Person', 'person',
       '<div class="bfb-prop">' + sw('Start with the person filling it in', 'cur.default===\'@me\'', 'setMe($event.target.checked)') +
       '<p class="field__hint">Still editable — for requests made on someone’s behalf.</p></div>' +
@@ -1665,6 +2210,9 @@
       '<p class="field__hint" x-show="cur.type!==\'link\'">Saved as text and checked as a web address (the column is single line of text).</p>' +
       fieldRow('Example text', '<input class="input" type="text" x-model="cur.placeholder">')) + '</template>';
 
+    // choice limit, then show-when for every control
+    h += '<template x-if="kindOf(cur)===\'choice\' || kindOf(cur)===\'multichoice\'">' + renderChoiceLimit() + '</template>';
+    h += renderRuleEditor('field', 'visibleWhen', 'Show this control when', 'filter', 'Always shown. Add a condition to show it only for some answers — a hidden control isn’t checked or saved.');
     // id + references
     h += card('Id', 'settings',
       fieldRow('Control id', '<input class="input bfb-mono" type="text" x-model="idDraft" @change="commitId()" @keydown.enter.prevent="commitId()" spellcheck="false">',
@@ -1672,13 +2220,35 @@
       '<p class="field__error" x-show="idErr" x-text="idErr" x-cloak></p>' +
       '<div class="bfb-refs" x-show="refsHere().length" x-cloak><span class="bfb-eyebrow">Used by</span>' +
       '<template x-for="r in refsHere()" :key="r"><span class="bfb-flag" x-text="r"></span></template></div>');
-    h += '<p class="bfb-later">' + icon('info') + '<span>Show-when rules and choice limits come with the rules editor.</span></p>';
     h += '</div></template>';
     return h;
   }
+  // the choice limit (choicesWhen, D10): one earlier choice / yes-no drives
+  // which of this control's choices show
+  function renderChoiceLimit() {
+    return card('Limit the choices', 'filter',
+      '<div class="bfb-prop">' + sw('Depends on an earlier answer', '!!cur.choicesWhen', 'setCwOn($event.target.checked)') +
+      '<p class="field__hint">Pick which choices show for each answer to an earlier Choice or Yes / No question. Picks that stop fitting are removed.</p></div>' +
+      '<template x-if="cur.choicesWhen"><div class="bfb-cw">' +
+      fieldRow('Depends on', '<select class="select" @change="setCwDriver($event.target.value)">' +
+        '<template x-for="d in cwDrivers()" :key="d.id"><option :value="d.id" :selected="d.id === cur.choicesWhen.field" x-text="fieldName(d)"></option></template>' +
+        '<template x-if="!cwDrivers().some(function (d) { return d.id === cur.choicesWhen.field; })"><option :value="cur.choicesWhen.field" selected x-text="cur.choicesWhen.field + \' (not an earlier choice)\'"></option></template>' +
+        '</select>', 'Changing it starts the table over with every choice allowed.') +
+      '<div class="bfb-cw__table" role="table">' +
+      '<div class="bfb-cw__row bfb-cw__head" role="row"><span role="columnheader">When the answer is</span><span role="columnheader">These choices show</span></div>' +
+      '<template x-for="k in cwKeys()" :key="k.key"><div class="bfb-cw__row" role="row">' +
+      '<span class="bfb-cw__key" role="cell" x-text="k.label"></span>' +
+      '<span class="bfb-cond__chips" role="cell"><template x-for="v in choiceValues(cur.id)" :key="v"><button type="button" class="chip bfb-chip-toggle" :class="{ \'is-on\': cwHas(k.key, v) }"' +
+      ' :aria-pressed="cwHas(k.key, v) ? \'true\' : \'false\'" @click="cwToggle(k.key, v)" x-text="v"></button></template>' +
+      '<span class="bfb-cw__none" x-show="!choiceValues(cur.id).some(function (v) { return cwHas(k.key, v); })">none — the control hides</span></span></div></template>' +
+      '<template x-if="cwDriverFill()"><div class="bfb-cw__row" role="row"><span class="bfb-cw__key" role="cell">Anything typed in “Other”</span>' +
+      '<span class="bfb-cond__chips" role="cell"><template x-for="v in choiceValues(cur.id)" :key="v"><button type="button" class="chip bfb-chip-toggle" :class="{ \'is-on\': cwHas(\'__else\', v) }"' +
+      ' @click="cwToggle(\'__else\', v)" x-text="v"></button></template></span></div></template>' +
+      '</div></div></template>');
+  }
 
   function renderBuilder() {
-    var h = '<div class="bfb" x-data="bspFormsBuilder()" :class="{ \'bfb--full\': full }" @keydown.window="keys($event)">';
+    var h = '<div class="bfb" x-data="bspFormsBuilder()" :class="{ \'bfb--full\': full, \'bfb--pv\': pv.on }" @keydown.window="keys($event)">';
     // header band
     h += '<header class="bfb-bar">' +
       '<div class="bfb-bar__brand"><span class="bfb-tile bfb-tile--blue bfb-tile--lg">' + icon('edit', 20) + '</span>' +
@@ -1692,6 +2262,7 @@
       '<button type="button" class="bfb-issuesbtn" @click="showIssues = !showIssues" :class="{ \'is-bad\': nErr, \'is-warn\': !nErr && nWarn, \'is-ok\': !nErr && !nWarn }" :aria-expanded="showIssues ? \'true\' : \'false\'">' +
       '<span class="bfb-issuesbtn__dot"></span><span x-text="nErr ? nErr + (nErr === 1 ? \' problem\' : \' problems\') : (nWarn ? nWarn + (nWarn === 1 ? \' warning\' : \' warnings\') : \'Ready\')"></span></button>' +
       '<button type="button" class="btn btn--subtle btn--sm" @click="newForm()">New</button>' +
+      '<button type="button" class="btn btn--sm bfb-pvtoggle" :class="{ \'is-on\': pv.on }" :aria-pressed="pv.on ? \'true\' : \'false\'" @click="togglePreview()">' + icon('play') + '<span>Preview</span></button>' +
       '<button type="button" class="icon-btn" :title="full ? \'Exit full screen\' : \'Full screen\'" :aria-label="full ? \'Exit full screen\' : \'Full screen\'" @click="full = !full">' + icon('full-screen-maximize') + '</button>' +
       '<button type="button" class="btn btn--primary" @click="openDownload()" :disabled="nErr > 0" :title="nErr ? \'Fix the problems first\' : \'\'">' + icon('arrow-down') + '<span>Download</span></button>' +
       '</header>';
@@ -1719,7 +2290,21 @@
     h += '<template x-if="sel.t===\'page\' && loc(\'page\', sel.id)"><div class="bfb-props__in">' + renderPageProps() + '</div></template>';
     h += '<template x-if="sel.t===\'section\' && loc(\'section\', sel.id)"><div class="bfb-props__in">' + renderSectionProps() + '</div></template>';
     h += '<template x-if="sel.t===\'field\' && curField()"><div class="bfb-props__in">' + renderFieldProps() + '</div></template>';
-    h += '</main></div>';
+    h += '</main>';
+    // the preview: the real engine (BSPForms.mountConfig, preview mode) —
+    // people search and lookups are live, nothing is saved, no redirect runs
+    h += '<section class="bfb-preview" x-show="pv.on" x-cloak aria-label="Preview">' +
+      '<div class="bfb-preview__bar"><span class="bfb-eyebrow">Preview</span><span class="bfb-flag">nothing is saved</span>' +
+      '<span class="bfb-bar__spacer"></span>' +
+      seg('(pv.payload ? \'saved\' : \'form\')', [['form', 'Form'], ['saved', 'What would be saved']], 'pv.payload = $v === \'saved\'') +
+      '<button type="button" class="btn btn--sm btn--subtle" @click="mountPreview()">Start over</button></div>' +
+      '<div class="msgbar msgbar--warning bfb-preview__err" x-show="pv.errors.length" x-cloak><div class="msgbar__body">The engine won’t load this config yet — see the problems list.</div></div>' +
+      '<div class="bfb-preview__wrap" x-show="!pv.payload"><div class="bfb-preview__stage"></div></div>' +
+      '<div class="bfb-preview__payload" x-show="pv.payload" x-cloak>' +
+      '<p class="bfb-rule__empty" x-show="!pv.n">Submit the preview form to see exactly what it would send to SharePoint (people get stand-in ids; nothing is written).</p>' +
+      '<pre class="bfb-pre" x-show="pv.n" x-text="pv.json"></pre></div>' +
+      '</section>';
+    h += '</div>';
 
     // list picker dialog
     h += '<div class="scrim bfb-dialog bfb-pick" x-show="pick.open" x-cloak @keydown.escape="pick.open=false" @click.self="pick.open=false">' +
