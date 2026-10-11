@@ -256,6 +256,15 @@ contract. Read both before changing behavior.
   text, `{date}`/`{time}`/`{now}`, `{form:title}` only with a title.
   `{user:*}`/`{field:*}` can render empty, and the engine then leaves the
   write out (REST doesn't enforce Required).
+- **The builder's preview is an Alpine world inside another.** Never put
+  `x-ignore` on the stage: Alpine's `initTree` refuses anything with an
+  ignored ancestor, so the engine's root would never init (every `x-show`
+  dead). The stage instead gets an empty `_x_dataStack` (the form's scope
+  can't inherit the builder's) and `_x_ignoreMutationObserver` (the builder
+  doesn't init the engine's root; the engine does). `mountConfig({ preview })`
+  simulates every write (ensureUser included: it runs on each person pick),
+  `startRedirect` only describes the redirect, and a capture click guard
+  stops same-tab links.
 - **`BSPForms.lists()` is read-only by construction** — a facade exposing
   four methods over `makeAdapter({ target: {} })`. The builder must never get
   the full adapter (it has `addItem`, `ensureUser`).

@@ -60,6 +60,10 @@ const fieldOf = (page, id) => ev(page, (s, id) => { const l = s.loc('field', id)
 const issuesOf = page => ev(page, s => { s.recheck(); return JSON.parse(JSON.stringify(s.issues)); });
 const settle = (page, ms) => page.waitForTimeout(ms == null ? 420 : ms); // > the 300 ms change debounce
 
+// ENGINE_JS=<file>: serve another engine build (same idea as BUILDER_JS)
+async function engineOverride(page) {
+  if (process.env.ENGINE_JS) await page.route('**/bsp-forms/bsp-forms.js*', r => r.fulfill({ contentType: 'text/javascript', body: fs.readFileSync(process.env.ENGINE_JS, 'utf8') }));
+}
 async function openBuilder(browser, opts) {
   opts = opts || {};
   const ctx = opts.ctx || await browser.newContext({ viewport: { width: 1400, height: 1100 }, acceptDownloads: true });
@@ -75,6 +79,7 @@ async function openBuilder(browser, opts) {
   // BUILDER_JS=<file>: serve another builder build (e.g. an older commit's) to
   // check the suite still catches what it should
   if (process.env.BUILDER_JS) await page.route('**/builder/bsp-forms-builder.js*', r => r.fulfill({ contentType: 'text/javascript', body: fs.readFileSync(process.env.BUILDER_JS, 'utf8') }));
+  await engineOverride(page);
   await gotoBuilder(page, opts.fresh !== false);
   return { ctx, page };
 }
@@ -2079,7 +2084,8 @@ async function testChoiceLimitsDatesSettings(browser) {
   await vi.dispatchEvent('change');
   await page.waitForTimeout(100);
   let lv = await fieldOf(page, 'level'), rl = await fieldOf(page, 'ruled');
-  check('rename "Option 1" → "Alpha" on the driver: maps keyed on it follow', same(Object.keys(lv.choicesWhen.map), ['Option 2', 'Alpha']) &&
+  // the renamed key keeps its place (mapWith), matching the driver's choice order
+  check('rename "Option 1" → "Alpha" on the driver: maps keyed on it follow', same(Object.keys(lv.choicesWhen.map), ['Alpha', 'Option 2']) &&
     same(lv.choicesWhen.map.Alpha, ['Low', 'Medium', 'High']), lv.choicesWhen.map);
   check('…rule values naming it follow (in-array and equals)', same(rl.visibleWhen.all[0].value, ['Alpha', 'Option 2']) && rl.visibleWhen.all[1].value === 'Alpha', rl.visibleWhen);
   // rename a free-list value on the limited control itself
@@ -2099,7 +2105,7 @@ async function testChoiceLimitsDatesSettings(browser) {
   await selectNode(page, 'field', 'level');
   await page.evaluate(() => [...document.querySelectorAll('.bfb-props .bfb-choice')].find(r => /High/.test(r.textContent)).querySelector('input[type=checkbox]').click());
   await page.waitForTimeout(100);
-  check('unticking "High" prunes it from the limit\'s arrays', same((await fieldOf(page, 'level')).choicesWhen.map, { 'Option 2': ['Low', 'Medium'], Alpha: ['Low', 'Medium'] }), (await fieldOf(page, 'level')).choicesWhen.map);
+  check('unticking "High" prunes it from the limit\'s arrays', same((await fieldOf(page, 'level')).choicesWhen.map, { Alpha: ['Low', 'Medium'], 'Option 2': ['Low', 'Medium'] }), (await fieldOf(page, 'level')).choicesWhen.map);
   await selectNode(page, 'field', 'kind');
   await page.evaluate(() => [...document.querySelectorAll('.bfb-props .bfb-choice')][1].querySelector('[aria-label="Remove"]').click());
   await page.waitForTimeout(100);
@@ -2242,7 +2248,7 @@ async function testChoiceLimitsDatesSettings(browser) {
   check('…empty URL → error', has(iss, /The redirect after submit needs a web address/, 'error'), issueLine(iss));
   const url = propInput(page, 'Page address');
   const secs = page.locator('.bfb-props .field').filter({ has: page.locator('label.field__label', { hasText: /^After \(seconds\)$/ }) }).locator('input');
-  for (const [u, ok] of [['/sites/FCUPortal/SitePages/Home.aspx', true], ['https://ok.example/x?y=1', true], ['javascript:x', false], ['//evil.example/x', false], ['http://', false], ['{var:next}', true]]) {
+  for (const [u, ok] of [['/sites/FCUPortal/SitePages/Home.aspx', true], ['https://ok.example/x?y=1', true], ['javascript:x', false], ['//evil.example/x', false], ['http://', false]]) {
     await url.fill(u);
     await page.waitForTimeout(40);
     iss = await issuesOf(page);
@@ -2446,10 +2452,243 @@ async function testPreview(browser) {
   await ctx.close();
 }
 
+/* ------------------------------------------------------------------
+   Codex review fixes (xo turn 12)
+   ------------------------------------------------------------------ */
+// a valid base: list picked, item title, the required column mapped
+async function validBase(page) {
+  await pickList(page, 'BSPF Builder Test');
+  await ev(page, s => { s.doc.form.title = 'Xo 12'; s.doc.target.titleTemplate = '{form:title}'; });
+  await addCtl(page, 'section1', 'text', 'req', { label: 'Request', col: 'TxtReq' });
+}
+async function testXo12(browser) {
+  console.log('xo 12 · 1. preview links never navigate:');
+  let { ctx, page } = await openBuilder(browser);
+  let popups = 0;
+  ctx.on('page', () => { popups++; });
+  await ctx.route('https://example.com/**', r => r.fulfill({ contentType: 'text/html', body: '<title>ext</title>ext' }));
+  await validBase(page);
+  await ev(page, s => { s.doc.form.intro = 'Read [the docs](https://example.com/docs) or [jump](#top).'; });
+  await page.waitForFunction(() => !!document.querySelector('.bfb-preview__stage a[target="_blank"]'), null, { timeout: 4000 }).catch(() => {});
+  await pvReady(page);
+  const ext = PV + ' a[target="_blank"]', same1 = PV + ' a[href="#top"]';
+  check('(the preview intro has a new-tab link and a same-tab link)', await page.locator(ext).count() === 1 && await page.locator(same1).count() === 1);
+  const prevented = await page.evaluate(({ ext, same1 }) => {
+    const fire = (sel, type, button) => { const e = new MouseEvent(type, { bubbles: true, cancelable: true, button }); document.querySelector(sel).dispatchEvent(e); return e.defaultPrevented; };
+    return { blankClick: fire(ext, 'click', 0), blankAux: fire(ext, 'auxclick', 1), sameClick: fire(same1, 'click', 0), sameAux: fire(same1, 'auxclick', 1) };
+  }, { ext, same1 });
+  check('the guard prevents click AND auxclick on new-tab and same-tab links', prevented.blankClick && prevented.blankAux && prevented.sameClick && prevented.sameAux, prevented);
+  const url0 = page.url();
+  await page.click(ext);
+  await page.waitForTimeout(600);
+  check('a real click on the target="_blank" link opens no page', popups === 0 && page.url() === url0, { popups, url: page.url() });
+  await page.click(ext, { button: 'middle' });
+  await page.waitForTimeout(600);
+  check('a middle click on it opens no page', popups === 0, popups);
+  await page.click(same1);
+  await page.click(same1, { button: 'middle' });
+  await page.waitForTimeout(400);
+  check('same-tab link: click and middle click do nothing', popups === 0 && page.url() === url0, { popups, url: page.url() });
+  await ctx.close();
+
+  console.log('xo 12 · 2. a stale scalar choice in a rule:');
+  ({ ctx, page } = await openBuilder(browser));
+  await validBase(page);
+  await addCtl(page, 'section1', 'choice', 'kind', { logic: true });
+  await addCtl(page, 'section1', 'text', 'tgt', { logic: true, extra: { visibleWhen: { field: 'kind', op: 'in', value: ['Option 1', 'Option 2'] } } });
+  await ev(page, s => s.addPage());
+  const p2 = await ev(page, s => s.sel.id);
+  await ev(page, (s, p) => { s.loc('page', p).pg.visibleWhen = { field: 'kind', op: 'equals', value: 'Option 2' }; }, p2);
+  await settle(page);
+  check('baseline: 0 errors', (await ev(page, s => s.nErr)) === 0, issueLine(await issuesOf(page)));
+  await selectNode(page, 'field', 'kind');
+  await page.evaluate(() => [...document.querySelectorAll('.bfb-props .bfb-choice')][1].querySelector('[aria-label="Remove"]').click());
+  await settle(page);
+  await selectNode(page, 'form'); // the note goes; the problem must stay
+  let iss = await issuesOf(page);
+  const STALE = new RegExp('page “' + p2 + '” show-when compares “kind” with “Option 2”, which isn’t one of its choices — so it can never be true');
+  check('deleting "Option 2" → a persistent ERROR naming it ("…can never be true")', has(iss, STALE, 'error'), issueLine(iss));
+  check('…Download blocked', await downloadDisabled(page) && (await ev(page, s => { s.openDownload(); return !s.dl.open; })));
+  await ev(page, s => { s.showIssues = false; });
+  check('…array values are still pruned (in → [Option 1])', same((await fieldOf(page, 'tgt')).visibleWhen.value, ['Option 1']));
+  await ev(page, s => { s.loc('field', 'kind').f.fillIn = true; });
+  iss = await issuesOf(page);
+  check('with fillIn on the driver → a WARNING instead ("only a typed “Other” could match")', iss.some(i => i.level === 'warn' && /compares “kind” with “Option 2”.*only a typed “Other” could match/.test(i.msg)) &&
+    !has(iss, STALE, 'error'), issueLine(iss));
+  await ctx.close();
+
+  console.log('xo 12 · 4. builder teardown:');
+  ({ ctx, page } = await openBuilder(browser));
+  await validBase(page);
+  await settle(page, 1200);
+  await page.evaluate(() => {
+    window.__spy = { set: 0, mount: 0 };
+    const set = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k) { if (/bspf-builder-draft/.test(k)) window.__spy.set++; return set.apply(this, arguments); };
+    const mc = BSPForms.mountConfig;
+    BSPForms.mountConfig = function () { window.__spy.mount++; return mc.apply(BSPForms, arguments); };
+  });
+  await ev(page, s => { s.doc.form.title = 'Edited just before teardown'; });
+  await page.waitForTimeout(60); // the watcher has fired; flush + preview are pending
+  await page.evaluate(() => { const r = document.querySelector('.bfb'); Alpine.destroyTree(r); r.remove(); });
+  await page.waitForTimeout(1500);
+  const spy = await page.evaluate(() => window.__spy);
+  check('destroyTree right after an edit → no draft write, no preview mount afterwards', spy.set === 0 && spy.mount === 0, spy);
+  check('…no errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+
+  console.log('xo 12 · 5. reorder vs date comparisons:');
+  ({ ctx, page } = await openBuilder(browser));
+  await validBase(page);
+  await addCtl(page, 'section1', 'date', 'start', { logic: true });
+  await addCtl(page, 'section1', 'date', 'end', { logic: true, extra: { rules: [{ op: 'after', compareTo: 'start', mode: 'block' }] } });
+  iss = await issuesOf(page);
+  check('baseline: no "comes after it" warning', !iss.some(i => /comes after it/.test(i.msg)), issueLine(iss));
+  await move(page, 'field', 'start', 1);
+  iss = await issuesOf(page);
+  check('moving the compared date after it → "…compared with “start”, which comes after it — move that date earlier"', iss.some(i => i.level === 'warn' && i.sel.id === 'end' &&
+    /is compared with “start”, which comes after it — move that date earlier/.test(i.msg)), issueLine(iss));
+  await move(page, 'field', 'start', -1);
+  await addCtl(page, 'section1', 'text', 'shown', { logic: true });
+  await addCtl(page, 'section1', 'date', 'late', { logic: true });
+  await ev(page, s => { s.loc('field', 'shown').f.visibleWhen = { field: 'start', op: 'after', compareTo: 'late' }; });
+  iss = await issuesOf(page);
+  check('a show-when comparing an earlier date with a LATER date\'s value → "comes after it" warning', iss.some(i => i.level === 'warn' && i.sel.id === 'shown' && /depending on “late”, which comes after it/.test(i.msg)), issueLine(iss));
+  await ctx.close();
+
+  console.log('xo 12 · 6. "__proto__" as a choice value:');
+  ({ ctx, page } = await openBuilder(browser));
+  await validBase(page);
+  await addCtl(page, 'section1', 'choice', 'kind', { logic: true });
+  await selectNode(page, 'field', 'kind');
+  let vi = page.locator('.bfb-props .bfb-choice input.bfb-choice__value').nth(1);
+  await vi.fill('__proto__');
+  await vi.dispatchEvent('change');
+  await page.waitForTimeout(80);
+  check('a driver choice renamed to "__proto__"', same((await fieldOf(page, 'kind')).choices.map(c => c.value), ['Option 1', '__proto__']));
+  await addCtl(page, 'section1', 'choice', 'dep', { logic: true });
+  vi = page.locator('.bfb-props .bfb-choice input.bfb-choice__value').nth(0);
+  await vi.fill('__proto__');
+  await vi.dispatchEvent('change');
+  await page.waitForTimeout(80);
+  await ev(page, s => { s.setCwOn(true); s.setCwDriver('kind'); });
+  let own = await ev(page, s => { const m = s.loc('field', 'dep').f.choicesWhen.map; return { own: Object.prototype.hasOwnProperty.call(m, '__proto__'), arr: Array.isArray(m['__proto__']) ? m['__proto__'].slice() : null, keys: Object.keys(m) }; });
+  check('choice limit: "__proto__" is an OWN map key holding every choice (incl. the value "__proto__")', own.own && same(own.arr, ['__proto__', 'Option 2']) && same(own.keys, ['Option 1', '__proto__']), own);
+  let c = await cardSel(page, 'Limit the choices');
+  const rowKeys = await page.evaluate(c => [...document.querySelectorAll(c + ' .bfb-cw__row:not(.bfb-cw__head) .bfb-cw__key')].map(e => e.textContent), c);
+  check('…its row renders', same(rowKeys, ['Option 1', '__proto__']), rowKeys);
+  await settle(page);
+  const np0 = await ev(page, s => s.nPast);
+  await page.evaluate(c => { const row = [...document.querySelectorAll(c + ' .bfb-cw__row:not(.bfb-cw__head)')][1]; [...row.querySelectorAll('.bfb-chip-toggle')].find(b => b.textContent === 'Option 2').click(); }, c);
+  await page.waitForTimeout(80);
+  own = await ev(page, s => { const m = s.loc('field', 'dep').f.choicesWhen.map; return { own: Object.prototype.hasOwnProperty.call(m, '__proto__'), arr: m['__proto__'] && m['__proto__'].slice(), proto: Object.getPrototypeOf(m) === Object.prototype }; });
+  check('…toggling a chip in that row edits it (map.__proto__ = ["__proto__"]), prototype untouched', own.own && same(own.arr, ['__proto__']) && own.proto, own);
+  const chipState = () => page.evaluate(c => { const row = [...document.querySelectorAll(c + ' .bfb-cw__row:not(.bfb-cw__head)')][1]; return [...row.querySelectorAll('.bfb-chip-toggle')].map(b => b.classList.contains('is-on')).join(); }, c);
+  const cs1 = await chipState();
+  await page.waitForTimeout(600);
+  const cs2 = await chipState();
+  // BUG (report): put() writes "__proto__" with defineProperty, which skips
+  // the reactive proxy's trigger, so the row keeps showing the old chips
+  check('fixed: …the "__proto__" row\'s chips re-render after the toggle (is-on: __proto__ yes, Option 2 no)', cs1 === 'true,false' && cs2 === 'true,false', [cs1, cs2]);
+  const hist = await page.evaluate(() => { try { const d = JSON.parse(localStorage.getItem('bspf-builder-draft:' + location.pathname)); const f = d.doc.pages[0].sections[0].fields.find(x => x.id === 'dep'); return JSON.stringify(f.choicesWhen.map); } catch (e) { return 'n/a'; } });
+  const np1 = await ev(page, s => s.nPast);
+  check('fixed: …the toggle reaches undo history and the autosaved draft', np1 === np0 + 1 && /"__proto__":\["__proto__"\]/.test(hist), { np0, np1, draftMap: hist });
+  await selectNode(page, 'form');
+  await selectNode(page, 'field', 'dep');
+  c = await cardSel(page, 'Limit the choices');
+  const cs3 = await chipState();
+  check('…after re-selecting the control the row reads right (the data is right)', cs3 === 'true,false', cs3);
+  await settle(page);
+  const txt = await ev(page, s => s.jsonText());
+  check('the JSON text has "__proto__" as a map key', /"map": \{\s*"Option 1": \[[^\]]*\],\s*"__proto__": \[\s*"__proto__"\s*\]/.test(txt), (txt.match(/"choicesWhen"[\s\S]{0,200}/) || [])[0]);
+  const cfg6 = JSON.parse(txt);
+  check('…parsed: an own key; BSPForms.normalize accepts it', Object.prototype.hasOwnProperty.call(cfg6.pages[0].sections[0].fields[2].choicesWhen.map, '__proto__') &&
+    (await page.evaluate(c => BSPForms.normalize(c).errors, cfg6)).length === 0, await page.evaluate(c => BSPForms.normalize(c).errors, cfg6));
+  check('…0 builder errors', (await ev(page, s => s.nErr)) === 0, issueLine((await issuesOf(page)).filter(i => i.level === 'error')));
+  await ctx.close();
+  {
+    const ectx = await browser.newContext({ viewport: { width: 1100, height: 1400 } });
+    const ep = await ectx.newPage();
+    const errs = [];
+    ep.on('pageerror', e => errs.push(e.message));
+    await engineOverride(ep);
+    await ep.route('**/forms/example-it-request.json', rt => rt.fulfill({ contentType: 'application/json', body: txt }));
+    await ep.goto(ENGINE);
+    await ep.waitForFunction(() => { const m = document.querySelector('[data-bsp-form]'); return m && /ready|error/.test(m.getAttribute('data-bspf-state') || ''); }, null, { timeout: 8000 });
+    await ep.waitForTimeout(250);
+    check('engine loads it', (await ep.getAttribute('[data-bsp-form]', 'data-bspf-state')) === 'ready');
+    const e6 = await ep.evaluate(() => new Promise(res => {
+      const s = document.querySelector('.bspf')._x_dataStack[0];
+      s.values.kind = '__proto__';
+      setTimeout(() => {
+        const f = document.querySelector('[data-bspf-field="dep"]');
+        res({ vis: s.vis('dep'), allowed: s.allowed('dep').slice(), shown: !!f && getComputedStyle(f).display !== 'none' });
+      }, 200);
+    }));
+    check('engine: choosing "__proto__" shows the mapped choice (["__proto__"]), not hidden', e6.vis && e6.shown && same(e6.allowed, ['__proto__']), e6);
+    const e6b = await ep.evaluate(() => new Promise(res => {
+      const s = document.querySelector('.bspf')._x_dataStack[0];
+      s.values.kind = 'Option 1';
+      setTimeout(() => res(s.allowed('dep').slice()), 150);
+    }));
+    check('…and "Option 1" shows its own list', same(e6b, ['__proto__', 'Option 2']), e6b);
+    check('no engine page errors', errs.length === 0, errs.join(' | '));
+    await ectx.close();
+  }
+
+  console.log('xo 12 · 7. redirect {var:…}:');
+  ({ ctx, page } = await openBuilder(browser));
+  await validBase(page);
+  await ev(page, s => { s.setRedirectOn(true); s.doc.confirmation.redirect.url = '{var:next}'; });
+  iss = await issuesOf(page);
+  check('{var:next} with no form.vars.next → error naming it', has(iss, /The redirect uses \{var:next\}, which the form doesn’t define/, 'error'), issueLine(iss));
+  await ev(page, s => { s.doc.form.vars = { next: '/sites/x/Home.aspx' }; });
+  iss = await issuesOf(page);
+  check('…with form.vars.next = "/sites/x/Home.aspx" → OK', !iss.some(i => /redirect/i.test(i.msg)) && (await ev(page, s => s.nErr)) === 0, issueLine(iss));
+  await ev(page, s => { s.doc.confirmation.redirect.url = 'javascript:{var:next}'; });
+  iss = await issuesOf(page);
+  check('"javascript:{var:next}" → error (the resolved value isn\'t https or /…)', has(iss, /The redirect after submit needs a web address/, 'error'), issueLine(iss));
+  await ev(page, s => { s.doc.form.vars.next = 'javascript:alert(1)'; s.doc.confirmation.redirect.url = '{var:next}'; });
+  iss = await issuesOf(page);
+  check('a var that resolves to javascript: → error', has(iss, /The redirect after submit needs a web address/, 'error'), issueLine(iss));
+  await ev(page, s => { s.doc.confirmation.redirect.url = '/x/{field:req}'; });
+  iss = await issuesOf(page);
+  check('an unknown token ({field:req}) → WARNING "can’t check"', iss.some(i => i.level === 'warn' && /token the builder can’t check/.test(i.msg)) && !has(iss, /redirect/, 'error'), issueLine(iss));
+  await ctx.close();
+
+  console.log('xo 12 · 8. imported rules with ops the editor doesn\'t offer:');
+  ({ ctx, page } = await openBuilder(browser));
+  await validBase(page);
+  await addCtl(page, 'section1', 'boolean', 'yn', { logic: true });
+  await addCtl(page, 'section1', 'choice', 'kind', { logic: true });
+  await addCtl(page, 'section1', 'text', 'tgt', { logic: true });
+  const ro = async rule => {
+    await ev(page, (s, r) => { s.loc('field', 'tgt').f.visibleWhen = r; s.select('field', 'tgt'); }, rule);
+    await page.waitForTimeout(120);
+    const cs = await cardSel(page, 'Show this control when');
+    return page.evaluate(cs => ({ conds: document.querySelectorAll(cs + ' .bfb-cond').length,
+      replace: [...document.querySelectorAll(cs + ' .btn')].some(b => b.textContent.trim() === 'Replace it'),
+      op: (document.querySelector(cs + ' .bfb-cond select.bfb-cond__op') || {}).value }), cs);
+  };
+  let r8 = await ro({ field: 'yn', op: 'isEmpty' });
+  check('boolean "isEmpty" → read-only with "Replace it"', r8.replace && r8.conds === 0, r8);
+  r8 = await ro({ field: 'kind', op: 'includes', value: 'x' });
+  check('choice "includes" (not a choice op) → read-only', r8.replace && r8.conds === 0, r8);
+  r8 = await ro({ all: [{ field: 'yn', op: 'equals', value: true }, { field: 'yn', op: 'isEmpty' }] });
+  check('…one unsupported row in an all-group makes the group read-only', r8.replace && r8.conds === 0, r8);
+  r8 = await ro({ field: 'yn', op: 'notEquals', value: false });
+  check('boolean "notEquals false" stays editable and reads "is on"', !r8.replace && r8.conds === 1 && r8.op === 'on', r8);
+  r8 = await ro({ field: 'yn', op: 'equals', value: 'yes' });
+  check('boolean equals a non-boolean value → read-only', r8.replace && r8.conds === 0, r8);
+  check('rule JSON left untouched by viewing', same((await fieldOf(page, 'tgt')).visibleWhen, { field: 'yn', op: 'equals', value: 'yes' }));
+  check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+}
+
 (async () => {
   const browser = await launch();
   const only = process.env.ONLY ? process.env.ONLY.split(',') : null;
-  const suite = [testBootAndCatalog, testControls, testSwitchAndLogicOnly, testChecks, testIds, testOrdering, testUndoAndDraft, testDownload, testEndToEnd, testReviewFixes, testRules, testChoiceLimitsDatesSettings, testPreview];
+  const suite = [testBootAndCatalog, testControls, testSwitchAndLogicOnly, testChecks, testIds, testOrdering, testUndoAndDraft, testDownload, testEndToEnd, testReviewFixes, testRules, testChoiceLimitsDatesSettings, testPreview, testXo12];
   try {
     for (const t of suite) {
       if (only && !only.includes(t.name)) continue;

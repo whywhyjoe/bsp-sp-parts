@@ -64,7 +64,39 @@ changes. The builder also has a **Full screen** button.
 4. **Lay it out.** Use pages, sections (one or two columns, icon,
    background), and drag or the ↑/↓ buttons to order pages, sections and
    controls.
-5. **Fix the problems.** The header shows the count, and the list says where
+5. **Add rules** (in the properties of the thing they apply to):
+   - **Show when** — on a control, a section or a page. Conditions on
+     earlier questions, joined by all or any. A page can only depend on
+     earlier pages, and the first page always shows. A hidden control isn't
+     checked or saved, and answers on a skipped page count as empty.
+   - **End the form after this page when** — Submit replaces Next.
+   - **Limit the choices** — on a choice: for each answer to an earlier
+     Choice or Yes / No, tick which choices show. Picks that stop fitting are
+     removed.
+   - **Date rules** — not in the past; at least N business days ahead (whole
+     days, Eastern, Mon–Fri, no holidays — it always comes with a blocking
+     "weekdays only"); weekdays only; compared with an earlier date. Each one
+     blocks or warns and has an optional message.
+
+   Renaming a choice or a control updates every rule that uses it. Deleting
+   a control is refused while a rule still uses it.
+6. **Form settings** (select the form at the top of the outline):
+   - look: card or plain frame, header band, tint, brand icon;
+   - **"are you sure?"** before saving, with Yes / No buttons;
+   - the success message, "Submit another", and an optional redirect to a
+     page after N seconds;
+   - **attachments**: at most 5 files of 10 MB each, on the list item. Only
+     for a list with attachments on, and only in a section every answer path
+     reaches.
+7. **Preview** — the real form engine, beside the editor on a wide screen
+   or in place of the properties on a narrow one:
+   - It reloads a moment after each change.
+   - People search and the signed-in user are live.
+   - **Nothing is saved**: adds, attachments and people lookups are
+     simulated, and a redirect is only described.
+   - Submit it, then choose **What would be saved** to see the exact item
+     it would send.
+8. **Fix the problems.** The header shows the count, and the list says where
    each one comes from:
    - **Schema** problems are about the list: will the save work and store
      what the form shows? This includes "every path fills each required
@@ -72,7 +104,7 @@ changes. The builder also has a **Full screen** button.
    - **Engine** problems are what a form page would refuse to load.
    - Warnings, such as a unique or validated column, don't block the
      download.
-6. **Download.** You get two files:
+9. **Download.** You get two files:
    - `<name>.json` — upload it to `Code/bsp-forms/forms/`.
    - `<name>.webpart.html` — paste it into the form page's custom-script web
      part. Leave `data-validate` on for the first load, check that every row
@@ -99,12 +131,9 @@ two controls is declared, and nothing else is.
 
 ## Not yet
 
-Coming in later phases of the plan:
-- the live preview;
-- the rules editor: show-when, branching, choice limits, date rules;
-- form settings beyond title, intro and item title: appearance,
-  confirmation, "are you sure?", attachments;
-- opening an existing JSON.
+Coming in Phase 4 of the plan: opening an existing JSON (round-trip of the
+forms in `forms/`). Rules nested deeper than one all/any group, or using
+"not", are kept read-only, with a "Replace it" button.
 
 Out of scope for v1: bilingual editing, lookup controls, URL-parameter
 fields, assignments, prompts and locks.

@@ -3801,12 +3801,16 @@
     return Promise.reject(new Error('no data-config url and no inline config'));
   }
 
-  function activateAlpine(rootEl) {
+  // isDead (optional): the mount was destroyed while Alpine loaded — then
+  // don't init at all (its x-data would find no _defs entry and every
+  // expression would throw)
+  function activateAlpine(rootEl, isDead) {
     if (window.Alpine) {
       if (!rootEl._x_dataStack) window.Alpine.initTree(rootEl);
       return Promise.resolve();
     }
     return whenAlpine().then(function () {
+      if (isDead && isDead()) return;
       // Alpine auto-starts and walks the whole document on load; only roots
       // inserted after that need an explicit init.
       if (window.Alpine && !rootEl._x_dataStack) window.Alpine.initTree(rootEl);
@@ -3953,22 +3957,24 @@
     opts = opts || {};
     var handle = { writes: [], errors: [], uid: null, ready: null, destroy: null };
     var root = null, uid = null, dead = false;
-    // links that would leave the page do nothing in a preview (new-tab
-    // links still open: they can't lose the builder)
+    // no link in a preview goes anywhere — same tab, new tab, middle click
+    // (Codex xo 12: new-tab links and auxclick got past an earlier guard)
     function guard(e) {
       var a = e.target && e.target.closest && e.target.closest('a[href]');
-      if (a && a.target !== '_blank') e.preventDefault();
+      if (a) e.preventDefault();
     }
     handle.destroy = function () {
       dead = true;
-      if (opts.preview) el.removeEventListener('click', guard, true);
+      if (opts.preview) { el.removeEventListener('click', guard, true); el.removeEventListener('auxclick', guard, true); }
       var def = uid && NS._defs[uid];
       if (def && def.store.redirTimer) { clearInterval(def.store.redirTimer); def.store.redirTimer = null; }
-      try { if (root && window.Alpine && window.Alpine.destroyTree) window.Alpine.destroyTree(root); } catch (e) { /* best effort */ }
+      // the LIVE root: a language switch (relocalize) replaces def.root
+      var live = (def && def.root) || root;
+      try { if (live && window.Alpine && window.Alpine.destroyTree) window.Alpine.destroyTree(live); } catch (e) { /* best effort */ }
       if (uid) delete NS._defs[uid];
       el.innerHTML = '';
     };
-    if (opts.preview) el.addEventListener('click', guard, true);
+    if (opts.preview) { el.addEventListener('click', guard, true); el.addEventListener('auxclick', guard, true); }
     ensureStyles();
     var spriteReady = ensureSprite();
     handle.ready = whenIntl(raw).then(function () {
@@ -3998,7 +4004,8 @@
         host.innerHTML = renderForm(uid, cfg);
         root = def.root = host.firstChild;
         el.appendChild(root);
-        return activateAlpine(root);
+        // destroyed while Alpine was still loading: never init the dead root
+        return activateAlpine(root, function () { return dead; });
       });
     });
     return handle;

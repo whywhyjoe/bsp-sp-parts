@@ -1687,14 +1687,17 @@ const PV_CFG = {
   ] }] }]
 };
 // mount cfg into a fresh <div id>, wait for ready; returns { uid, errors }
-function pvMount(page, id, cfg, preview) {
-  return page.evaluate(({ id, cfg, preview }) => {
+function pvMount(page, id, cfg, preview, noObserver) {
+  return page.evaluate(({ id, cfg, preview, noObserver }) => {
     const el = document.createElement('div');
     el.id = id;
+    // as the builder's preview stage: Alpine's mutation observer leaves it
+    // alone, so only destroy() can tear the engine's root down
+    if (noObserver) { el._x_dataStack = []; el._x_ignoreMutationObserver = true; }
     document.querySelector('.harness-canvas').appendChild(el);
     const h = window['__h_' + id] = BSPForms.mountConfig(el, cfg, preview ? { preview: true } : {});
     return h.ready.then(() => new Promise(r => setTimeout(r, 150))).then(() => ({ uid: h.uid, errors: h.errors.slice() }));
-  }, { id, cfg, preview });
+  }, { id, cfg, preview, noObserver: !!noObserver });
 }
 const pvWrites = (page, id) => page.evaluate(id => JSON.parse(JSON.stringify(window['__h_' + id].writes)), id);
 async function pvFillSubmit(page, id, file) {
@@ -1804,6 +1807,124 @@ async function testMountConfig(browser) {
   await ctx.close();
 }
 
+/* Codex xo 12 (engine side of the preview): links, destroy after a
+   language switch, destroy before Alpine. ENGINE_JS=<file> serves another
+   engine build (to confirm these fail on an older one). */
+async function engineOverride(page) {
+  if (process.env.ENGINE_JS) await page.route('**/bsp-forms/bsp-forms.js*', r => r.fulfill({ contentType: 'text/javascript', body: fs.readFileSync(process.env.ENGINE_JS, 'utf8') }));
+}
+async function testMountConfigXo12(browser) {
+  console.log('mountConfig (xo 12):');
+  let ctx = await browser.newContext({ viewport: { width: 1100, height: 1600 } });
+  let page = await ctx.newPage();
+  const errs = [];
+  page.on('pageerror', e => errs.push(e.message));
+  let popups = 0;
+  ctx.on('page', () => { popups++; });
+  await ctx.route('https://example.com/**', r => r.fulfill({ contentType: 'text/html', body: '<title>ext</title>ext' }));
+  await engineOverride(page);
+  const ready = () => page.waitForFunction(() => /ready|error/.test((document.querySelector('[data-bsp-form]') || { getAttribute: () => '' }).getAttribute('data-bspf-state') || ''), null, { timeout: 8000 });
+  await page.goto(BASE);
+  await ready();
+  const url0 = page.url();
+  // 1. links: new tab, middle click, same tab
+  const cfg = JSON.parse(JSON.stringify(PV_CFG));
+  cfg.form.intro = 'Read [the docs](https://example.com/docs) or [jump](#top).';
+  await pvMount(page, 'lx', cfg, true);
+  const pv = await page.evaluate(() => {
+    const fire = (a, type, button) => { const e = new MouseEvent(type, { bubbles: true, cancelable: true, button }); a.dispatchEvent(e); return e.defaultPrevented; };
+    const ext = document.querySelector('#lx a[target="_blank"]'), loc = document.querySelector('#lx a[href="#top"]');
+    return { ext: !!ext, extClick: ext && fire(ext, 'click', 0), extAux: ext && fire(ext, 'auxclick', 1), locClick: loc && fire(loc, 'click', 0), locAux: loc && fire(loc, 'auxclick', 1) };
+  });
+  check('preview: click AND auxclick prevented on new-tab and same-tab links', pv.ext && pv.extClick && pv.extAux && pv.locClick && pv.locAux, pv);
+  await page.click('#lx a[target="_blank"]');
+  await page.click('#lx a[target="_blank"]', { button: 'middle' });
+  await page.click('#lx a[href="#top"]', { button: 'middle' });
+  await page.waitForTimeout(700);
+  check('…real clicks / middle clicks open no page and don\'t navigate', popups === 0 && page.url() === url0, { popups, url: page.url() });
+  await page.evaluate(() => window.__h_lx.destroy());
+  const after = await page.evaluate(() => { const e = new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }); const a = document.createElement('a'); a.href = '#x'; document.getElementById('lx').appendChild(a); a.dispatchEvent(e); a.remove(); return e.defaultPrevented; });
+  check('…destroy() removes the guards (a link added later isn\'t blocked)', after === false);
+  // a non-preview mount keeps normal link behavior (no guard)
+  await pvMount(page, 'lx2', cfg, false);
+  const np = await page.evaluate(() => { const e = new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }); document.querySelector('#lx2 a[target="_blank"]').dispatchEvent(e); return e.defaultPrevented; });
+  check('…without preview, links aren\'t guarded', np === false);
+  await page.evaluate(() => window.__h_lx2.destroy());
+
+  // 3. destroy after a language switch
+  const bi = {
+    form: { title: { en: 'Hello', fr: 'Bonjour' }, languages: ['en', 'fr'] },
+    target: { listTitle: 'Preview list' },
+    pages: [{ id: 'p1', sections: [{ id: 's1', fields: [{ id: 'name', type: 'text', label: { en: 'Name', fr: 'Nom' }, column: 'Title' }] }] }]
+  };
+  const m = await pvMount(page, 'bi', bi, true, true);
+  check('bilingual preview mounts (EN)', /Hello/.test(await page.locator('#bi').textContent()) && !m.errors.length, m.errors);
+  const r0 = await page.evaluate(() => { window.__biRoot0 = document.querySelector('#bi .bspf'); return true; });
+  await page.evaluate(() => window.intl.setLang('fr'));
+  await page.waitForFunction(() => /Bonjour/.test(document.getElementById('bi').textContent), null, { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  const sw = await page.evaluate(() => ({ fr: /Bonjour/.test(document.getElementById('bi').textContent), swapped: document.querySelector('#bi .bspf') !== window.__biRoot0 }));
+  check('intl.setLang("fr") swaps the preview\'s root (relocalize)', r0 && sw.fr && sw.swapped, sw);
+  await page.fill('#bi [data-bspf-field="name"] input', 'before');
+  const d = await page.evaluate(uid => {
+    const root = document.querySelector('#bi .bspf');
+    window.__biLive = root;
+    window.__biState = root._x_dataStack[0];
+    window.__h_bi.destroy();
+    return { html: document.getElementById('bi').innerHTML, def: !!BSPForms._defs[uid], stack: root._x_dataStack ? root._x_dataStack.length : 0 };
+  }, m.uid);
+  check('destroy() after the switch: element empty, _defs entry gone', d.html === '' && !d.def, d);
+  const fx = await page.evaluate(() => new Promise(res => {
+    window.__biState.values.name = 'mutated after destroy';
+    setTimeout(() => {
+      const inp = window.__biLive.querySelector('[data-bspf-field="name"] input');
+      res({ value: inp.value, stack: window.__biLive._x_dataStack ? window.__biLive._x_dataStack.length : 0 });
+    }, 200);
+  }));
+  check('…the LIVE (post-switch) root is torn down: no Alpine effect updates it', fx.value === 'before' && fx.stack === 0, fx);
+  await page.evaluate(() => window.intl.setLang('en'));
+  await page.waitForTimeout(300);
+  check('no page errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+
+  // 3b. destroy before Alpine finished loading
+  ctx = await browser.newContext({ viewport: { width: 1100, height: 1600 } });
+  page = await ctx.newPage();
+  const errs2 = [];
+  page.on('pageerror', e => errs2.push(e.message));
+  await engineOverride(page);
+  await page.route('**/dev/vendor/alpine.js', async r => { await new Promise(res => setTimeout(res, 2500)); await r.continue(); });
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  const early = await page.evaluate(cfg => new Promise(res => {
+    const el = document.createElement('div');
+    el.id = 'late';
+    document.body.appendChild(el);
+    const h = BSPForms.mountConfig(el, cfg, { preview: true });
+    const t0 = Date.now();
+    (function poll() {
+      const root = el.querySelector('.bspf');
+      if (root) {
+        window.__lateRoot = root;
+        const alpineThen = !!window.Alpine;
+        h.destroy();
+        return res({ rendered: true, alpineThen, empty: el.innerHTML === '' });
+      }
+      if (Date.now() - t0 > 2000) return res({ rendered: false, alpineThen: !!window.Alpine });
+      setTimeout(poll, 20);
+    })();
+  }), PV_CFG);
+  check('(the root rendered and was destroyed before Alpine arrived)', early.rendered && !early.alpineThen && early.empty, early);
+  await page.waitForFunction(() => !!window.Alpine, null, { timeout: 8000 }).catch(() => {});
+  await page.waitForTimeout(600);
+  const late = await page.evaluate(() => ({ alpine: !!window.Alpine, stack: window.__lateRoot && window.__lateRoot._x_dataStack ? window.__lateRoot._x_dataStack.length : 0 }));
+  check('destroy before Alpine loaded → nothing left initialized once it arrives', late.alpine && late.stack === 0, late);
+  // BUG (report): the late initTree still runs on the dead root; its
+  // x-data="BSPForms.instance(uid)" finds no _defs entry (destroy removed
+  // it), so every child expression throws ("view is not defined", …)
+  check('fixed: destroy before Alpine loaded → no page errors when Alpine arrives', errs2.length === 0, errs2.length + ' errors, first: ' + errs2.slice(0, 3).join(' | '));
+  await ctx.close();
+}
+
 (async () => {
   const browser = await launch();
   // ONLY=testBranching,testSendEmpty runs a subset (iterating on one area)
@@ -1814,7 +1935,7 @@ async function testMountConfig(browser) {
     testBranching, testNormalizeErrors, testChoicesWhen, testNumberControls, testClearButtons, testBusinessDays,
     testSendEmpty, testAtMe, testConfirmationRedirect, testListsApi, testReviewFixes,
     // builder preview (E9b)
-    testMountConfig];
+    testMountConfig, testMountConfigXo12];
   try {
     for (const t of suite) if (!only || only.includes(t.name)) await t(browser);
   } finally {

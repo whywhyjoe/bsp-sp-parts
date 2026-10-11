@@ -42,6 +42,31 @@
   }
   function jstr(v) { return JSON.stringify(v); }
   function clone(o) { return o == null ? o : JSON.parse(JSON.stringify(o)); }
+  // author keys (choice values in a choice-limit map) are data: "__proto__"
+  // must become an own property, never the object's prototype (Codex xo 12)
+  // (only that key: defineProperty on an Alpine reactive proxy skips its
+  // triggers, so every other key is a plain, reactive assignment)
+  function put(o, k, v) {
+    if (k === '__proto__') Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
+    else o[k] = v;
+    return o;
+  }
+  // a copy of an author-keyed map with `key` set (val undefined = removed),
+  // in place of `from` when renaming, keeping key order. Assigning the copy
+  // is one reactive write even for "__proto__" (found by the suite: a
+  // defineProperty on the live proxy never re-rendered or reached undo)
+  function mapWith(map, key, val, from) {
+    var out = {}, done = false;
+    Object.keys(map || {}).forEach(function (k) {
+      if (k === key || (from != null && k === from)) {
+        if (!done && val !== undefined) { put(out, key, val); done = true; }
+        return;
+      }
+      put(out, k, map[k]);
+    });
+    if (!done && val !== undefined) put(out, key, val);
+    return out;
+  }
   function escRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
   function verAtLeast(v, min) {
     var a = String(v || '0').split('.').map(Number), b = String(min).split('.').map(Number);
@@ -458,13 +483,25 @@
                   ['notEmpty', 'is answered'], ['isEmpty', 'is not answered']]
   };
   function isCond(r) { return !!(r && typeof r === 'object' && typeof r.field === 'string' && !r.all && !r.any && !r.not); }
+  // a condition the editor can show faithfully: its op is one it offers for
+  // the driver's kind (an imported boolean "isEmpty" would otherwise read as
+  // "is on" — Codex xo 12)
+  function condOk(r, doc) {
+    if (!doc) return true;
+    var f = null;
+    eachField(doc, function (x) { if (x.id === r.field) f = x; });
+    if (!f) return true; // a dangling driver is its own error; still editable
+    var k = kindOf(f), op = r.op || 'equals';
+    if (k === 'boolean') return (op === 'equals' || op === 'notEquals') && typeof r.value === 'boolean';
+    return (RULE_OPS[k] || [['notEmpty'], ['isEmpty']]).some(function (o) { return o[0] === op; });
+  }
   // { mode, rows, editable } — rows are the doc's own condition objects
-  function ruleRows(rule) {
+  function ruleRows(rule, doc) {
     if (!rule) return { mode: 'all', rows: [], editable: true };
-    if (isCond(rule)) return { mode: 'all', rows: [rule], editable: true };
+    if (isCond(rule)) return { mode: 'all', rows: [rule], editable: condOk(rule, doc) };
     var mode = Array.isArray(rule.all) ? 'all' : Array.isArray(rule.any) ? 'any' : null;
     var rows = mode ? rule[mode] : null;
-    if (rows && rows.every(isCond)) return { mode: mode, rows: rows, editable: true };
+    if (rows && rows.every(isCond)) return { mode: mode, rows: rows, editable: rows.every(function (r) { return condOk(r, doc); }) };
     return { mode: 'all', rows: [], editable: false };
   }
   function rowsRule(mode, rows) {
@@ -665,9 +702,12 @@
 
     // rules (B5): what the engine allows but reads wrong, and D8
     var at = positions(doc);
+    // both sides of a condition: its driver and a date's compareTo (a
+    // reorder can push either after the control — Codex xo 12)
     function laterRefs(rule, before, out) {
       ruleRows(rule).rows.forEach(function (r) {
         if (at[r.field] != null && at[r.field] >= before) out.push(r.field);
+        if (r.compareTo && r.compareTo !== '@today' && at[r.compareTo] != null && at[r.compareTo] >= before) out.push(r.compareTo);
       });
       return out;
     }
@@ -689,6 +729,11 @@
             if (missing.length) add('warn', 'schema', name + ': the choice limit has no entry for “' + missing.join('”, “') + '” — with that answer the control hides.', sel);
           }
           var rules = Array.isArray(f.rules) ? f.rules : [];
+          rules.forEach(function (r) {
+            if (r && r.compareTo && r.compareTo !== '@today' && at[r.compareTo] != null && at[r.compareTo] >= idx) {
+              add('warn', 'schema', name + ' is compared with “' + r.compareTo + '”, which comes after it — move that date earlier.', sel);
+            }
+          });
           var hasBiz = rules.some(function (r) { return r && r.op === 'minBusinessDays'; });
           var wk = rules.filter(function (r) { return r && r.op === 'businessDay'; });
           if (hasBiz && !wk.some(function (r) { return (r.mode || 'block') === 'block'; })) add('error', 'schema', name + ': a business-day lead time needs “weekdays only” to block (weekends are rejected).', sel);
@@ -697,10 +742,34 @@
         });
       });
     });
+    // a condition comparing a choice with a value it no longer has can never
+    // be true (a deleted choice — Codex xo 12); with "Other" on, it still can
+    var byId = Object.create(null);
+    eachField(doc, function (x) { byId[x.id] = x; });
+    refSites(doc).forEach(function (s) {
+      if (s.key !== 'field' || !s.obj || !('op' in s.obj) || !('value' in s.obj)) return;
+      var d = byId[s.obj.field], dk = d && kindOf(d);
+      if (dk !== 'choice' && dk !== 'multichoice') return;
+      var vals = (d.choices || []).map(function (c) { return typeof c === 'string' ? c : c.value; });
+      var bad = (Array.isArray(s.obj.value) ? s.obj.value : [s.obj.value]).filter(function (v) { return vals.indexOf(v) < 0; });
+      if (!bad.length) return;
+      var where = s.where.replace(/^(\w+) "([^"]+)"/, function (m, t, id) { return t + ' “' + id + '”'; });
+      add(d.fillIn ? 'warn' : 'error', 'schema', where + ' compares “' + (d.label || d.id) + '” with “' + bad.join('”, “') + '”, which ' +
+        (bad.length > 1 ? 'aren’t' : 'isn’t') + ' one of its choices' + (d.fillIn ? ' (only a typed “Other” could match).' : ' — so it can never be true.'));
+    });
+
+    // the redirect, with {var:…} resolved the way the engine will
     var red = doc.confirmation && doc.confirmation.redirect;
     if (red) {
-      var u = String(red.url || '').trim();
-      if (!/^https?:\/\/[^\s]+$/i.test(u) && !/^\/(?!\/)[^\s]*$/.test(u) && !/\{var:[^}]+\}/.test(u)) {
+      var vars = (doc.form && doc.form.vars) || {}, missingVars = [];
+      var u = String(red.url || '').trim().replace(/\{var:([^}]+)\}/g, function (m, n) {
+        if (Object.prototype.hasOwnProperty.call(vars, n) && vars[n] != null) return String(vars[n]);
+        missingVars.push(n);
+        return '';
+      });
+      if (missingVars.length) add('error', 'schema', 'The redirect uses {var:' + missingVars.join('}, {var:') + '}, which the form doesn’t define.');
+      else if (/\{[^}]*\}/.test(u)) add('warn', 'schema', 'The redirect address has a token the builder can’t check; make sure it ends up as https://… or /….');
+      else if (!/^https?:\/\/[^\s]+$/i.test(u) && !/^\/(?!\/)[^\s]*$/.test(u)) {
         add('error', 'schema', 'The redirect after submit needs a web address starting with https:// or a site path starting with /.');
       }
     }
@@ -738,7 +807,7 @@
       }
       v = tidy(v);
       if (k === 'validation' && v && typeof v === 'object' && !Object.keys(v).length) return;
-      out[k] = v;
+      put(out, k, v);
     });
     // builder metadata reads last in every object
     if (out.$builder) { var b = out.$builder; delete out.$builder; out.$builder = b; }
@@ -763,8 +832,9 @@
   function ordered(o, keys) {
     if (!o || typeof o !== 'object' || Array.isArray(o)) return o;
     var out = {};
-    keys.forEach(function (k) { if (k in o) out[k] = o[k]; });
-    Object.keys(o).forEach(function (k) { if (!(k in out) && k !== '$builder') out[k] = o[k]; });
+    var own = function (x, k) { return Object.prototype.hasOwnProperty.call(x, k); };
+    keys.forEach(function (k) { if (own(o, k)) put(out, k, o[k]); });
+    Object.keys(o).forEach(function (k) { if (!own(out, k) && k !== '$builder') put(out, k, o[k]); });
     if ('$builder' in o) out.$builder = o.$builder;
     return out;
   }
@@ -873,9 +943,16 @@
         timers.pvPoll = setInterval(function () { self.pollPreview(); }, 600);
         this.$nextTick(function () { self.mountPreview(); });
       },
+      // Alpine calls this when the builder's tree goes away: every timer and
+      // callback stops (a pending flush or preview mount would otherwise run
+      // against a dead component — Codex xo 12)
       destroy: function () {
+        timers.dead = true;
         clearInterval(timers.pvPoll);
-        if (timers.pvHandle) timers.pvHandle.destroy();
+        clearTimeout(timers.change);
+        clearTimeout(timers.pv);
+        timers.schemaGen++;
+        if (timers.pvHandle) { timers.pvHandle.destroy(); timers.pvHandle = null; }
       },
 
       /* ---- change tracking: undo history, autosave, checks ---- */
@@ -888,6 +965,7 @@
       // (download calls this — a check result 300 ms old can't be trusted)
       flush: function () {
         clearTimeout(timers.change);
+        if (timers.dead) return;
         var snap = JSON.stringify(this.doc);
         if (snap !== hist.last) {
           hist.past.push(hist.last);
@@ -1452,7 +1530,7 @@
         var l = this.loc(t, this.sel.id);
         return !l ? null : t === 'field' ? l.f : t === 'section' ? l.sec : l.pg;
       },
-      rr: function (t, key) { var o = this.ruleObj(t); return ruleRows(o && o[key]); },
+      rr: function (t, key) { var o = this.ruleObj(t); return ruleRows(o && o[key], this.doc); },
       ruleDrivers: function (t, key) { return this.sel.id ? driversFor(this.doc, t, this.sel.id, key) : []; },
       fieldById: function (id) { var l = id && this.loc('field', id); return l ? l.f : null; },
       driverKind: function (row) { var f = this.fieldById(row.field); return f ? kindOf(f) : ''; },
@@ -1550,7 +1628,7 @@
         var f = this.curField(), d = this.fieldById(id);
         if (!f || !d) return;
         var all = this.choiceValues(f.id), map = {};
-        this.cwKeys(d).forEach(function (k) { map[k.key] = all.slice(); });
+        this.cwKeys(d).forEach(function (k) { put(map, k.key, all.slice()); });
         f.choicesWhen = { field: id, map: map };
       },
       cwKeys: function (d) {
@@ -1572,7 +1650,7 @@
         if (i > -1) a.splice(i, 1); else a.push(v);
         var order = this.choiceValues(this.curField().id);
         a = order.filter(function (x) { return a.indexOf(x) > -1; }); // keep the field's own order
-        if (key === '__else') { if (a.length) cw['else'] = a; else delete cw['else']; } else cw.map[key] = a;
+        if (key === '__else') { if (a.length) cw['else'] = a; else delete cw['else']; } else cw.map = mapWith(cw.map, key, a);
       },
       // a choice value changed or went away: keep every rule and limit that
       // names it in step (this field's own limit, limits keyed on it, rules
@@ -1590,8 +1668,7 @@
         eachField(this.doc, function (x) {
           var c = x.choicesWhen;
           if (c && c.field === f.id && c.map && Object.prototype.hasOwnProperty.call(c.map, from)) {
-            if (to != null) c.map[to] = c.map[from];
-            delete c.map[from];
+            c.map = to != null ? mapWith(c.map, to, c.map[from], from) : mapWith(c.map, from, undefined);
           }
         });
         refSites(this.doc).forEach(function (s) {
@@ -1707,6 +1784,7 @@
         timers.pv = setTimeout(function () { self.mountPreview(); }, 400);
       },
       mountPreview: function () {
+        if (timers.dead) return;
         var el = this.$root.querySelector('.bfb-preview__stage');
         if (timers.pvHandle) { timers.pvHandle.destroy(); timers.pvHandle = null; }
         this.pv.n = 0; this.pv.json = ''; this.pv.errors = [];
