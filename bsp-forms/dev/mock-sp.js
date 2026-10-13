@@ -183,18 +183,19 @@
     }
   };
   // what the dev tester is assigned (plus a row for someone else, which the
-  // user filter must drop)
+  // user filter must drop). Two rows have a current zone (confirm / change);
+  // Parking has none, so it gets the dropdown straight away.
   var ASSIGNMENTS = [
-    { ID: 11, UserEmail: 'Dev.Tester@example.com', UserDescription: 'Branch manager', AreaName: 'Floor 3 — East wing' },
-    { ID: 12, UserEmail: 'dev.tester@example.com', UserDescription: 'Branch manager', AreaName: 'Floor 1 — Lobby & vault' },
-    { ID: 13, UserEmail: 'dev.tester@example.com', UserDescription: 'Branch manager', AreaName: 'Parking level P2' },
-    { ID: 14, UserEmail: 'someone.else@example.com', UserDescription: 'Facilities', AreaName: 'Data centre — Hall B' }
+    { ID: 11, UserEmail: 'Dev.Tester@example.com', UserDescription: 'Branch manager', AreaName: 'Floor 3 — East wing', CurrentZone: 'Public Plus' },
+    { ID: 12, UserEmail: 'dev.tester@example.com', UserDescription: 'Branch manager', AreaName: 'Floor 1 — Lobby & vault', CurrentZone: 'High Security' },
+    { ID: 13, UserEmail: 'dev.tester@example.com', UserDescription: 'Branch manager', AreaName: 'Parking level P2', CurrentZone: '' },
+    { ID: 14, UserEmail: 'someone.else@example.com', UserDescription: 'Facilities', AreaName: 'Data centre — Hall B', CurrentZone: 'Public' }
   ];
   // per-list schemas for the doctor (window.BSPF_MOCK_FIELDS[listTitle] wins)
   var ZONE_FIELDS = {
-    'PS_Zone-Attestation-Assignments': ['UserEmail:Text', 'UserDescription:Text', 'AreaName:Text'],
+    'PS_Zone-Attestation-Assignments': ['UserEmail:Text', 'UserDescription:Text', 'AreaName:Text', 'CurrentZone:Text'],
     'PS_Zone-Attestation-Responses': ['Title:Text', 'LookupID:Number', 'UserName:Text', 'UserEmail:Text', 'UserDescription:Text',
-      'AreaName:Text', 'ZoneSelection:Text', 'Attestation:Text', 'AttestationTime:DateTime']
+      'AreaName:Text', 'ZoneSelection:Text', 'PreviousZone:Text', 'ZoneChanged:Boolean', 'Attestation:Text', 'AttestationTime:DateTime']
   };
   function fieldsOf(defs) {
     return defs.map(function (d) {

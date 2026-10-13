@@ -63,6 +63,7 @@ afterwards.
 | `UserEmail` | Single line of text | **Indexed.** The assignee's email, in any case. |
 | `UserDescription` | Single line of text | Copied into each response. |
 | `AreaName` | Single line of text | **Enforce unique values** (this indexes it). Shown as the row label. |
+| `CurrentZone` | Single line of text (or Choice) | The area's zone as it stands, which the user confirms or changes. Exactly one of `Public`, `Public Plus`, `Standards`, `Secure Restricted`, `High Security` (English, same spelling). Leave it empty if there's none: the user then picks one. Any other text counts as empty. |
 
 `Title` isn't used by the form. Make it optional (List settings → Title →
 Required: No) or put the area name in it.
@@ -76,7 +77,9 @@ Required: No) or put the area name in it.
 | `UserEmail` | Single line of text | **Indexed.** |
 | `UserDescription` | Single line of text | |
 | `AreaName` | Single line of text | |
-| `ZoneSelection` | Single line of text (or Choice) | Always the English value: Green / Yellow / Orange / Red. |
+| `ZoneSelection` | Single line of text (or Choice) | The zone the user attested, always the English value: `Public` / `Public Plus` / `Standards` / `Secure Restricted` / `High Security`. |
+| `PreviousZone` | Single line of text (or Choice) | The area's `CurrentZone` when the user answered. Empty if it had none. |
+| `ZoneChanged` | Yes/No | Yes when `ZoneSelection` differs from `PreviousZone` (or there was none). |
 | `Attestation` | Single line of text | `Confirmed`. |
 | `AttestationTime` | Date and Time, **include time** | Shown in the site's regional time zone. |
 

@@ -74,8 +74,11 @@ two-line web part insert.
   `lib/`. Every engine message ships in French. `intl.setLang()` re-renders
   the form in place, answers kept.
 - **Assignments:** an `assignments` field lists the signed-in user's rows from
-  a source list (filtered by their email), with a clearable color-dot dropdown
-  per row. Submit saves one item per row from the answers as confirmed. After a
+  a source list (filtered by their email), one card per row. A row with a
+  current value (`source.currentColumn`) is confirmed with a checkbox or
+  changed through a clearable color-dot dropdown, with "keep current" to undo;
+  a row without one gets the dropdown. Each choice can carry a description,
+  and the card wears the color of the value it shows. Submit saves one item per row from the answers as confirmed. After a
   failure, a retry re-checks the list and skips rows already saved. Rows
   already answered drop out. "Nothing assigned" and "all done" have their own
   screens. Pairs with `currentUser` (photo, name and email), `target.set`

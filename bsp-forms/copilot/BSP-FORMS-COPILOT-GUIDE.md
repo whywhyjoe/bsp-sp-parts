@@ -135,8 +135,8 @@ These are the mistakes that break forms. Check every one.
   sure a key exists, don't use it.
 
 ### Look
-- Colors only by name. Choice pill colors: `blue green yellow red gray sky
-  teal berry lavender orange` (or leave them out; they're assigned
+- Colors only by name. Choice pill colors: `blue green lime yellow red gray
+  sky teal berry lavender orange` (`lime` is a light green; or leave them out; they're assigned
   automatically). Tints: `sky blue neutral`. Never hex codes.
 - Section `icon` must be one of: `add alert arrow-down arrow-export
   arrow-right arrow-up attach calendar-ltr checkmark checkmark-circle
@@ -158,8 +158,10 @@ These are the mistakes that break forms. Check every one.
 - **Bilingual:** `"form": { "languages": ["en", "fr"] }`. After that, any text
   can be `{ "en": "…", "fr": "…" }`. Translate choice **labels**, never
   **values**. Values are what's saved, and must stay one language:
-  `{ "value": "Green", "label": { "en": "Green", "fr": "Vert" } }`.
+  `{ "value": "Public", "label": { "en": "Public - General Access", "fr": "Public - Accès général" } }`.
 - **assignments:** only one per form, no `attachments`, no `visibleWhen` on it.
+  `previousColumn` / `changedColumn` need `source.currentColumn`. A choice
+  `description` shows under the value on each card.
   Copy the structure from `ps-zone-attestation.json`.
 - **Redirect URLs** go in `form.vars` and are used as `{var:name}`. Never take
   a redirect URL from the page URL.
