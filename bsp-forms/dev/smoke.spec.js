@@ -363,8 +363,8 @@ async function testCreativeCallout(browser) {
 
 /* Zone attestation: assignments rows from the mock source list, per-row
    save, submit confirmation, header card, current user, EN/FR. Mock rows:
-   0 Lobby (current High Security), 1 East wing (current Public Plus),
-   2 Parking (no current zone: dropdown straight away). */
+   0 Concourse Podium (current High Security), 1 Tower 10 (current Public Plus),
+   2 Tower 37 (no current zone: dropdown straight away). */
 const ZONE = '?form=ps-zone-attestation';
 const JOB_AID = 'https://example.com/job-aid';
 async function openZone(browser, opts) {
@@ -421,7 +421,7 @@ async function testZoneAttestation(browser) {
   // load: the user's rows only (case-insensitive email), sorted by area
   const labels = await page.$$eval('.bspf-asg__label', els => els.map(e => e.textContent));
   check('3 rows, the other user\'s row filtered out, sorted',
-    JSON.stringify(labels) === JSON.stringify(['Floor 1 — Lobby & vault', 'Floor 3 — East wing', 'Parking level P2']), JSON.stringify(labels));
+    JSON.stringify(labels) === JSON.stringify(['FCP - Concourse Podium', 'FCP - Tower 10', 'FCP - Tower 37']), JSON.stringify(labels));
   check('current user card shows name + email',
     (await page.locator('.bspf-who__name').textContent()) === 'Dev Tester' &&
     (await page.locator('.bspf-who__mail').textContent()) === 'dev.tester@example.com');
@@ -438,6 +438,10 @@ async function testZoneAttestation(browser) {
   await navClick(page, 'Submit attestation');
   await page.waitForTimeout(200);
   check('empty submit → an error on every row', (await page.locator('.bspf-asg__row.is-error').count()) === 3);
+  const rowErrs = await page.$$eval('.bspf-asg__row .bspf-asg__foot > .field__error', ps => ps.map(p => p.textContent));
+  check('row errors: "confirm or choose" where there is a current zone, "choose" where there is none',
+    JSON.stringify(rowErrs) === JSON.stringify(['Confirm this zone or choose a new one.', 'Confirm this zone or choose a new one.', 'Choose a zone for this area.']),
+    JSON.stringify(rowErrs));
   check('empty submit → checkbox error', await page.locator('[data-bspf-field="attestation"] .field__error').isVisible());
   check('empty submit → no dialog, nothing saved', !(await page.locator('.bspf-dialog').isVisible()) && (await zoneAdds(page)).length === 0);
 
@@ -480,7 +484,7 @@ async function testZoneAttestation(browser) {
   const byId = Object.fromEntries(adds.map(p => [p.LookupID, p]));
   check('one item per row', adds.length === 3, adds.length);
   check('row columns copied (LookupID / AreaName / UserDescription)',
-    byId[12] && byId[12].AreaName === 'Floor 1 — Lobby & vault' && byId[12].UserDescription === 'Branch manager' && typeof byId[12].LookupID === 'number');
+    byId[12] && byId[12].AreaName === 'FCP - Concourse Podium' && byId[12].UserDescription === 'Branch manager' && typeof byId[12].LookupID === 'number');
   check('each row saves its own zone', byId[12].ZoneSelection === 'Secure Restricted' && byId[11].ZoneSelection === 'Public' && byId[13].ZoneSelection === 'High Security');
   check('changed rows: PreviousZone = the current zone, ZoneChanged = true',
     byId[12].PreviousZone === 'High Security' && byId[12].ZoneChanged === true &&
@@ -491,7 +495,7 @@ async function testZoneAttestation(browser) {
     adds.every(p => p.UserName === 'Dev Tester' && p.UserEmail === 'dev.tester@example.com' && p.Attestation === 'Confirmed'));
   check('AttestationTime: one ISO instant shared by the rows',
     /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(adds[0].AttestationTime) && adds.every(p => p.AttestationTime === adds[0].AttestationTime));
-  check('Title per row from {row:AreaName}', byId[13].Title === 'Parking level P2 — dev.tester@example.com', byId[13].Title);
+  check('Title per row from {row:AreaName}', byId[13].Title === 'FCP - Tower 37 — dev.tester@example.com', byId[13].Title);
   check('no "submit another" button', (await page.locator('.bspf-done button').count()) === 0);
   check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
   await ctx.close();
@@ -502,7 +506,7 @@ async function testZoneAttestation(browser) {
   check('a current zone shows its name, description, confirm + Change; no dropdown',
     (await row0.locator('.bspf-asg__eyebrow:visible').textContent()) === 'Current zone' &&
     (await row0.locator('.bspf-asg__zone:visible').textContent()) === L.high &&
-    /^\[Placeholder\] What this zone means/.test(await row0.locator('.bspf-asg__desc:visible').textContent()) &&
+    /^\[Placeholder\] Critical assets such as vaults/.test(await row0.locator('.bspf-asg__desc:visible').textContent()) &&
     await row0.locator('.bspf-asg__confirm input').isVisible() && await row0.locator('.bspf-asg__confirm button').isVisible() &&
     await row0.locator('.bspf-asg__pick').isHidden());
   check('the card wears its current zone\'s hue, the row with no current zone none',
@@ -580,7 +584,7 @@ async function testZoneAttestation(browser) {
   await page.waitForSelector('.bspf-done:not(.bspf-done--empty):not(.bspf-done--allDone)', { state: 'visible', timeout: 5000 });
   const tAdds = Object.fromEntries((await zoneAdds(page)).map(p => [p.LookupID, p]));
   check('previousColumn = Title keeps the previous zone; a row with none falls back to titleTemplate',
-    tAdds[12].Title === 'High Security' && tAdds[13].Title === 'Parking level P2 — dev.tester@example.com',
+    tAdds[12].Title === 'High Security' && tAdds[13].Title === 'FCP - Tower 37 — dev.tester@example.com',
     JSON.stringify([tAdds[12].Title, tAdds[13].Title]));
   await ctx.close();
   // a CurrentZone that isn't a choice value → treated as none

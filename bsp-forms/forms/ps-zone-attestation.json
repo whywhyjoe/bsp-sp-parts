@@ -54,7 +54,8 @@
       "en": "Your assigned areas couldn't be loaded. Try again in a moment.",
       "fr": "Impossible de charger les zones qui vous sont attribuées. Réessayez dans un moment."
     },
-    "assignRowRequired": { "en": "Confirm this zone or choose a new one.", "fr": "Confirmez cette zone ou choisissez-en une nouvelle." },
+    "assignRowRequired": { "en": "Choose a zone for this area.", "fr": "Choisissez une zone pour cet emplacement." },
+    "assignRowConfirmRequired": { "en": "Confirm this zone or choose a new one.", "fr": "Confirmez cette zone ou choisissez-en une nouvelle." },
     "assignAllRequired": { "en": "Confirm or change the zone for every area.", "fr": "Confirmez ou changez la zone de chaque emplacement." },
     "assignCurrent": { "en": "Current zone", "fr": "Zone actuelle" },
     "assignConfirm": { "en": "Confirm this is the correct zone", "fr": "Je confirme que c'est la bonne zone" },
@@ -119,40 +120,40 @@
                   "value": "Public", "color": "lime",
                   "label": { "en": "Public - General Access", "fr": "Public - Accès général" },
                   "description": {
-                    "en": "[Placeholder] What this zone means: who may enter, what must be worn or shown, and what can and can't be left unattended here. Two or three lines at most.",
-                    "fr": "[Texte provisoire] Ce que signifie cette zone : qui peut y entrer, ce qu'il faut porter ou présenter, et ce qui peut ou non y être laissé sans surveillance. Deux ou trois lignes au plus."
+                    "en": "[Placeholder] Open to clients, visitors and staff during business hours. No badge is needed to enter. Keep confidential papers and screens out of public view.",
+                    "fr": "[Texte provisoire] Ouverte aux clients, aux visiteurs et au personnel pendant les heures d'ouverture. Aucun badge n'est requis. Gardez les documents et les écrans confidentiels hors de la vue du public."
                   }
                 },
                 {
                   "value": "Public Plus", "color": "yellow",
                   "label": { "en": "Public Plus - Authorized Entry", "fr": "Public Plus - Entrée autorisée" },
                   "description": {
-                    "en": "[Placeholder] What this zone means: who may enter, what must be worn or shown, and what can and can't be left unattended here. Two or three lines at most.",
-                    "fr": "[Texte provisoire] Ce que signifie cette zone : qui peut y entrer, ce qu'il faut porter ou présenter, et ce qui peut ou non y être laissé sans surveillance. Deux ou trois lignes au plus."
+                    "en": "[Placeholder] Staff with a valid badge, and visitors signed in and escorted. Badges are worn visibly at all times. Doors close behind you; don't let others follow you in.",
+                    "fr": "[Texte provisoire] Personnel muni d'un badge valide et visiteurs inscrits et accompagnés. Le badge se porte bien en vue en tout temps. Les portes se referment derrière vous; ne laissez entrer personne à votre suite."
                   }
                 },
                 {
                   "value": "Standards", "color": "berry",
                   "label": { "en": "Standards - Restricted Operation", "fr": "Normes - Fonctionnement restreint" },
                   "description": {
-                    "en": "[Placeholder] What this zone means: who may enter, what must be worn or shown, and what can and can't be left unattended here. Two or three lines at most.",
-                    "fr": "[Texte provisoire] Ce que signifie cette zone : qui peut y entrer, ce qu'il faut porter ou présenter, et ce qui peut ou non y être laissé sans surveillance. Deux ou trois lignes au plus."
+                    "en": "[Placeholder] Day-to-day operations for authorized staff only. Visitors need approval and an escort. Lock workstations when you step away and clear desks at the end of the day.",
+                    "fr": "[Texte provisoire] Activités courantes, réservées au personnel autorisé. Les visiteurs doivent être approuvés et accompagnés. Verrouillez votre poste quand vous vous absentez et rangez votre bureau en fin de journée."
                   }
                 },
                 {
                   "value": "Secure Restricted", "color": "orange",
                   "label": { "en": "Secure Restricted", "fr": "Sécurisé restreint" },
                   "description": {
-                    "en": "[Placeholder] What this zone means: who may enter, what must be worn or shown, and what can and can't be left unattended here. Two or three lines at most.",
-                    "fr": "[Texte provisoire] Ce que signifie cette zone : qui peut y entrer, ce qu'il faut porter ou présenter, et ce qui peut ou non y être laissé sans surveillance. Deux ou trois lignes au plus."
+                    "en": "[Placeholder] Named staff only, with access reviewed every quarter. Entry is logged at the door. No personal devices on the floor; report propped doors or tailgating right away.",
+                    "fr": "[Texte provisoire] Personnel désigné seulement; les accès sont revus chaque trimestre. Chaque entrée est consignée. Aucun appareil personnel sur l'étage; signalez sans tarder une porte bloquée ou une entrée à la suite d'une autre personne."
                   }
                 },
                 {
                   "value": "High Security", "color": "red",
                   "label": { "en": "High Security", "fr": "Haute sécurité" },
                   "description": {
-                    "en": "[Placeholder] What this zone means: who may enter, what must be worn or shown, and what can and can't be left unattended here. Two or three lines at most.",
-                    "fr": "[Texte provisoire] Ce que signifie cette zone : qui peut y entrer, ce qu'il faut porter ou présenter, et ce qui peut ou non y être laissé sans surveillance. Deux ou trois lignes au plus."
+                    "en": "[Placeholder] Critical assets such as vaults and server rooms. Two-person access only, recorded on camera. Every entry is pre-approved, signed in and out, and nothing leaves without sign-off.",
+                    "fr": "[Texte provisoire] Actifs essentiels, comme les chambres fortes et les salles de serveurs. Accès à deux personnes seulement, sous surveillance vidéo. Chaque entrée est approuvée à l'avance et consignée à l'arrivée et au départ; rien ne sort sans autorisation."
                   }
                 }
               ],

@@ -258,6 +258,7 @@
     assignNoUser: 'Your account couldn’t be identified, so the items assigned to you can’t be loaded.',
     assignRetry: 'Try again',
     assignRowRequired: 'Make a selection for this row.',
+    assignRowConfirmRequired: 'Confirm this value or choose a new one.',
     assignAllRequired: 'Make a selection for every row.',
     assignProgress: '{n} of {total} complete',
     assignSomeDone: '{n} of your items were already submitted and aren’t shown.',
@@ -356,6 +357,7 @@
     assignNoUser: 'Votre compte n’a pas pu être identifié; les éléments qui vous sont attribués ne peuvent donc pas être chargés.',
     assignRetry: 'Réessayer',
     assignRowRequired: 'Faites une sélection pour cette ligne.',
+    assignRowConfirmRequired: 'Confirmez cette valeur ou choisissez-en une nouvelle.',
     assignAllRequired: 'Faites une sélection pour chaque ligne.',
     assignProgress: '{n} sur {total} terminé(s)',
     assignSomeDone: '{n} de vos éléments ont déjà été soumis et ne sont pas affichés.',
@@ -1648,13 +1650,13 @@
         ' :checked="!!row.value" :disabled="row.saved" @change="rowConfirm(' + kq + ', row, $event.target.checked)"' +
         ' :aria-invalid="row.err && row.mode === \'confirm\' ? \'true\' : \'false\'" :aria-describedby="' + esc(jstr(base + '-r')) + ' + row.id">' +
         '<span>' + esc(S.assignConfirm) + '</span></label>' +
-        '<button type="button" class="btn btn--subtle btn--sm" :id="' + esc(jstr(base + '-g')) + ' + row.id"' +
+        '<button type="button" class="btn btn--secondary btn--lg" :id="' + esc(jstr(base + '-g')) + ' + row.id"' +
         ' x-show="!row.saved" @click="rowChange(' + kq + ', row)">' +
         icon('ic-fluent-edit-24-regular', 16) + '<span>' + esc(S.assignChange) + '</span></button></div>';
     }
     foot += '<div class="bspf-asg__pick"' + (hasCur ? ' x-show="row.mode!==\'confirm\'" x-cloak' : '') + '>' + c;
     if (hasCur) {
-      foot += '<button type="button" class="btn btn--tertiary btn--sm bspf-asg__keep" x-show="row.mode===\'change\' && !row.saved"' +
+      foot += '<button type="button" class="btn btn--tertiary btn--lg bspf-asg__keep" x-show="row.mode===\'change\' && !row.saved"' +
         ' @click="rowKeep(' + kq + ', row)">' + icon('ic-fluent-dismiss-24-regular', 16) +
         '<span>' + esc(S.assignKeep) + '</span></button>';
     }
@@ -1669,7 +1671,7 @@
       '<span class="bspf-asg__label" :id="' + esc(jstr(base + '-r')) + ' + row.id" x-text="row.label"></span>';
     if (f.source.detailColumn) h += '<span class="bspf-asg__detail" x-show="row.detail" x-text="row.detail"></span>';
     h += '</div><span class="bspf-asg__status" x-show="row.value || row.saved" x-cloak>' +
-      icon('ic-fluent-checkmark-circle-24-filled', 16) + '<span x-text="rowStatus(row)"></span></span></div>';
+      icon('ic-fluent-checkmark-24-regular', 16) + '<span x-text="rowStatus(row)"></span></span></div>';
     h += body + foot + '</div></template></div>';
 
     h += '<div class="progress progress--subtle bspf-asg__progress" x-show="asg.state===\'ready\' && values.' + K + '.length > 1" x-cloak' +
@@ -2641,7 +2643,11 @@
           if (this.asg.state !== 'ready') msg = this.asg.state === 'error' ? (this.asg.msg || S.assignLoadError) : S.assignLoading;
           else if (f.required) {
             var missing = 0;
-            v.forEach(function (r) { r.err = r.value || r.saved ? '' : S.assignRowRequired; if (r.err) missing++; });
+            // a row with a current value is confirmed or changed; one without is picked
+            v.forEach(function (r) {
+              r.err = r.value || r.saved ? '' : r.current ? S.assignRowConfirmRequired : S.assignRowRequired;
+              if (r.err) missing++;
+            });
             if (missing) msg = S.assignAllRequired;
           }
           this.errors[k] = msg;

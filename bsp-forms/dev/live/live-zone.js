@@ -3,8 +3,8 @@
 // end to end and read the saved rows back via REST. Lists come from live-zone-lists.js: a cross-site
 // twin of prod on the tenant ROOT site (prod: /teams/FCUWebDatastores), the page on the dev site.
 // Each run, as the signed-in test user: recycles that user's earlier responses, makes sure the
-// assignment rows exist (three for this user — one stored with different email casing, names with
-// an apostrophe and accents — plus one for someone else, which the form must not show), then:
+// assignment rows exist (three for this user, one stored with different email casing, plus one
+// for someone else, which the form must not show), then:
 //   EN submit (row 1 confirmed as is, row 2 changed, row 3 had no current zone: picked) → read
 //   back, incl. PreviousZone / ZoneChanged → reload shows "already submitted" →
 //   one response recycled → FR shows only that row → FR change saves the English value.
@@ -30,7 +30,9 @@ const ROOT = tenants.dev.tenantRoot.replace(/\/$/, '');
 const listApi = name => ROOT + "/_api/web/lists/getbytitle('" + encodeURIComponent(name) + "')";
 const A = listApi('PS_Zone-Attestation-Assignments');
 const R = listApi('PS_Zone-Attestation-Responses');
-const MINE = ['Floor 2 — Trading floor', "Floor 7 — D'Arcy executive suite", 'Parking P1 — Entrée sud'];
+// the example areas (sorted: Concourse Podium, Tower 10, Tower 37). Quotes and accents in list data
+// are covered by the harness's hostile-text test.
+const MINE = ['FCP - Concourse Podium', 'FCP - Tower 10', 'FCP - Tower 37'];
 const OTHER = 'Data centre — Hall B (not yours)';
 // CurrentZone per row of MINE (by index, after sorting): confirm, change, none (pick)
 const CUR = ['High Security', 'Public Plus', ''];

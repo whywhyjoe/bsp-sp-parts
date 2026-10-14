@@ -184,11 +184,11 @@
   };
   // what the dev tester is assigned (plus a row for someone else, which the
   // user filter must drop). Two rows have a current zone (confirm / change);
-  // Parking has none, so it gets the dropdown straight away.
+  // Tower 37 has none, so it gets the dropdown straight away.
   var ASSIGNMENTS = [
-    { ID: 11, UserEmail: 'Dev.Tester@example.com', UserDescription: 'Branch manager', AreaName: 'Floor 3 — East wing', CurrentZone: 'Public Plus' },
-    { ID: 12, UserEmail: 'dev.tester@example.com', UserDescription: 'Branch manager', AreaName: 'Floor 1 — Lobby & vault', CurrentZone: 'High Security' },
-    { ID: 13, UserEmail: 'dev.tester@example.com', UserDescription: 'Branch manager', AreaName: 'Parking level P2', CurrentZone: '' },
+    { ID: 11, UserEmail: 'Dev.Tester@example.com', UserDescription: 'Branch manager', AreaName: 'FCP - Tower 10', CurrentZone: 'Public Plus' },
+    { ID: 12, UserEmail: 'dev.tester@example.com', UserDescription: 'Branch manager', AreaName: 'FCP - Concourse Podium', CurrentZone: 'High Security' },
+    { ID: 13, UserEmail: 'dev.tester@example.com', UserDescription: 'Branch manager', AreaName: 'FCP - Tower 37', CurrentZone: '' },
     { ID: 14, UserEmail: 'someone.else@example.com', UserDescription: 'Facilities', AreaName: 'Data centre — Hall B', CurrentZone: 'Public' }
   ];
   // per-list schemas for the doctor (window.BSPF_MOCK_FIELDS[listTitle] wins)

@@ -246,7 +246,7 @@ of the value it shows.
 | `required` | Every row needs an answer (confirmed, or a value picked); each unanswered row shows its own error. |
 | `empty` / `allDone` | The screens for "nothing assigned" and "all already submitted". Engine defaults exist. |
 | `choiceLabel` | The small heading over the value on a row with no current value (a row with one says `assignCurrent`). Also the dropdowns' accessible name. (`rowLabel`, a column header in the 0.5.0 table, is ignored.) |
-| strings | `assignCurrent`, `assignConfirm`, `assignChange`, `assignKeep`, `assignNewPlaceholder`, `assignConfirmed` / `assignChanged` / `assignSelected` (the card's status), `assignRowRequired`, `assignAllRequired`, `assignProgress`. Generic engine defaults ("Confirm this is correct", "Change"…); override them in `strings` for the form's own words. |
+| strings | `assignCurrent`, `assignConfirm`, `assignChange`, `assignKeep`, `assignNewPlaceholder`, `assignConfirmed` / `assignChanged` / `assignSelected` (the card's status), `assignRowRequired` (a row to pick) / `assignRowConfirmRequired` (a row to confirm or change), `assignAllRequired`, `assignProgress`. Generic engine defaults ("Confirm this is correct", "Change"…); override them in `strings` for the form's own words. |
 
 - Every dropdown can be cleared: the **×** in the control, or **Clear
   selection** at the top of its menu.

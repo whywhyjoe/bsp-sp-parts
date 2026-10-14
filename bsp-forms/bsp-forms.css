@@ -542,13 +542,15 @@
 .bspf-asg__area { display: flex; flex-direction: column; gap: var(--space-20); min-width: 0; }
 .bspf-asg__label { font: var(--type-subtitle2); color: var(--fg-primary); overflow-wrap: anywhere; }
 .bspf-asg__detail { font: var(--type-caption1); color: var(--fg-secondary); }
+/* answered: a solid success badge (BSP .badge geometry), readable on any hue */
 .bspf-asg__status {
   display: inline-flex; align-items: center; gap: var(--space-40); flex: none;
-  padding: var(--space-20) var(--space-80);
-  border-radius: var(--radius-circle);
-  background: var(--surface-raised); color: var(--fg-success);
-  font: var(--type-caption1-strong);
+  height: 24px; padding: 0 var(--space-100) 0 var(--space-80);
+  border-radius: 12px;
+  background: var(--fg-success); color: var(--fg-on-accent);
+  font: var(--type-caption1-strong); white-space: nowrap;
 }
+.bspf-asg__status .icon { width: 16px; height: 16px; }
 
 .bspf-asg__body { display: flex; flex-direction: column; gap: var(--space-80); padding: var(--space-160) var(--space-200) var(--space-120); }
 .bspf-asg__eyebrow { font: var(--type-caption1-strong); color: var(--fg-secondary); letter-spacing: .06em; text-transform: uppercase; }
@@ -563,14 +565,34 @@
 .bspf-asg__arrow { display: inline-flex; color: var(--fg-secondary); }
 .bspf-asg__desc { margin: 0; max-width: 72ch; font: var(--type-body1); color: var(--fg-secondary); }
 
+/* the answer band. Unanswered: an accent tint and an accent rule, so the
+   action reads as "to do"; answered: it settles to neutral. */
 .bspf-asg__foot {
-  display: flex; flex-direction: column; gap: var(--space-40);
-  padding: var(--space-120) var(--space-200);
+  display: flex; flex-direction: column; gap: var(--space-80);
+  padding: var(--space-160) var(--space-200);
   border-radius: 0 0 var(--radius-large) 0;
-  background: var(--surface-subtle);
+  border-top: var(--stroke-thick) solid var(--accent-rest);
+  background: color-mix(in srgb, var(--accent-rest) 7%, var(--surface-raised));
+  transition: background var(--motion-normal) var(--ease-out), border-color var(--motion-normal) var(--ease-out);
 }
-.bspf-asg__row.has-value .bspf-asg__foot { border-top: var(--stroke-thin) solid var(--stroke-divider); }
-.bspf-asg__confirm, .bspf-asg__pick { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-120) var(--space-240); }
+.bspf-asg__row.is-set .bspf-asg__foot { border-top-color: var(--stroke-divider); background: var(--surface-subtle); }
+.bspf-asg__row.is-error .bspf-asg__foot { border-top-color: var(--fg-danger); }
+.bspf-asg__confirm, .bspf-asg__pick { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-120) var(--space-160); }
+/* the confirm checkbox as a bordered tile: a big, obvious target */
+.bspf-asg__confirm .check {
+  min-height: 40px; padding: 0 var(--space-160);
+  border: var(--stroke-thin) solid var(--stroke-control-strong);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+  font: var(--type-body1-strong);
+  transition: background var(--motion-normal) var(--ease-out), border-color var(--motion-normal) var(--ease-out);
+}
+.bspf-asg__confirm .check:hover { border-color: var(--accent-rest); }
+.bspf-asg__confirm .check input { width: 20px; height: 20px; }
+.bspf-asg__confirm .check:has(input:checked) { border-color: var(--fg-success); background: var(--surface-success-tint); }
+.bspf-asg__confirm .check:has(input:focus-visible) { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: 1px; }
+.bspf-asg__confirm .check:has(input[aria-invalid="true"]) { border-color: var(--fg-danger); }
+.bspf-asg__pick .bspf-combo__control { min-height: 40px; }
 .bspf-asg__pick .bspf-combo { flex: 0 1 360px; min-width: 0; }
 .bspf-asg__foot .field__error { margin: 0; }
 /* a saved row (partial save, retry pending) is shown, not editable */
