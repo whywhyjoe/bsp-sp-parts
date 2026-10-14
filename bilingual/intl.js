@@ -1,6 +1,6 @@
 /**
  * @fileoverview intl — bilingual EN/FR string swapper for SharePoint pages.
- * @version 1.1.3
+ * @version 1.1.4
  *
  * One dictionary holds both languages side by side (see strings.js). HTML
  * is marked up with data-intl attributes; script code calls intl.t(). No
@@ -57,7 +57,7 @@
   // shared global scope, so a second load (two web parts, SPA re-run, or
   // any other script with a top-level VERSION) throws a SyntaxError.
   var LOG_PREFIX = '[intl]';
-  var VERSION = '1.1.3';
+  var VERSION = '1.1.4';
 
   // A second load (two web parts, an SPA re-run) keeps the first instance —
   // its dictionaries and onChange subscribers (bsp-forms subscribes once) —
@@ -684,7 +684,9 @@
       // Written even when lang is already active, for the same reason.
       var url = new global.URL(global.location.href);
       url.searchParams.set('lang', lang);
-      global.history.replaceState(null, '', url.toString());
+      // Pass the current state through: SharePoint's SPA router keeps its
+      // navigation data there, and null would erase it (Back breaks).
+      global.history.replaceState(global.history.state, '', url.toString());
     } catch (e) {
       console.warn(LOG_PREFIX + " setLang: URL API unavailable — reload would fall back to detection");
     }
