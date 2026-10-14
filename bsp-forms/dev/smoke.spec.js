@@ -571,6 +571,18 @@ async function testZoneAttestation(browser) {
     JSON.stringify([cAdds[12], cAdds[11]]));
   check('no page errors (confirm / change)', page.__errors.length === 0, page.__errors.join(' | '));
   await ctx.close();
+  // previousColumn named Title wins over target.titleTemplate (it isn't overwritten)
+  ({ ctx, page } = await openZone(browser, { mutate: cfg => { cfg.pages[0].sections[1].fields[0].previousColumn = 'Title'; } }));
+  await zoneConfirm(page, 0); await zoneConfirm(page, 1); await zonePick(page, 2, L.sec);
+  await page.locator('[data-bspf-field="attestation"] input').check();
+  await navClick(page, 'Submit attestation'); await page.waitForTimeout(250);
+  await navClick(page, 'Confirm');
+  await page.waitForSelector('.bspf-done:not(.bspf-done--empty):not(.bspf-done--allDone)', { state: 'visible', timeout: 5000 });
+  const tAdds = Object.fromEntries((await zoneAdds(page)).map(p => [p.LookupID, p]));
+  check('previousColumn = Title keeps the previous zone; a row with none falls back to titleTemplate',
+    tAdds[12].Title === 'High Security' && tAdds[13].Title === 'Parking level P2 — dev.tester@example.com',
+    JSON.stringify([tAdds[12].Title, tAdds[13].Title]));
+  await ctx.close();
   // a CurrentZone that isn't a choice value → treated as none
   ({ ctx, page } = await openZone(browser, {
     rows: [{ ID: 31, UserEmail: 'dev.tester@example.com', UserDescription: 'x', AreaName: 'Old wing', CurrentZone: 'Green' }]

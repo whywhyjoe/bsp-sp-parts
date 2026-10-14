@@ -2885,6 +2885,8 @@
             // (a row with no current value counts as changed)
             if (fa.previousColumn && row.current) payload[fa.previousColumn] = row.current;
             if (fa.changedColumn) payload[fa.changedColumn] = row.value !== row.current;
+            // a row column named Title wins over titleTemplate, like a field's
+            if ([fa.column, fa.previousColumn, fa.changedColumn].indexOf('Title') > -1 && 'Title' in payload) titleMapped = true;
           }
           if (!titleMapped && cfg.target.titleTemplate) {
             payload.Title = self.renderTemplate(cfg.target.titleTemplate, row);
