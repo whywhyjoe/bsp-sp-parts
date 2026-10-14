@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "bsp-sp-parts-static",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8646", "--bind", "127.0.0.1"],
+      "port": 8646
+    },
+    {
+      "name": "repos-static",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8647", "--bind", "127.0.0.1", "--directory", "C:/dev/repos"],
+      "port": 8647
+    }
+  ]
+}
