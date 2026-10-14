@@ -1,6 +1,6 @@
 /**
  * @fileoverview intl — bilingual EN/FR string swapper for SharePoint pages.
- * @version 1.1.1
+ * @version 1.1.2
  *
  * One dictionary holds both languages side by side (see strings.js). HTML
  * is marked up with data-intl attributes; script code calls intl.t(). No
@@ -57,7 +57,18 @@
   // shared global scope, so a second load (two web parts, SPA re-run, or
   // any other script with a top-level VERSION) throws a SyntaxError.
   var LOG_PREFIX = '[intl]';
-  var VERSION = '1.1.1';
+  var VERSION = '1.1.2';
+
+  // A second load (two web parts, an SPA re-run) keeps the first instance —
+  // its dictionaries and onChange subscribers (bsp-forms subscribes once) —
+  // and only re-checks the language for the page now showing.
+  if (global.intl && typeof global.intl.__reload === 'function') {
+    console.log(
+      `${LOG_PREFIX} ${VERSION} Already loaded (${global.intl.version}); reusing it`
+    );
+    global.intl.__reload();
+    return;
+  }
 
   console.log(`${LOG_PREFIX} ${VERSION} Loaded`);
   console.log(`${LOG_PREFIX} Last modified: 2026/10/14`);
@@ -82,6 +93,19 @@
   }
 
   /**
+   * Reduces a language tag to a supported language, or null. The whole
+   * value must be a tag — "fr", "fr-CA", "en-us" — so "?lang=friday" is not
+   * mistaken for French.
+   *
+   * @param {*} value - Raw language tag from the URL, SharePoint or <html lang>
+   * @returns {?('en'|'fr')} The supported language, or null
+   */
+  function normLang(value) {
+    var m = /^(en|fr)(-[a-z0-9]+)*$/.exec(String(value == null ? '' : value).trim().toLowerCase());
+    return m ? m[1] : null;
+  }
+
+  /**
    * Detects the current page language using available SharePoint and page signals.
    * Side-effect free: the late-toggle poll is started once, at init.
    *
@@ -98,19 +122,16 @@
   function detectLang() {
     console.log(`${LOG_PREFIX} ${VERSION} detectLang() starting`);
 
-    var queryLanguage = new URLSearchParams(global.location.search)
-      .get('lang')
-      ?.trim()
-      .toLowerCase()
-      .slice(0, 2);
+    var queryRaw = new URLSearchParams(global.location.search).get('lang');
+    var queryLanguage = normLang(queryRaw);
 
     console.log(
       `${LOG_PREFIX} ${VERSION} Query string lang = ${
-      queryLanguage || '(none)'
+      queryRaw || '(none)'
     }`
     );
 
-    if (SUPPORTED.indexOf(queryLanguage) !== -1) {
+    if (queryLanguage) {
       console.log(
         `${LOG_PREFIX} ${VERSION} Language detected from query string: ${queryLanguage}`
       );
@@ -121,14 +142,9 @@
       `${LOG_PREFIX} ${VERSION} Query string language not supported or missing`
     );
 
-    var sharePointLanguage =
-      global._spPageContextInfo &&
-      global._spPageContextInfo.currentUICultureName ?
-      String(global._spPageContextInfo.currentUICultureName)
-      .trim()
-      .toLowerCase()
-      .slice(0, 2) :
-      null;
+    var sharePointLanguage = normLang(
+      global._spPageContextInfo && global._spPageContextInfo.currentUICultureName
+    );
 
     var toggleButton = global.document.querySelector(TOGGLE_SELECTOR);
 
@@ -176,7 +192,7 @@
     }`
     );
 
-    if (SUPPORTED.indexOf(sharePointLanguage) !== -1) {
+    if (sharePointLanguage) {
       console.log(
         `${LOG_PREFIX} ${VERSION} Language detected from SharePoint culture: ${sharePointLanguage}`
       );
@@ -187,18 +203,16 @@
       `${LOG_PREFIX} ${VERSION} SharePoint culture not supported or unavailable`
     );
 
-    var documentLanguage = global.document.documentElement.lang
-      ?.trim()
-      .toLowerCase()
-      .slice(0, 2);
+    var documentRaw = global.document.documentElement.lang;
+    var documentLanguage = normLang(documentRaw);
 
     console.log(
       `${LOG_PREFIX} ${VERSION} Document html lang = ${
-      documentLanguage || '(not set)'
+      documentRaw || '(not set)'
     }`
     );
 
-    if (SUPPORTED.indexOf(documentLanguage) !== -1) {
+    if (documentLanguage) {
       console.log(
         `${LOG_PREFIX} ${VERSION} Language detected from html lang attribute: ${documentLanguage}`
       );
@@ -222,7 +236,13 @@
     `${LOG_PREFIX} ${VERSION} Final detected language: ${current}`
   );
 
+  // Declare it now, not at the first full apply(): a consumer that loads
+  // this on demand (bsp-forms) may render from getLang() and never call
+  // apply(), and assistive tech reads the page language from here.
+  global.document.documentElement.lang = current;
+
   var userChose = false; // set by setLang(); late detection never overrides it
+  var polling = false;   // a late-toggle poll is running
   var messages = {};
   var missing = {};
   var listeners = [];
@@ -304,7 +324,7 @@
         try {
           addMessages(JSON.parse(xhr.responseText), lang);
           apply();
-          for (var i = 0; i < listeners.length; i++) listeners[i](current);
+          notify();
           console.log(LOG_PREFIX + " load: merged " + url + " successfully");
         } catch (e) {
           err = e;
@@ -560,23 +580,63 @@
   function switchTo(lang) {
     current = lang;
     apply();
-    for (var i = 0; i < listeners.length; i++) listeners[i](current);
+    notify();
+  }
+
+  /**
+   * Calls every onChange listener with the active language. Each call is
+   * isolated: one listener throwing doesn't skip the ones after it (the
+   * language and DOM have already changed); its error is logged.
+   *
+   * @returns {void}
+   */
+  function notify() {
+    var errors = [];
+    for (var i = 0; i < listeners.length; i++) {
+      try {
+        listeners[i](current);
+      } catch (e) {
+        errors.push(e);
+      }
+    }
+    for (var j = 0; j < errors.length; j++) {
+      console.error(LOG_PREFIX + " onChange listener failed:", errors[j]);
+    }
+  }
+
+  /**
+   * Starts the late-toggle poll, unless the toggle is already on the page
+   * or a poll is already running.
+   *
+   * @returns {void}
+   */
+  function startTogglePoll() {
+    if (polling || global.document.querySelector(TOGGLE_SELECTOR)) return;
+    console.log(
+      `${LOG_PREFIX} ${VERSION} Language toggle button not found. Running late detection loop`
+    );
+    polling = true;
+    waitForLanguageToggle(0);
   }
 
   /**
    * Polls for a language toggle that SharePoint renders after this script
-   * runs (up to 20 × 250 ms), then re-detects once. Started once at init,
-   * only when the toggle wasn't there yet. An explicit setLang() wins.
+   * runs (up to 20 × 250 ms), then re-detects once. Started only through
+   * startTogglePoll(). An explicit setLang() wins.
    *
    * @param {number} attempt - Poll count so far
    * @returns {void}
    */
   function waitForLanguageToggle(attempt) {
-    if (userChose) return;
+    if (userChose) {
+      polling = false;
+      return;
+    }
 
     var button = global.document.querySelector(TOGGLE_SELECTOR);
 
     if (button) {
+      polling = false;
       var detected = detectLang();
 
       if (detected !== current) {
@@ -591,6 +651,7 @@
     }
 
     if (attempt >= 20) {
+      polling = false;
       console.log(
         `${LOG_PREFIX} ${VERSION} Language toggle never appeared`
       );
@@ -716,14 +777,33 @@
     load: load,
     onChange: onChange,
     report: report,
-    version: VERSION
+    version: VERSION,
+    __reload: reload // internal: a second load of this file calls it
   };
 
-  // Last, so a late switch finds the whole API (and listeners) in place.
-  if (!global.document.querySelector(TOGGLE_SELECTOR)) {
-    console.log(
-      `${LOG_PREFIX} ${VERSION} Language toggle button not found. Running late detection loop`
-    );
-    waitForLanguageToggle(0);
+  /**
+   * What a second load of this file does instead of building a new
+   * instance: re-detect for the page now showing (an SPA navigation may have
+   * changed it), switch if needed, and re-arm the late-toggle poll. A
+   * reload is a fresh page, so an earlier setLang() no longer pins the
+   * language — its ?lang= write-back still carries it if the URL kept it.
+   *
+   * @returns {void}
+   */
+  function reload() {
+    userChose = false;
+    var detected = detectLang();
+    if (detected !== current) {
+      console.log(
+        `${LOG_PREFIX} ${VERSION} Reload detection: ${current} -> ${detected}`
+      );
+      switchTo(detected);
+    } else {
+      global.document.documentElement.lang = current;
+    }
+    startTogglePoll();
   }
+
+  // Last, so a late switch finds the whole API (and listeners) in place.
+  startTogglePoll();
 })(window);
