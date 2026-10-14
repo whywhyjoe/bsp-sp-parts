@@ -901,6 +901,16 @@
     if ((f.previousColumn || f.changedColumn) && !src.currentColumn) {
       errors.push(where + ': previousColumn / changedColumn need source.currentColumn');
     }
+    // every target column a row writes must be distinct, or one silently
+    // overwrites another (e.g. previousColumn = column saves the old value)
+    var targets = Object.create(null);
+    [['column', f.column], ['previousColumn', f.previousColumn], ['changedColumn', f.changedColumn]]
+      .concat(Object.keys(f.rowColumns || {}).map(function (c) { return ['rowColumns', c]; }))
+      .forEach(function (p) {
+        if (!p[1]) return;
+        if (targets[p[1]]) errors.push(where + ': target column "' + p[1] + '" is used by both ' + targets[p[1]] + ' and ' + p[0]);
+        else targets[p[1]] = p[0];
+      });
     // every source column the rows need: label, detail, current, and what rowColumns copies
     var cols = [];
     [src.labelColumn, src.detailColumn, src.currentColumn].concat(Object.keys(f.rowColumns).map(function (k) { return f.rowColumns[k]; }))
@@ -1636,7 +1646,7 @@
       foot += '<div class="bspf-asg__confirm" x-show="row.mode===\'confirm\'">' +
         '<label class="check"><input type="checkbox" :id="' + esc(jstr(base + '-k')) + ' + row.id"' +
         ' :checked="!!row.value" :disabled="row.saved" @change="rowConfirm(' + kq + ', row, $event.target.checked)"' +
-        ' :aria-invalid="row.err ? \'true\' : \'false\'" :aria-describedby="' + esc(jstr(base + '-r')) + ' + row.id">' +
+        ' :aria-invalid="row.err && row.mode === \'confirm\' ? \'true\' : \'false\'" :aria-describedby="' + esc(jstr(base + '-r')) + ' + row.id">' +
         '<span>' + esc(S.assignConfirm) + '</span></label>' +
         '<button type="button" class="btn btn--subtle btn--sm" :id="' + esc(jstr(base + '-g')) + ' + row.id"' +
         ' x-show="!row.saved" @click="rowChange(' + kq + ', row)">' +
@@ -2751,11 +2761,15 @@
         var k = this.pageFieldKeys(this.page).filter(function (x) { return self.errors[x]; })[0];
         if (!k) return;
         if (cfg._byKey[k].type === 'assignments') {
-          // the first row missing a choice (or the retry button) — after the
-          // tick that renders the rows' aria-invalid
+          // the first row's invalid control (only the visible one carries
+          // aria-invalid), else the load error's retry button — after the tick
+          // that renders the rows' aria-invalid. Two queries, not one selector
+          // list: a list returns whichever matches first in the document, and
+          // the cards' Change buttons are .btn too.
           var root = this.$root;
           this.$nextTick(function () {
-            var r = root.querySelector('[data-bspf-field="' + k + '"] [aria-invalid="true"], [data-bspf-field="' + k + '"] .btn');
+            var sel = '[data-bspf-field="' + k + '"] ';
+            var r = root.querySelector(sel + '[aria-invalid="true"]') || root.querySelector(sel + '.msgbar .btn');
             if (r) r.focus();
           });
           return;

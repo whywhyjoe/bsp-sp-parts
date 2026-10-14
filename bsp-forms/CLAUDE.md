@@ -160,7 +160,9 @@ contract. Read both before changing behavior.
   JSON copies). It waits while a submit is busy. Keep new state that must
   survive a switch in `snapshotState`'s list.
 - **Choice `value` is data, `label` is display.** Translate labels, never
-  values: the zone attestation must save "Green" whatever the language.
+  values: the zone attestation must save `Public` / `Public Plus` /
+  `Standards` / `Secure Restricted` / `High Security` whatever the language
+  (and its `CurrentZone` column must hold exactly those).
 - **The form root's `lang` carries `lang-keep`.** Without it, the bilingual
   library's `lang-blocks.css` would hide the form, and `intl.apply()` would
   disable its inputs during a switch (apply runs before onChange listeners).

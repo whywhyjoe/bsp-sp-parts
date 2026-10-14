@@ -17,7 +17,7 @@ in the **same** library as those two. Use whatever path your existing
 ## 1. Updating the engine (any form)
 
 Do this whenever `bsp-forms.js` or `bsp-forms.css` changes on main. The engine
-version is the `VERSION` line near the top of `bsp-forms.js` (now `0.5.0`).
+version is the `VERSION` line near the top of `bsp-forms.js` (now `0.5.1`).
 
 1. Keep a copy of the deployed `bsp-forms.js` and `bsp-forms.css` (for
    rollback).
@@ -29,7 +29,7 @@ version is the `VERSION` line near the top of `bsp-forms.js` (now `0.5.0`).
    the other forms; they never load it.
 4. **Bump `?v=` on every page that embeds a form.** It's the `?v=…` at the end
    of the `bsp-forms.js` script URL in each page's web part snippet; use the
-   engine version, e.g. `?v=0.5.0`. The same stamp cache-busts
+   engine version, e.g. `?v=0.5.1`. The same stamp cache-busts
    `bsp-forms.css`. A page left on its old `?v=` can keep running the cached
    old engine.
 5. Open each form page once and check that it renders and that devtools shows
@@ -38,7 +38,12 @@ version is the `VERSION` line near the top of `bsp-forms.js` (now `0.5.0`).
 Config JSON files (`forms/*.json`) are fetched uncached, so editing one never
 needs a `?v=` bump: it's live on the next page load.
 
-**What 0.5.0 changes for existing forms:** nothing in how they look or what
+**What 0.5.1 changes for existing forms:** only `assignments` forms change
+(the zone attestation is the only one): their rows become cards, with the
+confirm-or-change flow when the config sets `source.currentColumn`. Every
+other form looks and saves exactly as on 0.5.0.
+
+**What 0.5.0 changed for existing forms:** nothing in how they look or what
 they save. Inputs (attachments included) are locked while a submit is saving.
 The save sends the list's item type explicitly, which fixes a pnp cache clash
 between same-titled lists on different sites. The doctor now accepts a Text
@@ -48,7 +53,9 @@ column for a yes/no field that saves words.
 
 ## 2. Installing the Physical Security Zones Attestation
 
-Needs engine 0.5.0 or later (section 1) and `intl.js` in `Code/lib/`.
+Needs engine **0.5.1** or later (section 1) and `intl.js` in `Code/lib/`. An
+older engine ignores `currentColumn`, `previousColumn` and `changedColumn`:
+it shows a plain dropdown and never writes `PreviousZone` / `ZoneChanged`.
 
 ### a. The two lists (by hand), on `/teams/FCUWebDatastores`
 
@@ -117,7 +124,7 @@ tenant host; keep the path matching where `Code/` really is:
 ```html
 <div data-bsp-form data-validate
      data-config="/sites/FCUPortal/Code/bsp-forms/forms/ps-zone-attestation.json"></div>
-<script src="https://TENANT.sharepoint.com/sites/FCUPortal/Code/bsp-forms/bsp-forms.js?v=0.5.0"></script>
+<script src="https://TENANT.sharepoint.com/sites/FCUPortal/Code/bsp-forms/bsp-forms.js?v=0.5.1"></script>
 ```
 
 That's all the page needs: the engine loads the design system, Alpine, pnp
@@ -194,7 +201,7 @@ Add a Modern Script Editor web part with:
 ```html
 <div data-bsp-form data-validate
      data-config="/sites/FCUPortal/Code/bsp-forms/forms/classic-url-request.json"></div>
-<script src="https://TENANT.sharepoint.com/sites/FCUPortal/Code/bsp-forms/bsp-forms.js?v=0.5.0"></script>
+<script src="https://TENANT.sharepoint.com/sites/FCUPortal/Code/bsp-forms/bsp-forms.js?v=0.5.1"></script>
 ```
 
 Whatever sends old links here must open the page as

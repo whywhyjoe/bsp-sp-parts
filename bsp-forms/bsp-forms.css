@@ -202,7 +202,7 @@
   border: none; border-radius: var(--radius-circle);
   background: transparent; color: inherit; cursor: pointer; flex: none;
 }
-.bspf-pill__remove:hover { background: rgba(0, 25, 40, .08); }
+.bspf-pill__remove:hover { background: color-mix(in srgb, var(--bmo-slate) 8%, transparent); }
 .bspf-pill__remove:focus-visible { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: 1px; }
 .bspf-pill__remove .icon { width: 10px; height: 10px; }
 
@@ -463,7 +463,7 @@
   border-radius: var(--radius-circle);
   background: var(--bspf-hue, var(--f2-grey-74));
   /* a hairline ring keeps light hues (yellow) visible on white */
-  box-shadow: inset 0 0 0 1px rgba(0, 25, 40, .14);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bmo-slate) 14%, transparent);
 }
 .bspf-zone { display: inline-flex; align-items: center; gap: var(--space-80); min-width: 0; }
 .bspf-zone > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -554,7 +554,7 @@
 .bspf-asg__eyebrow { font: var(--type-caption1-strong); color: var(--fg-secondary); letter-spacing: .06em; text-transform: uppercase; }
 .bspf-asg__zones { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-80) var(--space-120); }
 .bspf-asg__zone { display: inline-flex; align-items: center; gap: var(--space-80); min-width: 0; font: var(--type-subtitle2); color: var(--fg-primary); }
-.bspf-asg__zone .bspf-dot { width: 20px; height: 20px; box-shadow: inset 0 0 0 1px rgba(0, 25, 40, .14), 0 0 0 2px var(--surface-raised); }
+.bspf-asg__zone .bspf-dot { width: 20px; height: 20px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bmo-slate) 14%, transparent), 0 0 0 2px var(--surface-raised); }
 .bspf-asg__zonename { overflow-wrap: anywhere; }
 /* changed: the old value greys out and is struck through */
 .bspf-asg__zone.is-replaced { color: var(--fg-secondary); font: var(--type-body1); }

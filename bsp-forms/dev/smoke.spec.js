@@ -539,8 +539,28 @@ async function testZoneAttestation(browser) {
     !(await row0.locator('.bspf-asg__confirm input').isChecked()) && await row0.locator('.bspf-asg__pick').isHidden() &&
     (await row0.locator('.bspf-asg__zone.is-replaced:visible').count()) === 0 &&
     (await page.evaluate(() => document.activeElement.textContent.trim())) === 'Change zone');
-  await zoneConfirm(page, 0); await zoneConfirm(page, 1); await zonePick(page, 2, L.sec);
+  // validation focus: rows 0-1 answered, row 1 switched to "change" and left empty,
+  // row 2 (pick) empty → focus lands on row 1's visible dropdown, and only visible
+  // controls carry aria-invalid
+  await zoneConfirm(page, 0);
+  await page.locator('.bspf-asg__row').nth(1).locator('.bspf-asg__confirm button').click();
+  await page.waitForTimeout(100);
+  await page.keyboard.press('Escape');
   await page.locator('[data-bspf-field="attestation"] input').check();
+  await navClick(page, 'Submit attestation');
+  await page.waitForTimeout(300);
+  const inv = await page.evaluate(() => {
+    const vis = el => !!el.offsetParent;
+    const all = [...document.querySelectorAll('[data-bspf-field="zones"] [aria-invalid="true"]')];
+    const a = document.activeElement;
+    return { n: all.length, allVisible: all.every(vis), activeRole: a && a.getAttribute('role'),
+      activeRow: [...document.querySelectorAll('.bspf-asg__row')].findIndex(r => r.contains(a)) };
+  });
+  check('validation: focus on the first unanswered row\'s visible dropdown; aria-invalid only on visible controls',
+    inv.n === 2 && inv.allVisible && inv.activeRole === 'combobox' && inv.activeRow === 1, JSON.stringify(inv));
+  await page.locator('.bspf-asg__row').nth(1).locator('.bspf-asg__keep').click();
+  await page.waitForTimeout(80);
+  await zoneConfirm(page, 1); await zonePick(page, 2, L.sec);
   await navClick(page, 'Submit attestation'); await page.waitForTimeout(250);
   await navClick(page, 'Confirm');
   await page.waitForSelector('.bspf-done:not(.bspf-done--empty):not(.bspf-done--allDone)', { state: 'visible', timeout: 5000 });
@@ -794,7 +814,9 @@ async function testZoneAttestation(browser) {
       cfg.pages[0].sections[1].fields.push(f);
     }],
     ['form.languages ["de"] → error card', cfg => { cfg.form.languages = ['de']; }],
-    ['previousColumn without source.currentColumn → error card', cfg => { delete cfg.pages[0].sections[1].fields[0].source.currentColumn; }]
+    ['previousColumn without source.currentColumn → error card', cfg => { delete cfg.pages[0].sections[1].fields[0].source.currentColumn; }],
+    ['previousColumn = column → error card', cfg => { cfg.pages[0].sections[1].fields[0].previousColumn = 'ZoneSelection'; }],
+    ['changedColumn = a rowColumns target → error card', cfg => { cfg.pages[0].sections[1].fields[0].changedColumn = 'AreaName'; }]
   ]) {
     ({ ctx, page } = await openZone(browser, { mutate }));
     const state = await page.getAttribute('[data-bsp-form]', 'data-bspf-state');
