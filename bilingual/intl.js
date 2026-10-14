@@ -1,6 +1,6 @@
 /**
  * @fileoverview intl — bilingual EN/FR string swapper for SharePoint pages.
- * @version 1.1.2
+ * @version 1.1.3
  *
  * One dictionary holds both languages side by side (see strings.js). HTML
  * is marked up with data-intl attributes; script code calls intl.t(). No
@@ -57,7 +57,7 @@
   // shared global scope, so a second load (two web parts, SPA re-run, or
   // any other script with a top-level VERSION) throws a SyntaxError.
   var LOG_PREFIX = '[intl]';
-  var VERSION = '1.1.2';
+  var VERSION = '1.1.3';
 
   // A second load (two web parts, an SPA re-run) keeps the first instance —
   // its dictionaries and onChange subscribers (bsp-forms subscribes once) —
@@ -94,14 +94,15 @@
 
   /**
    * Reduces a language tag to a supported language, or null. The whole
-   * value must be a tag — "fr", "fr-CA", "en-us" — so "?lang=friday" is not
-   * mistaken for French.
+   * value must be a well-formed tag — language, optional 4-letter script,
+   * optional 2-letter or 3-digit region: "fr", "fr-CA", "en-us",
+   * "fr-Latn-CA" — so "?lang=friday" and "?lang=fr-1" are not French.
    *
    * @param {*} value - Raw language tag from the URL, SharePoint or <html lang>
    * @returns {?('en'|'fr')} The supported language, or null
    */
   function normLang(value) {
-    var m = /^(en|fr)(-[a-z0-9]+)*$/.exec(String(value == null ? '' : value).trim().toLowerCase());
+    var m = /^(en|fr)(-[a-z]{4})?(-([a-z]{2}|\d{3}))?$/.exec(String(value == null ? '' : value).trim().toLowerCase());
     return m ? m[1] : null;
   }
 
@@ -242,7 +243,7 @@
   global.document.documentElement.lang = current;
 
   var userChose = false; // set by setLang(); late detection never overrides it
-  var polling = false;   // a late-toggle poll is running
+  var pollTimer = null;  // pending late-toggle poll timeout, if any
   var messages = {};
   var missing = {};
   var listeners = [];
@@ -605,17 +606,22 @@
   }
 
   /**
-   * Starts the late-toggle poll, unless the toggle is already on the page
-   * or a poll is already running.
+   * (Re)starts the late-toggle poll with a full window: any poll still
+   * pending is cancelled first, so polls never stack and a reload (SPA
+   * navigation) never inherits an almost-expired one. No poll when the
+   * toggle is already on the page.
    *
    * @returns {void}
    */
   function startTogglePoll() {
-    if (polling || global.document.querySelector(TOGGLE_SELECTOR)) return;
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    if (global.document.querySelector(TOGGLE_SELECTOR)) return;
     console.log(
       `${LOG_PREFIX} ${VERSION} Language toggle button not found. Running late detection loop`
     );
-    polling = true;
     waitForLanguageToggle(0);
   }
 
@@ -628,15 +634,12 @@
    * @returns {void}
    */
   function waitForLanguageToggle(attempt) {
-    if (userChose) {
-      polling = false;
-      return;
-    }
+    pollTimer = null;
+    if (userChose) return;
 
     var button = global.document.querySelector(TOGGLE_SELECTOR);
 
     if (button) {
-      polling = false;
       var detected = detectLang();
 
       if (detected !== current) {
@@ -651,14 +654,13 @@
     }
 
     if (attempt >= 20) {
-      polling = false;
       console.log(
         `${LOG_PREFIX} ${VERSION} Language toggle never appeared`
       );
       return;
     }
 
-    setTimeout(function () {
+    pollTimer = setTimeout(function () {
       waitForLanguageToggle(attempt + 1);
     }, 250);
 
@@ -667,7 +669,8 @@
   /**
    * Switches the active language, re-applies the DOM, syncs the ?lang= URL
    * param (so a reload stays on the chosen language), and notifies onChange
-   * listeners. No-op if lang is unsupported or already active.
+   * listeners. No-op if lang is unsupported. Re-picking the active language
+   * still records the choice (pin + ?lang=) but changes nothing else.
    *
    * @param {'en'|'fr'} lang - Language to switch to
    * @returns {void}
@@ -675,17 +678,18 @@
   function setLang(lang) {
     if (SUPPORTED.indexOf(lang) === -1) return;
     userChose = true; // even re-picking the current language pins it
-    if (lang === current) return;
-    console.log(LOG_PREFIX + " setLang: " + current + " -> " + lang);
     try {
-      // ?lang= is detection's first signal, so a reload stays in the
-      // chosen language.
+      // ?lang= is detection's first signal, so the choice outlives both a
+      // page reload and a second load of this file (which clears the pin).
+      // Written even when lang is already active, for the same reason.
       var url = new global.URL(global.location.href);
       url.searchParams.set('lang', lang);
       global.history.replaceState(null, '', url.toString());
     } catch (e) {
       console.warn(LOG_PREFIX + " setLang: URL API unavailable — reload would fall back to detection");
     }
+    if (lang === current) return;
+    console.log(LOG_PREFIX + " setLang: " + current + " -> " + lang);
     switchTo(lang);
   }
 
@@ -784,9 +788,12 @@
   /**
    * What a second load of this file does instead of building a new
    * instance: re-detect for the page now showing (an SPA navigation may have
-   * changed it), switch if needed, and re-arm the late-toggle poll. A
-   * reload is a fresh page, so an earlier setLang() no longer pins the
-   * language — its ?lang= write-back still carries it if the URL kept it.
+   * changed it), switch if needed, and restart the late-toggle poll with a
+   * full window. A reload may be a fresh page, so an earlier setLang() no
+   * longer pins the language — its ?lang= write-back (always written, even
+   * for the active language) still carries the choice while the URL has it.
+   * Only a copy that has this hook is reused: an older intl.js loaded first
+   * is replaced, as before — deploy one shared copy per site (README).
    *
    * @returns {void}
    */
