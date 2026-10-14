@@ -1,13 +1,6 @@
-const LOG_PREFIX = "[intl]";
-const VERSION = "1.11";
-
-console.log(`${LOG_PREFIX} ${VERSION} Loaded`);
-console.log(`${LOG_PREFIX} Last modified: 2026/09/18 12:30:14
-  `);
-
 /**
  * @fileoverview intl — bilingual EN/FR string swapper for SharePoint pages.
- * @version = 1.1
+ * @version 1.1.1
  *
  * One dictionary holds both languages side by side (see strings.js). HTML
  * is marked up with data-intl attributes; script code calls intl.t(). No
@@ -24,7 +17,7 @@ console.log(`${LOG_PREFIX} Last modified: 2026/09/18 12:30:14
  *
  * @author jzapert; FCU Portal Team; TBD
  * @created Created: 2026/08/01 00:00:00
- * @lastmodified Last modified: 2026/09/18 00:00:00
+ * @lastmodified Last modified: 2026/10/14 00:00:00
  *
  * @example
  * // Keyed tier
@@ -60,24 +53,48 @@ console.log(`${LOG_PREFIX} Last modified: 2026/09/18 12:30:14
 (function (global) {
   'use strict';
 
+  // Inside the IIFE on purpose: top-level const would live in the page's
+  // shared global scope, so a second load (two web parts, SPA re-run, or
+  // any other script with a top-level VERSION) throws a SyntaxError.
+  var LOG_PREFIX = '[intl]';
+  var VERSION = '1.1.1';
+
+  console.log(`${LOG_PREFIX} ${VERSION} Loaded`);
+  console.log(`${LOG_PREFIX} Last modified: 2026/10/14`);
+
   var DEFAULT_LANG = 'en';
   var SUPPORTED = ['en', 'fr'];
+  var TOGGLE_SELECTOR = '#LanguageToggle button';
+
+  /**
+   * Reads the page's language toggle. Canadian convention: the toggle names
+   * the OTHER language, so a button reading "FR" / "Français" means the page
+   * is currently English, and "EN" / "English" means it is French.
+   *
+   * @param {?Element} button - The toggle button, if present
+   * @returns {?('en'|'fr')} The page language implied by the toggle, or null
+   */
+  function langFromToggle(button) {
+    var text = button && button.textContent ? button.textContent.trim().toLowerCase() : '';
+    if (text === 'fr' || text === 'français' || text === 'francais') return 'en';
+    if (text === 'en' || text === 'english') return 'fr';
+    return null;
+  }
 
   /**
    * Detects the current page language using available SharePoint and page signals.
+   * Side-effect free: the late-toggle poll is started once, at init.
    *
    * Detection order:
    * 1. Explicit ?lang= query-string parameter
-   * 2. SharePoint current UI culture
-   * 3. French Site Pages URL path
-   * 4. Document language
-   * 5. Language-toggle state
+   * 2. Language-toggle state (names the other language — see langFromToggle)
+   * 3. French Site Pages URL path (…/SitePages/fr/… on any site)
+   * 4. SharePoint current UI culture (the user's preference, not the page's)
+   * 5. Document language (<html lang>)
    * 6. Default language
    *
    * @returns {'en'|'fr'} The detected supported language.
    */
-
-  
   function detectLang() {
     console.log(`${LOG_PREFIX} ${VERSION} detectLang() starting`);
 
@@ -113,43 +130,25 @@ console.log(`${LOG_PREFIX} Last modified: 2026/09/18 12:30:14
       .slice(0, 2) :
       null;
 
-    var toggleButton = global.document.querySelector(
-      '#LanguageToggle button'
-    );
-
-    if (!toggleButton) {
-      console.log(
-        `${LOG_PREFIX} ${VERSION} Language toggle button not found. Running late detection loop`
-      );
-      waitForLanguageToggle(0);
-    }
+    var toggleButton = global.document.querySelector(TOGGLE_SELECTOR);
 
     console.log(
       `${LOG_PREFIX} ${VERSION} Language toggle button found = ${!!toggleButton}`
     );
 
-    var toggleLanguage = toggleButton?.textContent
-      ?.trim()
-      .toLowerCase();
-
     console.log(
       `${LOG_PREFIX} ${VERSION} Language toggle text = ${
-      toggleLanguage || '(not available)'
+      toggleButton?.textContent?.trim() || '(not available)'
     }`
     );
 
-    if (toggleLanguage === 'fr') {
-      console.log(
-        `${LOG_PREFIX} ${VERSION} Language detected from toggle button: fr`
-      );
-      return 'fr';
-    }
+    var toggleLanguage = langFromToggle(toggleButton);
 
-    if (toggleLanguage === 'en') {
+    if (toggleLanguage) {
       console.log(
-        `${LOG_PREFIX} ${VERSION} Language detected from toggle button: en`
+        `${LOG_PREFIX} ${VERSION} Language detected from toggle button: ${toggleLanguage}`
       );
-      return 'en';
+      return toggleLanguage;
     }
 
 
@@ -159,7 +158,8 @@ console.log(`${LOG_PREFIX} Last modified: 2026/09/18 12:30:14
       `${LOG_PREFIX} ${VERSION} Pathname = ${pathname}`
     );
 
-    if (pathname.indexOf('/sites/tando-fcu/sitepages/fr/') === 0) {
+    // Any site: /sites/<name>/SitePages/fr/… (or fr-ca / fr-fr folders).
+    if (/\/sitepages\/fr(-[a-z]{2})?\//.test(pathname)) {
       console.log(
         `${LOG_PREFIX} ${VERSION} Language detected from French Site Pages path`
       );
@@ -222,8 +222,7 @@ console.log(`${LOG_PREFIX} Last modified: 2026/09/18 12:30:14
     `${LOG_PREFIX} ${VERSION} Final detected language: ${current}`
   );
 
-  var current = detectLang();
-  console.log(LOG_PREFIX + " Detected language: " + current);
+  var userChose = false; // set by setLang(); late detection never overrides it
   var messages = {};
   var missing = {};
   var listeners = [];
@@ -550,9 +549,32 @@ console.log(`${LOG_PREFIX} Last modified: 2026/09/18 12:30:14
     }
   }
 
-function waitForLanguageToggle(attempt) {
+  /**
+   * The one place the active language changes: re-applies the DOM and
+   * notifies onChange listeners (bsp-forms re-render, the Alpine store,
+   * script-rendered UI). setLang() and late toggle detection both use it.
+   *
+   * @param {'en'|'fr'} lang - Language to switch to (assumed supported)
+   * @returns {void}
+   */
+  function switchTo(lang) {
+    current = lang;
+    apply();
+    for (var i = 0; i < listeners.length; i++) listeners[i](current);
+  }
 
-    var button = global.document.querySelector('#LanguageToggle button');
+  /**
+   * Polls for a language toggle that SharePoint renders after this script
+   * runs (up to 20 × 250 ms), then re-detects once. Started once at init,
+   * only when the toggle wasn't there yet. An explicit setLang() wins.
+   *
+   * @param {number} attempt - Poll count so far
+   * @returns {void}
+   */
+  function waitForLanguageToggle(attempt) {
+    if (userChose) return;
+
+    var button = global.document.querySelector(TOGGLE_SELECTOR);
 
     if (button) {
       var detected = detectLang();
@@ -562,8 +584,7 @@ function waitForLanguageToggle(attempt) {
           `${LOG_PREFIX} ${VERSION} Late language detection: ${current} -> ${detected}`
         );
 
-        current = detected;
-        apply();
+        switchTo(detected);
       }
 
       return;
@@ -591,20 +612,20 @@ function waitForLanguageToggle(attempt) {
    * @returns {void}
    */
   function setLang(lang) {
-    if (SUPPORTED.indexOf(lang) === -1 || lang === current) return;
+    if (SUPPORTED.indexOf(lang) === -1) return;
+    userChose = true; // even re-picking the current language pins it
+    if (lang === current) return;
     console.log(LOG_PREFIX + " setLang: " + current + " -> " + lang);
-    current = lang;
-    apply();
     try {
-      // Keep the (placeholder) detection source in sync so a reload
-      // stays in the chosen language.
+      // ?lang= is detection's first signal, so a reload stays in the
+      // chosen language.
       var url = new global.URL(global.location.href);
       url.searchParams.set('lang', lang);
       global.history.replaceState(null, '', url.toString());
     } catch (e) {
       console.warn(LOG_PREFIX + " setLang: URL API unavailable — reload would fall back to detection");
     }
-    for (var i = 0; i < listeners.length; i++) listeners[i](current);
+    switchTo(lang);
   }
 
   /**
@@ -616,7 +637,8 @@ function waitForLanguageToggle(attempt) {
 
   /**
    * Registers a callback fired whenever the active language changes
-   * (via setLang), so script-rendered UI can re-render.
+   * (setLang, or a late-rendered toggle correcting the first guess), so
+   * script-rendered UI can re-render.
    *
    * @param {function(('en'|'fr')): void} cb - Callback invoked with the new language
    * @returns {void}
@@ -693,6 +715,15 @@ function waitForLanguageToggle(attempt) {
     addMessages: addMessages,
     load: load,
     onChange: onChange,
-    report: report
+    report: report,
+    version: VERSION
   };
+
+  // Last, so a late switch finds the whole API (and listeners) in place.
+  if (!global.document.querySelector(TOGGLE_SELECTOR)) {
+    console.log(
+      `${LOG_PREFIX} ${VERSION} Language toggle button not found. Running late detection loop`
+    );
+    waitForLanguageToggle(0);
+  }
 })(window);
