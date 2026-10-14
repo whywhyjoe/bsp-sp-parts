@@ -186,6 +186,7 @@
 .bspf-pill > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bspf-pill--blue     { --bspf-pill-bg: var(--surface-info-tint);    --bspf-pill-fg: var(--fg-info); }
 .bspf-pill--green    { --bspf-pill-bg: var(--surface-success-tint); --bspf-pill-fg: var(--fg-success); }
+.bspf-pill--lime     { --bspf-pill-bg: color-mix(in srgb, var(--fg-success-on-dark) 22%, var(--bmo-white));   --bspf-pill-fg: color-mix(in srgb, var(--bmo-positive) 70%, var(--bmo-slate)); }
 .bspf-pill--yellow   { --bspf-pill-bg: var(--surface-warning-tint); --bspf-pill-fg: var(--fg-warning); }
 .bspf-pill--red      { --bspf-pill-bg: var(--surface-danger-tint);  --bspf-pill-fg: var(--fg-danger); }
 .bspf-pill--gray     { --bspf-pill-bg: var(--surface-neutral-tint); --bspf-pill-fg: var(--fg-neutral); }
@@ -201,7 +202,7 @@
   border: none; border-radius: var(--radius-circle);
   background: transparent; color: inherit; cursor: pointer; flex: none;
 }
-.bspf-pill__remove:hover { background: rgba(0, 25, 40, .08); }
+.bspf-pill__remove:hover { background: color-mix(in srgb, var(--bmo-slate) 8%, transparent); }
 .bspf-pill__remove:focus-visible { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: 1px; }
 .bspf-pill__remove .icon { width: 10px; height: 10px; }
 
@@ -445,6 +446,9 @@
    custom property per hue (--bspf-hue), shared with the row accent.
    --------------------------------------------------------------------- */
 .bspf-dot--green,    .bspf-asg__row--green    { --bspf-hue: var(--fg-success); }
+/* a light green: far lighter than red/orange, so the pair still separates
+   for red-green colour blindness (the zone attestation's lowest zone) */
+.bspf-dot--lime,     .bspf-asg__row--lime     { --bspf-hue: color-mix(in srgb, var(--fg-success-on-dark) 80%, var(--bmo-positive)); }
 .bspf-dot--yellow,   .bspf-asg__row--yellow   { --bspf-hue: var(--f2-yellow); }
 .bspf-dot--orange,   .bspf-asg__row--orange   { --bspf-hue: var(--bmo-chart-orange); }
 .bspf-dot--red,      .bspf-asg__row--red      { --bspf-hue: var(--fg-danger); }
@@ -459,7 +463,7 @@
   border-radius: var(--radius-circle);
   background: var(--bspf-hue, var(--f2-grey-74));
   /* a hairline ring keeps light hues (yellow) visible on white */
-  box-shadow: inset 0 0 0 1px rgba(0, 25, 40, .14);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bmo-slate) 14%, transparent);
 }
 .bspf-zone { display: inline-flex; align-items: center; gap: var(--space-80); min-width: 0; }
 .bspf-zone > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -482,9 +486,11 @@
 .bspf-combo__option--clear .icon { color: var(--fg-secondary); }
 
 /* ---------------------------------------------------------------------
-   Assignments (type "assignments") — the user's rows as a two-column
-   table: row label | dot-choice dropdown. A chosen row picks up its
-   hue as a left accent and a whisper of tint; rows rise in once on load
+   Assignments (type "assignments") — one card per row: head (row name +
+   answered status), body (the value: dot + label, its description), foot
+   (confirm / change, or the dropdown). The card wears the hue of the value
+   it shows — a thick left stripe and a tinted head — so the colour reads
+   at a glance; the label always names it too. Cards rise in once on load
    (motion-safe only). No overflow clipping: the menus must escape.
    --------------------------------------------------------------------- */
 .bspf-asg { gap: var(--space-120); }
@@ -496,50 +502,102 @@
   font: var(--type-body1); color: var(--fg-secondary);
 }
 .bspf-asg__err { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-120); }
-.bspf-asg__table {
+.bspf-asg__list { display: flex; flex-direction: column; gap: var(--space-160); }
+.bspf-asg__row {
+  --bspf-stripe: 8px;
+  position: relative;
+  display: flex; flex-direction: column;
   border: var(--stroke-thin) solid var(--stroke-divider);
   border-radius: var(--radius-large);
   background: var(--surface-raised);
+  box-shadow: var(--shadow-2);
+  padding-left: var(--bspf-stripe);
+  transition: border-color var(--motion-normal) var(--ease-out), box-shadow var(--motion-normal) var(--ease-out);
 }
-.bspf-asg__head, .bspf-asg__row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(200px, 300px);
-  column-gap: var(--space-240);
-  align-items: center;
-  padding: var(--space-120) var(--space-200);
+/* the hue stripe: painted over the card's own edge, under nothing */
+.bspf-asg__row::before {
+  content: ""; position: absolute; top: -1px; bottom: -1px; left: -1px;
+  width: var(--bspf-stripe);
+  border-radius: var(--radius-large) 0 0 var(--radius-large);
+  background: var(--bspf-hue, var(--stroke-control));
+  transition: background var(--motion-normal) var(--ease-out);
 }
-.bspf-asg__head {
-  padding-top: var(--space-100); padding-bottom: var(--space-100);
-  background: var(--surface-subtle);
-  border-bottom: var(--stroke-thin) solid var(--stroke-divider);
-  border-radius: var(--radius-large) var(--radius-large) 0 0;
-  font: var(--type-caption1-strong); color: var(--fg-secondary);
-  letter-spacing: .06em; text-transform: uppercase;
-}
-.bspf-asg__row {
-  position: relative;
-  transition: background var(--motion-normal) var(--ease-out), box-shadow var(--motion-normal) var(--ease-out);
-}
-.bspf-asg__row + .bspf-asg__row { border-top: var(--stroke-thin) solid var(--stroke-divider); }
-/* each row is its own stacking context (position + the rise animation), so
-   the row with an open menu sits above its siblings */
+.bspf-asg__row.has-hue { border-color: color-mix(in srgb, var(--bspf-hue) 45%, var(--stroke-divider)); }
+/* each card is its own stacking context (position + the rise animation), so
+   the card with an open menu sits above its siblings */
 .bspf-asg__row.is-open { z-index: 3; }
-.bspf-asg__row:last-child { border-radius: 0 0 var(--radius-large) var(--radius-large); }
-.bspf-asg__row:hover { background: var(--f2-grey-98); }
-.bspf-asg__row.is-set {
-  background: color-mix(in srgb, var(--bspf-hue) 6%, var(--surface-raised));
-  box-shadow: inset 4px 0 0 var(--bspf-hue);
+.bspf-asg__row.is-error { border-color: var(--fg-danger); box-shadow: 0 0 0 1px var(--fg-danger), var(--shadow-2); }
+
+.bspf-asg__head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-120);
+  padding: var(--space-120) var(--space-200);
+  border-radius: 0 var(--radius-large) 0 0;
+  border-bottom: var(--stroke-thin) solid var(--stroke-divider);
+  background: var(--surface-subtle);
 }
-.bspf-asg__row.is-error { box-shadow: inset 4px 0 0 var(--fg-danger); }
+.bspf-asg__row.has-hue .bspf-asg__head {
+  background: color-mix(in srgb, var(--bspf-hue) 18%, var(--surface-raised));
+  border-bottom-color: color-mix(in srgb, var(--bspf-hue) 35%, var(--stroke-divider));
+}
 .bspf-asg__area { display: flex; flex-direction: column; gap: var(--space-20); min-width: 0; }
-.bspf-asg__label { font: var(--type-body1-strong); color: var(--fg-primary); overflow-wrap: anywhere; }
+.bspf-asg__label { font: var(--type-subtitle2); color: var(--fg-primary); overflow-wrap: anywhere; }
 .bspf-asg__detail { font: var(--type-caption1); color: var(--fg-secondary); }
-.bspf-asg__pick { display: flex; flex-direction: column; gap: var(--space-40); min-width: 0; }
-.bspf-asg__pick .field__error { margin: 0; }
+/* answered: a solid success badge (BSP .badge geometry), readable on any hue */
+.bspf-asg__status {
+  display: inline-flex; align-items: center; gap: var(--space-40); flex: none;
+  height: 24px; padding: 0 var(--space-100) 0 var(--space-80);
+  border-radius: 12px;
+  background: var(--fg-success); color: var(--fg-on-accent);
+  font: var(--type-caption1-strong); white-space: nowrap;
+}
+.bspf-asg__status .icon { width: 16px; height: 16px; }
+
+.bspf-asg__body { display: flex; flex-direction: column; gap: var(--space-80); padding: var(--space-160) var(--space-200) var(--space-120); }
+.bspf-asg__eyebrow { font: var(--type-caption1-strong); color: var(--fg-secondary); letter-spacing: .06em; text-transform: uppercase; }
+.bspf-asg__zones { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-80) var(--space-120); }
+.bspf-asg__zone { display: inline-flex; align-items: center; gap: var(--space-80); min-width: 0; font: var(--type-subtitle2); color: var(--fg-primary); }
+.bspf-asg__zone .bspf-dot { width: 20px; height: 20px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bmo-slate) 14%, transparent), 0 0 0 2px var(--surface-raised); }
+.bspf-asg__zonename { overflow-wrap: anywhere; }
+/* changed: the old value greys out and is struck through */
+.bspf-asg__zone.is-replaced { color: var(--fg-secondary); font: var(--type-body1); }
+.bspf-asg__zone.is-replaced .bspf-asg__zonename { text-decoration: line-through; }
+.bspf-asg__zone.is-replaced .bspf-dot { width: 14px; height: 14px; filter: grayscale(1); opacity: .45; }
+.bspf-asg__arrow { display: inline-flex; color: var(--fg-secondary); }
+.bspf-asg__desc { margin: 0; max-width: 72ch; font: var(--type-body1); color: var(--fg-secondary); }
+
+/* the answer band. Unanswered: an accent tint and an accent rule, so the
+   action reads as "to do"; answered: it settles to neutral. */
+.bspf-asg__foot {
+  display: flex; flex-direction: column; gap: var(--space-80);
+  padding: var(--space-160) var(--space-200);
+  border-radius: 0 0 var(--radius-large) 0;
+  border-top: var(--stroke-thick) solid var(--accent-rest);
+  background: color-mix(in srgb, var(--accent-rest) 7%, var(--surface-raised));
+  transition: background var(--motion-normal) var(--ease-out), border-color var(--motion-normal) var(--ease-out);
+}
+.bspf-asg__row.is-set .bspf-asg__foot { border-top-color: var(--stroke-divider); background: var(--surface-subtle); }
+.bspf-asg__row.is-error .bspf-asg__foot { border-top-color: var(--fg-danger); }
+.bspf-asg__confirm, .bspf-asg__pick { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-120) var(--space-160); }
+/* the confirm checkbox as a bordered tile: a big, obvious target */
+.bspf-asg__confirm .check {
+  min-height: 40px; padding: 0 var(--space-160);
+  border: var(--stroke-thin) solid var(--stroke-control-strong);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+  font: var(--type-body1-strong);
+  transition: background var(--motion-normal) var(--ease-out), border-color var(--motion-normal) var(--ease-out);
+}
+.bspf-asg__confirm .check:hover { border-color: var(--accent-rest); }
+.bspf-asg__confirm .check input { width: 20px; height: 20px; }
+.bspf-asg__confirm .check:has(input:checked) { border-color: var(--fg-success); background: var(--surface-success-tint); }
+.bspf-asg__confirm .check:has(input:focus-visible) { outline: var(--stroke-thick) solid var(--stroke-focus); outline-offset: 1px; }
+.bspf-asg__confirm .check:has(input[aria-invalid="true"]) { border-color: var(--fg-danger); }
+.bspf-asg__pick .bspf-combo__control { min-height: 40px; }
+.bspf-asg__pick .bspf-combo { flex: 0 1 360px; min-width: 0; }
+.bspf-asg__foot .field__error { margin: 0; }
 /* a saved row (partial save, retry pending) is shown, not editable */
 .bspf-asg__row.is-saved .bspf-combo__control { cursor: default; background: var(--surface-subtle); }
 .bspf-asg__row.is-saved .bspf-combo__chevron { display: none; }
-.bspf-asg__savedmark { display: inline-flex; color: var(--fg-success); flex: none; }
 .bspf-asg__progress { max-width: 360px; }
 @keyframes bspf-row-in {
   from { opacity: 0; transform: translateY(calc(var(--reveal-rise) / 2)); }
@@ -566,16 +624,14 @@
   .bspf__head { flex-direction: column-reverse; align-items: flex-start; gap: var(--space-160); }
   .bspf__head-icon { width: 40px; height: 40px; }
 }
-/* Header card drops under the intro, full width. Assignment rows stack:
-   label above its dropdown. */
+/* Header card drops under the intro, full width. */
 @container bspf (max-width: 719px) {
   .bspf__head.bspf__head--hascard { flex-direction: column; align-items: stretch; gap: var(--space-200); }
   .bspf-tipcard { flex: none; }
 }
+/* Narrow: assignment cards tighten up; the dropdown takes the full width */
 @container bspf (max-width: 539px) {
-  .bspf-asg__head { display: none; }
-  .bspf-asg__row { grid-template-columns: minmax(0, 1fr); row-gap: var(--space-80); padding: var(--space-120) var(--space-160); }
-  /* first row (after the x-for template) takes the rounded top */
-  .bspf-asg__table > template + .bspf-asg__row { border-radius: var(--radius-large) var(--radius-large) 0 0; }
-  .bspf-asg__table > template + .bspf-asg__row:last-child { border-radius: var(--radius-large); }
+  .bspf-asg__row { --bspf-stripe: 6px; }
+  .bspf-asg__head, .bspf-asg__body, .bspf-asg__foot { padding-left: var(--space-160); padding-right: var(--space-160); }
+  .bspf-asg__pick .bspf-combo { flex-basis: 100%; }
 }

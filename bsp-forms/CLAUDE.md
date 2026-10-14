@@ -41,7 +41,7 @@ contract. Read both before changing behavior.
 | `forms/gsi-digital-initiatives-intake.json` | Live form: FCU GSI Digital Initiatives Technology Intake → the Creative Digital Solutions intake list (internal column names; see its `$comment`). |
 | `forms/gsi-digital-creative-intake.json` | Live form: FCU GSI Digital & Creative Solutions Intake → the same list. Uses business time: urgent prompt + locked Urgent/Standard switch. |
 | `forms/classic-url-request.json` | Live form: classic-link request (`?Link=&ResourceName=`) → Classic-URL-Requests, lookup in Classic-URL-Redirects, else copy + redirect to the link converter (`form.vars`). |
-| `forms/ps-zone-attestation.json` | Live form (bilingual): Physical Security Zones Attestation — `assignments` rows from PS_Zone-Attestation-Assignments, one PS_Zone-Attestation-Responses item per row (both lists on /teams/FCUWebDatastores, addressed by title), `currentUser`, `headerCard` (job aid, `form.vars.jobAidUrl`), `submitConfirm`, `target.set`. The reference config for all of those (they can't all live in example-it-request.json: assignments excludes attachments). |
+| `forms/ps-zone-attestation.json` | Live form (bilingual): Physical Security Zones Attestation — `assignments` rows from PS_Zone-Attestation-Assignments, one PS_Zone-Attestation-Responses item per row (both lists on /teams/FCUWebDatastores, addressed by title), `currentUser`, `headerCard` (job aid, `form.vars.jobAidUrl`), `submitConfirm`, `target.set`, and (0.5.1) confirm-or-change cards: `source.currentColumn` (CurrentZone), `previousColumn` / `changedColumn`, choice `description`, the `lime` hue. The reference config for all of those (they can't all live in example-it-request.json: assignments excludes attachments). |
 | `copilot/BSP-FORMS-COPILOT-GUIDE.md` | The form-authoring guide for Microsoft 365 Copilot Chat (no skills, can only read a few linked files). It repeats facts from `CONFIG-REFERENCE.md` and the engine: field types, sprite icon names, what `normalizeConfig` rejects, what the engine can't do. **When one of those changes, update the guide in the same commit.** Its SharePoint links live only in its section 1 table (`PASTE-LINK` placeholders, filled in on prod). Setup: `docs/COPILOT.md`. |
 | `dev/` | Harness (`index.html`), mock adapter (`mock-sp.js`, same method names as the real adapter), vendored Alpine. Never deployed. |
 | `dev/live/live-zone-perms.js` | Copies the hand-made permission setup from the dev site's first copies of the zone lists (level "View and Add", group PSZoneTestGroup and its members) onto the root twin, so a non-admin tests what prod will run. `live-zone-lists.js --user <email>` seeds that account's rows and reports its effective rights. |
@@ -160,13 +160,22 @@ contract. Read both before changing behavior.
   JSON copies). It waits while a submit is busy. Keep new state that must
   survive a switch in `snapshotState`'s list.
 - **Choice `value` is data, `label` is display.** Translate labels, never
-  values: the zone attestation must save "Green" whatever the language.
+  values: the zone attestation must save `Public` / `Public Plus` /
+  `Standards` / `Secure Restricted` / `High Security` whatever the language
+  (and its `CurrentZone` column must hold exactly those).
 - **The form root's `lang` carries `lang-keep`.** Without it, the bilingual
   library's `lang-blocks.css` would hide the form, and `intl.apply()` would
   disable its inputs during a switch (apply runs before onChange listeners).
 - **Assignment rows stack.** Each row is a stacking context (`position` plus
   the rise animation), so an open menu sits under the next rows unless its
   row gets `is-open` (z-index). Don't drop that class.
+- **`row.value` is always the row's answer** (0.5.1, `source.currentColumn`).
+  Confirming copies `row.current` into it; Change and Keep both clear it.
+  `row.mode` ('confirm' | 'change' | 'pick') only decides which control
+  shows. So validation, progress, the payload and the saved-row lock read
+  `row.value` alone. Don't add a separate "confirmed" flag: it would drift
+  from the value. A `current` that isn't a choice value is dropped at load
+  (console warning), so every card's hue and label resolve.
 - **`row.saved` is the per-row "never twice" guard**, like `store.itemId`
   for attachments. A retry after a partial save sends only unsaved rows. It
   isn't enough alone: an add can land while its reply is lost. So any failed

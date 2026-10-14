@@ -362,7 +362,9 @@ async function testCreativeCallout(browser) {
 }
 
 /* Zone attestation: assignments rows from the mock source list, per-row
-   save, submit confirmation, header card, current user, EN/FR. */
+   save, submit confirmation, header card, current user, EN/FR. Mock rows:
+   0 Concourse Podium (current High Security), 1 Tower 10 (current Public Plus),
+   2 Tower 37 (no current zone: dropdown straight away). */
 const ZONE = '?form=ps-zone-attestation';
 const JOB_AID = 'https://example.com/job-aid';
 async function openZone(browser, opts) {
@@ -389,15 +391,27 @@ async function openZone(browser, opts) {
   await page.waitForTimeout(1200);
   return { ctx, page };
 }
+// pick a zone by its label; a row showing confirm / change is switched to
+// "change" first (that opens its menu)
 async function zonePick(page, row, label) {
   await page.evaluate(async ({ row, label }) => {
     const r = document.querySelectorAll('.bspf-asg__row')[row];
-    r.querySelector('[role="combobox"]').click();
+    const vis = el => el && getComputedStyle(el).display !== 'none';
+    if (vis(r.querySelector('.bspf-asg__confirm'))) r.querySelector('.bspf-asg__confirm button').click();
+    else r.querySelector('[role="combobox"]').click();
     await new Promise(x => setTimeout(x, 60));
     [...r.querySelectorAll('.bspf-combo__option')].find(b => b.innerText.trim() === label).click();
   }, { row, label });
   await page.waitForTimeout(80);
 }
+async function zoneConfirm(page, row) {
+  await page.locator('.bspf-asg__row').nth(row).locator('.bspf-asg__confirm input').check();
+  await page.waitForTimeout(80);
+}
+const L = {
+  pub: 'Public - General Access', plus: 'Public Plus - Authorized Entry', std: 'Standards - Restricted Operation',
+  sec: 'Secure Restricted', high: 'High Security'
+};
 const zoneAdds = page => page.evaluate(() => window.__BSPF_MOCK_WRITES__.filter(w => w.op === 'addItem').map(w => w.payload));
 
 async function testZoneAttestation(browser) {
@@ -407,7 +421,7 @@ async function testZoneAttestation(browser) {
   // load: the user's rows only (case-insensitive email), sorted by area
   const labels = await page.$$eval('.bspf-asg__label', els => els.map(e => e.textContent));
   check('3 rows, the other user\'s row filtered out, sorted',
-    JSON.stringify(labels) === JSON.stringify(['Floor 1 — Lobby & vault', 'Floor 3 — East wing', 'Parking level P2']), JSON.stringify(labels));
+    JSON.stringify(labels) === JSON.stringify(['FCP - Concourse Podium', 'FCP - Tower 10', 'FCP - Tower 37']), JSON.stringify(labels));
   check('current user card shows name + email',
     (await page.locator('.bspf-who__name').textContent()) === 'Dev Tester' &&
     (await page.locator('.bspf-who__mail').textContent()) === 'dev.tester@example.com');
@@ -424,16 +438,20 @@ async function testZoneAttestation(browser) {
   await navClick(page, 'Submit attestation');
   await page.waitForTimeout(200);
   check('empty submit → an error on every row', (await page.locator('.bspf-asg__row.is-error').count()) === 3);
+  const rowErrs = await page.$$eval('.bspf-asg__row .bspf-asg__foot > .field__error', ps => ps.map(p => p.textContent));
+  check('row errors: "confirm or choose" where there is a current zone, "choose" where there is none',
+    JSON.stringify(rowErrs) === JSON.stringify(['Confirm this zone or choose a new one.', 'Confirm this zone or choose a new one.', 'Choose a zone for this area.']),
+    JSON.stringify(rowErrs));
   check('empty submit → checkbox error', await page.locator('[data-bspf-field="attestation"] .field__error').isVisible());
   check('empty submit → no dialog, nothing saved', !(await page.locator('.bspf-dialog').isVisible()) && (await zoneAdds(page)).length === 0);
 
   // pick, clear, re-pick; the progress meter follows
-  await zonePick(page, 0, 'Yellow');
+  await zonePick(page, 0, L.plus);
   check('a pick clears that row\'s error', (await page.locator('.bspf-asg__row.is-error').count()) === 2);
   await page.locator('.bspf-asg__row').nth(0).locator('.bspf-combo__clear').click();
   await page.waitForTimeout(80);
-  check('the × clears the selection', (await page.locator('.bspf-asg__row').nth(0).locator('.bspf-combo__placeholder').isVisible()));
-  await zonePick(page, 0, 'Orange');
+  check('the × clears the selection', (await page.locator('.bspf-asg__row').nth(0).locator('.bspf-combo__placeholder:visible').textContent()) === 'Select a new zone');
+  await zonePick(page, 0, L.sec);
   await page.evaluate(async () => {
     const r = document.querySelectorAll('.bspf-asg__row')[0];
     r.querySelector('[role="combobox"]').click();
@@ -443,9 +461,9 @@ async function testZoneAttestation(browser) {
   await page.waitForTimeout(80);
   check('the menu\'s "Clear selection" clears it too',
     await page.evaluate(() => { const d = Object.values(BSPForms._defs).pop(); return d.store.state.values.zones[0].value === ''; }));
-  await zonePick(page, 0, 'Orange');
-  await zonePick(page, 1, 'Green');
-  await zonePick(page, 2, 'Red');
+  await zonePick(page, 0, L.sec);
+  await zonePick(page, 1, L.pub);
+  await zonePick(page, 2, L.high);
   check('progress reads 3 of 3', /3 of 3/.test(await page.locator('.bspf-asg__progress').textContent()));
   await page.locator('[data-bspf-field="attestation"] input').check();
 
@@ -466,15 +484,115 @@ async function testZoneAttestation(browser) {
   const byId = Object.fromEntries(adds.map(p => [p.LookupID, p]));
   check('one item per row', adds.length === 3, adds.length);
   check('row columns copied (LookupID / AreaName / UserDescription)',
-    byId[12] && byId[12].AreaName === 'Floor 1 — Lobby & vault' && byId[12].UserDescription === 'Branch manager' && typeof byId[12].LookupID === 'number');
-  check('each row saves its own zone', byId[12].ZoneSelection === 'Orange' && byId[11].ZoneSelection === 'Green' && byId[13].ZoneSelection === 'Red');
+    byId[12] && byId[12].AreaName === 'FCP - Concourse Podium' && byId[12].UserDescription === 'Branch manager' && typeof byId[12].LookupID === 'number');
+  check('each row saves its own zone', byId[12].ZoneSelection === 'Secure Restricted' && byId[11].ZoneSelection === 'Public' && byId[13].ZoneSelection === 'High Security');
+  check('changed rows: PreviousZone = the current zone, ZoneChanged = true',
+    byId[12].PreviousZone === 'High Security' && byId[12].ZoneChanged === true &&
+    byId[11].PreviousZone === 'Public Plus' && byId[11].ZoneChanged === true);
+  check('a row with no current zone: no PreviousZone, ZoneChanged = true',
+    !('PreviousZone' in byId[13]) && byId[13].ZoneChanged === true, JSON.stringify(byId[13]));
   check('UserName / UserEmail / Attestation set on every row',
     adds.every(p => p.UserName === 'Dev Tester' && p.UserEmail === 'dev.tester@example.com' && p.Attestation === 'Confirmed'));
   check('AttestationTime: one ISO instant shared by the rows',
     /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(adds[0].AttestationTime) && adds.every(p => p.AttestationTime === adds[0].AttestationTime));
-  check('Title per row from {row:AreaName}', byId[13].Title === 'Parking level P2 — dev.tester@example.com', byId[13].Title);
+  check('Title per row from {row:AreaName}', byId[13].Title === 'FCP - Tower 37 — dev.tester@example.com', byId[13].Title);
   check('no "submit another" button', (await page.locator('.bspf-done button').count()) === 0);
   check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+
+  // confirm / change / keep: a row with a current zone
+  ({ ctx, page } = await openZone(browser));
+  const row0 = page.locator('.bspf-asg__row').nth(0);
+  check('a current zone shows its name, description, confirm + Change; no dropdown',
+    (await row0.locator('.bspf-asg__eyebrow:visible').textContent()) === 'Current zone' &&
+    (await row0.locator('.bspf-asg__zone:visible').textContent()) === L.high &&
+    /^\[Placeholder\] Critical assets such as vaults/.test(await row0.locator('.bspf-asg__desc:visible').textContent()) &&
+    await row0.locator('.bspf-asg__confirm input').isVisible() && await row0.locator('.bspf-asg__confirm button').isVisible() &&
+    await row0.locator('.bspf-asg__pick').isHidden());
+  check('the card wears its current zone\'s hue, the row with no current zone none',
+    /bspf-asg__row--red/.test(await row0.getAttribute('class')) &&
+    !/has-hue/.test(await page.locator('.bspf-asg__row').nth(2).getAttribute('class')));
+  check('no current zone → the dropdown straight away, no Keep',
+    await page.locator('.bspf-asg__row').nth(2).locator('.bspf-asg__pick').isVisible() &&
+    await page.locator('.bspf-asg__row').nth(2).locator('.bspf-asg__keep').isHidden());
+  await zoneConfirm(page, 0);
+  const zst = () => page.evaluate(() => Object.values(BSPForms._defs).pop().store.state.values.zones.map(r => [r.mode, r.value, r.open]));
+  check('confirm → the row\'s answer is its current zone, status "Confirmed"',
+    JSON.stringify((await zst())[0]) === '["confirm","High Security",false]' &&
+    (await row0.locator('.bspf-asg__status').textContent()).trim() === 'Confirmed');
+  await row0.locator('.bspf-asg__confirm button').click();
+  await page.waitForTimeout(120);
+  check('Change → unconfirms, opens the dropdown, focus in it, Change gone',
+    JSON.stringify((await zst())[0]) === '["change","",true]' &&
+    await row0.locator('.bspf-combo__menu').isVisible() && await row0.locator('.bspf-asg__confirm').isHidden() &&
+    (await page.evaluate(() => document.activeElement.getAttribute('role'))) === 'combobox');
+  const offered = await row0.locator('.bspf-combo__option:visible').allTextContents();
+  check('the dropdown leaves the current zone out', offered.map(t => t.trim()).join('|') === [L.pub, L.plus, L.std, L.sec].join('|'), offered.join('|'));
+  await row0.locator('.bspf-combo__option', { hasText: L.std }).click();
+  await page.waitForTimeout(100);
+  check('a new zone → the current one greys out, the new one + its description show, status "Changed"',
+    (await row0.locator('.bspf-asg__zone.is-replaced:visible').textContent()) === L.high &&
+    (await row0.locator('.bspf-asg__zone:not(.is-replaced):visible').textContent()) === L.std &&
+    (await row0.locator('.bspf-asg__desc:visible').count()) === 1 &&
+    /bspf-asg__row--berry/.test(await row0.getAttribute('class')) &&
+    (await row0.locator('.bspf-asg__status').textContent()).trim() === 'Changed');
+  await row0.locator('.bspf-asg__keep').click();
+  await page.waitForTimeout(120);
+  check('Keep current zone → back to unconfirmed confirm / change, focus on Change',
+    JSON.stringify((await zst())[0]) === '["confirm","",false]' &&
+    !(await row0.locator('.bspf-asg__confirm input').isChecked()) && await row0.locator('.bspf-asg__pick').isHidden() &&
+    (await row0.locator('.bspf-asg__zone.is-replaced:visible').count()) === 0 &&
+    (await page.evaluate(() => document.activeElement.textContent.trim())) === 'Change zone');
+  // validation focus: rows 0-1 answered, row 1 switched to "change" and left empty,
+  // row 2 (pick) empty → focus lands on row 1's visible dropdown, and only visible
+  // controls carry aria-invalid
+  await zoneConfirm(page, 0);
+  await page.locator('.bspf-asg__row').nth(1).locator('.bspf-asg__confirm button').click();
+  await page.waitForTimeout(100);
+  await page.keyboard.press('Escape');
+  await page.locator('[data-bspf-field="attestation"] input').check();
+  await navClick(page, 'Submit attestation');
+  await page.waitForTimeout(300);
+  const inv = await page.evaluate(() => {
+    const vis = el => !!el.offsetParent;
+    const all = [...document.querySelectorAll('[data-bspf-field="zones"] [aria-invalid="true"]')];
+    const a = document.activeElement;
+    return { n: all.length, allVisible: all.every(vis), activeRole: a && a.getAttribute('role'),
+      activeRow: [...document.querySelectorAll('.bspf-asg__row')].findIndex(r => r.contains(a)) };
+  });
+  check('validation: focus on the first unanswered row\'s visible dropdown; aria-invalid only on visible controls',
+    inv.n === 2 && inv.allVisible && inv.activeRole === 'combobox' && inv.activeRow === 1, JSON.stringify(inv));
+  await page.locator('.bspf-asg__row').nth(1).locator('.bspf-asg__keep').click();
+  await page.waitForTimeout(80);
+  await zoneConfirm(page, 1); await zonePick(page, 2, L.sec);
+  await navClick(page, 'Submit attestation'); await page.waitForTimeout(250);
+  await navClick(page, 'Confirm');
+  await page.waitForSelector('.bspf-done:not(.bspf-done--empty):not(.bspf-done--allDone)', { state: 'visible', timeout: 5000 });
+  const cAdds = Object.fromEntries((await zoneAdds(page)).map(p => [p.LookupID, p]));
+  check('confirmed rows save the current zone, PreviousZone = it, ZoneChanged = false',
+    cAdds[12].ZoneSelection === 'High Security' && cAdds[12].PreviousZone === 'High Security' && cAdds[12].ZoneChanged === false &&
+    cAdds[11].ZoneSelection === 'Public Plus' && cAdds[11].PreviousZone === 'Public Plus' && cAdds[11].ZoneChanged === false,
+    JSON.stringify([cAdds[12], cAdds[11]]));
+  check('no page errors (confirm / change)', page.__errors.length === 0, page.__errors.join(' | '));
+  await ctx.close();
+  // previousColumn named Title wins over target.titleTemplate (it isn't overwritten)
+  ({ ctx, page } = await openZone(browser, { mutate: cfg => { cfg.pages[0].sections[1].fields[0].previousColumn = 'Title'; } }));
+  await zoneConfirm(page, 0); await zoneConfirm(page, 1); await zonePick(page, 2, L.sec);
+  await page.locator('[data-bspf-field="attestation"] input').check();
+  await navClick(page, 'Submit attestation'); await page.waitForTimeout(250);
+  await navClick(page, 'Confirm');
+  await page.waitForSelector('.bspf-done:not(.bspf-done--empty):not(.bspf-done--allDone)', { state: 'visible', timeout: 5000 });
+  const tAdds = Object.fromEntries((await zoneAdds(page)).map(p => [p.LookupID, p]));
+  check('previousColumn = Title keeps the previous zone; a row with none falls back to titleTemplate',
+    tAdds[12].Title === 'High Security' && tAdds[13].Title === 'FCP - Tower 37 — dev.tester@example.com',
+    JSON.stringify([tAdds[12].Title, tAdds[13].Title]));
+  await ctx.close();
+  // a CurrentZone that isn't a choice value → treated as none
+  ({ ctx, page } = await openZone(browser, {
+    rows: [{ ID: 31, UserEmail: 'dev.tester@example.com', UserDescription: 'x', AreaName: 'Old wing', CurrentZone: 'Green' }]
+  }));
+  check('unknown CurrentZone → no current zone, the dropdown straight away',
+    await page.locator('.bspf-asg__row .bspf-asg__pick').isVisible() && await page.locator('.bspf-asg__row .bspf-asg__confirm').isHidden());
   await ctx.close();
 
   // the job aid card stays hidden while its URL is empty or unsafe
@@ -487,14 +605,16 @@ async function testZoneAttestation(browser) {
 
   // a failure mid-save: saved rows are kept and never saved twice
   ({ ctx, page } = await openZone(browser, { fail: { addItemAfter: 1 } }));
-  await zonePick(page, 0, 'Green'); await zonePick(page, 1, 'Green'); await zonePick(page, 2, 'Yellow');
+  await zonePick(page, 0, L.pub); await zonePick(page, 1, L.pub); await zonePick(page, 2, L.plus);
   await page.locator('[data-bspf-field="attestation"] input').check();
   await navClick(page, 'Submit attestation'); await page.waitForTimeout(200);
   await navClick(page, 'Confirm');
   await page.waitForSelector('.bspf__pageerror', { state: 'visible', timeout: 5000 });
   check('partial save → "1 of 3 areas are confirmed saved" message', /1 of 3 areas are confirmed saved/.test(await page.locator('.bspf__pageerror').textContent()));
   check('the saved row is locked', (await page.locator('.bspf-asg__row.is-saved').count()) === 1 &&
-    (await page.locator('.bspf-asg__row.is-saved .bspf-combo__clear').isHidden()));
+    (await page.locator('.bspf-asg__row.is-saved .bspf-combo__clear').isHidden()) &&
+    (await page.locator('.bspf-asg__row.is-saved .bspf-asg__keep').isHidden()) &&
+    (await page.locator('.bspf-asg__row.is-saved .bspf-asg__status').textContent()).trim() === 'Saved');
   await page.evaluate(() => { window.BSPF_MOCK_FAIL = {}; });
   await navClick(page, 'Submit attestation'); await page.waitForTimeout(200);
   await navClick(page, 'Confirm');
@@ -529,31 +649,36 @@ async function testZoneAttestation(browser) {
   ({ ctx, page } = await openZone(browser, { query: '&lang=fr' }));
   check('?lang=fr → French title, labels, button',
     (await page.locator('.bspf__title').textContent()) === 'Attestation des zones de sécurité physique' &&
-    /ÉTAGE\/ZONE|Étage\/zone/i.test(await page.locator('.bspf-asg__head').textContent()) &&
+    (await page.locator('.bspf-asg__row').nth(0).locator('.bspf-asg__eyebrow:visible').textContent()) === 'Zone actuelle' &&
+    (await page.locator('.bspf-asg__row').nth(0).locator('.bspf-asg__zone:visible').textContent()) === 'Haute sécurité' &&
+    (await page.locator('.bspf-asg__row').nth(0).locator('.bspf-asg__confirm').textContent()).includes('Je confirme que c\'est la bonne zone') &&
     await page.locator('button[type="submit"]:has-text("Soumettre l\'attestation")').isVisible());
   check('form root lang="fr" (lang-keep)', (await page.getAttribute('.bspf', 'lang')) === 'fr' &&
     (await page.getAttribute('.bspf', 'class')).includes('lang-keep'));
-  await zonePick(page, 0, 'Vert');
+  await zonePick(page, 0, 'Public - Accès général');
   await page.evaluate(() => window.intl.setLang('en'));
   await page.waitForTimeout(500);
-  check('switch to EN keeps the pick (Vert → Green)', (await page.locator('.bspf-asg__row').nth(0).locator('.bspf-zone:visible').textContent()).trim() === 'Green' &&
+  check('switch to EN keeps the change (Accès général → General Access, still "change")',
+    (await page.locator('.bspf-asg__row').nth(0).locator('.bspf-zone:visible').textContent()).trim() === L.pub &&
+    (await page.locator('.bspf-asg__row').nth(0).locator('.bspf-asg__zone.is-replaced:visible').textContent()) === L.high &&
+    await page.locator('.bspf-asg__row').nth(0).locator('.bspf-asg__keep').isVisible() &&
     (await page.locator('.bspf__title').textContent()) === 'Physical Security Zones Attestation');
   await page.evaluate(() => window.intl.setLang('fr'));
   await page.waitForTimeout(500);
-  await zonePick(page, 1, 'Jaune'); await zonePick(page, 2, 'Rouge');
+  await zonePick(page, 1, 'Normes - Fonctionnement restreint'); await zonePick(page, 2, 'Haute sécurité');
   await page.locator('[data-bspf-field="attestation"] input').check();
   await navClick(page, 'Soumettre'); await page.waitForTimeout(200);
   check('French confirmation dialog', /Une fois soumises/.test(await page.locator('.bspf-dialog').textContent()));
   await navClick(page, 'Confirmer');
   await page.waitForSelector('.bspf-done:not(.bspf-done--empty):not(.bspf-done--allDone)', { state: 'visible', timeout: 5000 });
   const frZones = (await zoneAdds(page)).map(p => p.ZoneSelection).sort();
-  check('French submit saves English zone values', JSON.stringify(frZones) === '["Green","Red","Yellow"]', JSON.stringify(frZones));
+  check('French submit saves English zone values', JSON.stringify(frZones) === '["High Security","Public","Standards"]', JSON.stringify(frZones));
   check('no page errors (French)', page.__errors.length === 0, page.__errors.join(' | '));
   await ctx.close();
 
   // answers are frozen once confirmed: a slow save, edits attempted mid-save
   ({ ctx, page } = await openZone(browser, { addMs: 900 }));
-  await zonePick(page, 0, 'Orange'); await zonePick(page, 1, 'Green'); await zonePick(page, 2, 'Red');
+  await zonePick(page, 0, L.sec); await zonePick(page, 1, L.pub); await zonePick(page, 2, L.high);
   await page.locator('[data-bspf-field="attestation"] input').check();
   await navClick(page, 'Submit attestation'); await page.waitForTimeout(200);
   await navClick(page, 'Confirm');
@@ -564,26 +689,30 @@ async function testZoneAttestation(browser) {
     const clear = r3.querySelector('.bspf-combo__clear');
     if (clear) clear.click();                       // UI path: guarded
     st.rowPick('zones', st.values.zones[2], '');    // method path: guarded
+    st.rowKeep('zones', st.values.zones[0]);        // guarded too
+    st.rowChange('zones', st.values.zones[0]);
     const cb = document.querySelector('[data-bspf-field="attestation"] input');
     const cbDisabled = cb.matches(':disabled'); cb.click(); // disabled via the fieldset: ignores the click
     const busy = st.busy;
     st.values.zones[1].value = '';                  // bypass every guard: the snapshot must win
     st.values.attestation = false;
-    return { busy, cbDisabled, fieldset: document.querySelector('fieldset.bspf__lock').disabled, r3: st.values.zones[2].value };
+    return { busy, cbDisabled, fieldset: document.querySelector('fieldset.bspf__lock').disabled, r3: st.values.zones[2].value,
+      r1: [st.values.zones[0].mode, st.values.zones[0].value] };
   });
   check('mid-save: busy, fieldset + checkbox disabled', mid.busy && mid.fieldset && mid.cbDisabled, JSON.stringify(mid));
-  check('mid-save: clearing a row is refused', mid.r3 === 'Red', mid.r3);
+  check('mid-save: clearing a row is refused', mid.r3 === 'High Security', mid.r3);
+  check('mid-save: keep / change are refused', JSON.stringify(mid.r1) === '["change","Secure Restricted"]', JSON.stringify(mid.r1));
   await page.waitForSelector('.bspf-done:not(.bspf-done--empty):not(.bspf-done--allDone)', { state: 'visible', timeout: 8000 });
   let saved = await zoneAdds(page);
   const zb = Object.fromEntries(saved.map(p => [p.LookupID, p]));
   check('saved what was confirmed, not what changed mid-save',
-    saved.length === 3 && zb[12].ZoneSelection === 'Orange' && zb[11].ZoneSelection === 'Green' && zb[13].ZoneSelection === 'Red' &&
+    saved.length === 3 && zb[12].ZoneSelection === 'Secure Restricted' && zb[11].ZoneSelection === 'Public' && zb[13].ZoneSelection === 'High Security' &&
     saved.every(p => p.Attestation === 'Confirmed'), JSON.stringify(saved.map(p => [p.LookupID, p.ZoneSelection, p.Attestation])));
   await ctx.close();
 
   // an add that LANDS but whose reply is lost: the retry checks the list first
   ({ ctx, page } = await openZone(browser, { fail: { addItemLostAfter: 1 } }));
-  await zonePick(page, 0, 'Green'); await zonePick(page, 1, 'Yellow'); await zonePick(page, 2, 'Red');
+  await zonePick(page, 0, L.pub); await zonePick(page, 1, L.std); await zonePick(page, 2, L.high);
   await page.locator('[data-bspf-field="attestation"] input').check();
   await navClick(page, 'Submit attestation'); await page.waitForTimeout(200);
   await navClick(page, 'Confirm');
@@ -604,7 +733,7 @@ async function testZoneAttestation(browser) {
   // the same, with the earlier-responses read capped at 0: the retry's exact
   // check must still find the landed row (the cap doesn't apply to it)
   ({ ctx, page } = await openZone(browser, { fail: { addItemLostAfter: 1 }, keysCap: 0 }));
-  await zonePick(page, 0, 'Green'); await zonePick(page, 1, 'Yellow'); await zonePick(page, 2, 'Red');
+  await zonePick(page, 0, L.pub); await zonePick(page, 1, L.std); await zonePick(page, 2, L.high);
   await page.locator('[data-bspf-field="attestation"] input').check();
   await navClick(page, 'Submit attestation'); await page.waitForTimeout(200);
   await navClick(page, 'Confirm');
@@ -618,7 +747,7 @@ async function testZoneAttestation(browser) {
   await ctx.close();
   // lost on the very first add: no "nothing was saved" promise
   ({ ctx, page } = await openZone(browser, { fail: { addItemLostAfter: 0 } }));
-  await zonePick(page, 0, 'Green'); await zonePick(page, 1, 'Green'); await zonePick(page, 2, 'Green');
+  await zonePick(page, 0, L.pub); await zonePick(page, 1, L.pub); await zonePick(page, 2, L.pub);
   await page.locator('[data-bspf-field="attestation"] input').check();
   await navClick(page, 'Submit attestation'); await page.waitForTimeout(200);
   await navClick(page, 'Confirm');
@@ -700,7 +829,10 @@ async function testZoneAttestation(browser) {
       const f = JSON.parse(JSON.stringify(cfg.pages[0].sections[1].fields[0])); f.id = 'zones2';
       cfg.pages[0].sections[1].fields.push(f);
     }],
-    ['form.languages ["de"] → error card', cfg => { cfg.form.languages = ['de']; }]
+    ['form.languages ["de"] → error card', cfg => { cfg.form.languages = ['de']; }],
+    ['previousColumn without source.currentColumn → error card', cfg => { delete cfg.pages[0].sections[1].fields[0].source.currentColumn; }],
+    ['previousColumn = column → error card', cfg => { cfg.pages[0].sections[1].fields[0].previousColumn = 'ZoneSelection'; }],
+    ['changedColumn = a rowColumns target → error card', cfg => { cfg.pages[0].sections[1].fields[0].changedColumn = 'AreaName'; }]
   ]) {
     ({ ctx, page } = await openZone(browser, { mutate }));
     const state = await page.getAttribute('[data-bsp-form]', 'data-bspf-state');

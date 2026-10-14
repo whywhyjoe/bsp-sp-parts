@@ -192,29 +192,45 @@ Common keys:
 | `heading` | section-style heading | — | `text`, `description` |
 | `note` | message bar / paragraph | — | `text`, `style`: `info` `warning` `success` `danger` `plain` |
 | `currentUser` | identity card: photo (initials fallback), name, email | — | `label`. Display only. |
-| `assignments` | a table of the user's rows, a color-dot dropdown per row | Text or Choice (`column`, per row) | See *Assignments*. One per form. |
+| `assignments` | a card per row of the user's: the row's value (color dot + label + description) and a confirm / change control, or a color-dot dropdown | Text or Choice (`column`, per row) | See *Assignments*. One per form. |
 
 `choices` entries are strings or `{ "value": "…", "label": "…", "color": "…" }`.
 `value` is what's saved; `label` (optional, may be bilingual) is what's shown.
-Colors: `blue green yellow red gray sky teal berry lavender orange`,
-auto-assigned in a cycle when omitted, so configs can stay plain arrays.
+Colors: `blue green lime yellow red gray sky teal berry lavender orange`
+(`lime` is a light green: next to red or orange it still reads apart for
+red-green colour blindness), auto-assigned in a cycle when omitted, so
+configs can stay plain arrays. On an `assignments` field a choice can also
+carry a `description` (may be bilingual, `[text](url)` links allowed), shown
+under the value on each card.
 
 ### Assignments
 
 For "confirm something about each item assigned to you". The rows come from a
-**source list**, filtered to the signed-in user. Each row gets one dropdown.
-Submit saves **one item per row** to the target list.
+**source list**, filtered to the signed-in user. Each row is a card: its
+name, its value, and the control that answers it. Submit saves **one item per
+row** to the target list.
+
+A row can carry a **current value** (`source.currentColumn`). Its card then
+shows that value (color dot, label, the choice's `description`) with a
+**confirm** checkbox and a **Change** button. Change swaps the button for the
+dropdown, which leaves the current value out, plus **Keep current**, which
+undoes it (back to unconfirmed). Once a new value is picked, the current one
+greys out and is struck through, and the description becomes the new
+value's. A row with no current value (an empty column, or a value that isn't
+one of the choices) gets the dropdown straight away. The card wears the hue
+of the value it shows.
 
 ```json
 {
   "id": "zones", "type": "assignments", "required": true,
   "rowLabel": "Floor/Area", "choiceLabel": "Physical Security Zone", "placeholder": "Select a zone",
   "source": { "listTitle": "PS_Zone-Attestation-Assignments", "userColumn": "UserEmail",
-              "labelColumn": "AreaName", "orderBy": "AreaName" },
+              "labelColumn": "AreaName", "currentColumn": "CurrentZone", "orderBy": "AreaName" },
   "responses": { "userColumn": "UserEmail", "keyColumn": "LookupID" },
-  "column": "ZoneSelection",
+  "column": "ZoneSelection", "previousColumn": "PreviousZone", "changedColumn": "ZoneChanged",
   "rowColumns": { "LookupID": "ID", "UserDescription": "UserDescription", "AreaName": "AreaName" },
-  "choices": [ { "value": "Green", "label": { "en": "Green", "fr": "Vert" }, "color": "green" } ],
+  "choices": [ { "value": "Public", "label": { "en": "Public - General Access", "fr": "Public - Accès général" },
+                 "color": "lime", "description": { "en": "…", "fr": "…" } } ],
   "empty":   { "title": "…", "message": "…" },
   "allDone": { "title": "…", "message": "…" }
 }
@@ -222,13 +238,15 @@ Submit saves **one item per row** to the target list.
 
 | Key | Notes |
 | --- | --- |
-| `source` | The list (`listTitle` / `listUrl`, optional `siteUrl`). `userColumn` (required) holds an email. A row belongs to the user when it equals their profile email **or** UPN, ignoring case. `labelColumn` (required) names the row; `detailColumn` (optional) adds a second line; `orderBy` (default: the label) and `top` (default 500). If more rows match than `top`, the first `top` show with a warning ("submit these, then reload"); nothing is dropped silently. **Limit:** if every row in that first `top` is already answered, the form can't reach the rest — it says so instead of "already submitted". Raise `top` if one person can have that many. |
-| `column` | The **target** column each row's choice is saved to. Required. |
+| `source` | The list (`listTitle` / `listUrl`, optional `siteUrl`). `userColumn` (required) holds an email. A row belongs to the user when it equals their profile email **or** UPN, ignoring case. `labelColumn` (required) names the row; `detailColumn` (optional) adds a second line; `currentColumn` (optional) holds each row's current value, which the user confirms or changes (see above; it must hold choice **values**); `orderBy` (default: the label) and `top` (default 500). If more rows match than `top`, the first `top` show with a warning ("submit these, then reload"); nothing is dropped silently. **Limit:** if every row in that first `top` is already answered, the form can't reach the rest — it says so instead of "already submitted". Raise `top` if one person can have that many. |
+| `column` | The **target** column each row's answer is saved to (a confirmed row saves its current value). Required. |
+| `previousColumn` / `changedColumn` | Optional, need `source.currentColumn`. Target columns for the row's current value (Text or Choice; left out when the row had none) and for whether the answer differs from it (Yes/No; `true` for a row that had none). |
 | `rowColumns` | Target column → source column, copied into each row's item. `"ID"` is the source item's id (saved as a number). |
 | `responses` | Optional. The rows this user already saved are found in the target list (`userColumn` = their email) and not shown again. They're matched on `keyColumn`, which must be a `rowColumns` target (normally the copied ID). A note says how many were skipped. If every row is done, the `allDone` screen shows instead of the form. One read covers up to 5,000 earlier responses per user; past that a warning says answered rows may show again, and "already submitted" is never claimed on a cut-off read. |
-| `required` | Every row needs a choice; each empty row shows its own error. |
+| `required` | Every row needs an answer (confirmed, or a value picked); each unanswered row shows its own error. |
 | `empty` / `allDone` | The screens for "nothing assigned" and "all already submitted". Engine defaults exist. |
-| `rowLabel` / `choiceLabel` | The table's two column headers. |
+| `choiceLabel` | The small heading over the value on a row with no current value (a row with one says `assignCurrent`). Also the dropdowns' accessible name. (`rowLabel`, a column header in the 0.5.0 table, is ignored.) |
+| strings | `assignCurrent`, `assignConfirm`, `assignChange`, `assignKeep`, `assignNewPlaceholder`, `assignConfirmed` / `assignChanged` / `assignSelected` (the card's status), `assignRowRequired` (a row to pick) / `assignRowConfirmRequired` (a row to confirm or change), `assignAllRequired`, `assignProgress`. Generic engine defaults ("Confirm this is correct", "Change"…); override them in `strings` for the form's own words. |
 
 - Every dropdown can be cleared: the **×** in the control, or **Clear
   selection** at the top of its menu.

@@ -34,7 +34,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '0.5.0';
+  var VERSION = '0.5.1';
   var NS = window.BSPForms = window.BSPForms || {};
   if (NS.__engineLoaded) { if (NS.scan) NS.scan(); return; }
   NS.__engineLoaded = true;
@@ -258,11 +258,19 @@
     assignNoUser: 'Your account couldn’t be identified, so the items assigned to you can’t be loaded.',
     assignRetry: 'Try again',
     assignRowRequired: 'Make a selection for this row.',
+    assignRowConfirmRequired: 'Confirm this value or choose a new one.',
     assignAllRequired: 'Make a selection for every row.',
     assignProgress: '{n} of {total} complete',
     assignSomeDone: '{n} of your items were already submitted and aren’t shown.',
     assignClear: 'Clear selection',
     assignSaved: 'Saved',
+    // rows with a current value (source.currentColumn): confirm it or change it
+    assignCurrent: 'Current',
+    assignConfirm: 'Confirm this is correct',
+    assignChange: 'Change',
+    assignKeep: 'Keep current',
+    assignNewPlaceholder: 'Select a new value',
+    assignConfirmed: 'Confirmed', assignChanged: 'Changed', assignSelected: 'Selected',
     assignEmptyTitle: 'Nothing to complete',
     assignEmptyMessage: 'There are no items assigned to you right now.',
     assignDoneTitle: 'Already submitted',
@@ -349,11 +357,18 @@
     assignNoUser: 'Votre compte n’a pas pu être identifié; les éléments qui vous sont attribués ne peuvent donc pas être chargés.',
     assignRetry: 'Réessayer',
     assignRowRequired: 'Faites une sélection pour cette ligne.',
+    assignRowConfirmRequired: 'Confirmez cette valeur ou choisissez-en une nouvelle.',
     assignAllRequired: 'Faites une sélection pour chaque ligne.',
     assignProgress: '{n} sur {total} terminé(s)',
     assignSomeDone: '{n} de vos éléments ont déjà été soumis et ne sont pas affichés.',
     assignClear: 'Effacer la sélection',
     assignSaved: 'Enregistré',
+    assignCurrent: 'Valeur actuelle',
+    assignConfirm: 'Je confirme que c’est exact',
+    assignChange: 'Modifier',
+    assignKeep: 'Conserver la valeur actuelle',
+    assignNewPlaceholder: 'Sélectionnez une nouvelle valeur',
+    assignConfirmed: 'Confirmé', assignChanged: 'Modifié', assignSelected: 'Sélectionné',
     assignEmptyTitle: 'Rien à remplir',
     assignEmptyMessage: 'Aucun élément ne vous est attribué pour le moment.',
     assignDoneTitle: 'Déjà soumis',
@@ -883,9 +898,24 @@
     if (!src.labelColumn) errors.push(where + ': source.labelColumn is required');
     if (!f.column) errors.push(where + ': column (where each row\'s choice is saved) is required');
     f.rowColumns = (f.rowColumns && typeof f.rowColumns === 'object') ? f.rowColumns : {};
-    // every source column the rows need: label, detail, and what rowColumns copies
+    // currentColumn: each row's value as it stands. The row then offers
+    // "confirm" or "change"; previousColumn / changedColumn record which.
+    if ((f.previousColumn || f.changedColumn) && !src.currentColumn) {
+      errors.push(where + ': previousColumn / changedColumn need source.currentColumn');
+    }
+    // every target column a row writes must be distinct, or one silently
+    // overwrites another (e.g. previousColumn = column saves the old value)
+    var targets = Object.create(null);
+    [['column', f.column], ['previousColumn', f.previousColumn], ['changedColumn', f.changedColumn]]
+      .concat(Object.keys(f.rowColumns || {}).map(function (c) { return ['rowColumns', c]; }))
+      .forEach(function (p) {
+        if (!p[1]) return;
+        if (targets[p[1]]) errors.push(where + ': target column "' + p[1] + '" is used by both ' + targets[p[1]] + ' and ' + p[0]);
+        else targets[p[1]] = p[0];
+      });
+    // every source column the rows need: label, detail, current, and what rowColumns copies
     var cols = [];
-    [src.labelColumn, src.detailColumn].concat(Object.keys(f.rowColumns).map(function (k) { return f.rowColumns[k]; }))
+    [src.labelColumn, src.detailColumn, src.currentColumn].concat(Object.keys(f.rowColumns).map(function (k) { return f.rowColumns[k]; }))
       .forEach(function (c) { if (c && !isIdCol(c) && cols.indexOf(c) < 0) cols.push(c); });
     src._cols = cols;
     var rs = f.responses;
@@ -1512,10 +1542,15 @@
     return '<span class="bspf-dot bspf-dot--' + esc(color) + '" aria-hidden="true"></span>';
   }
 
-  /* assignments — a table of the user's rows, a dot-choice dropdown per row.
-     Rows arrive after load (x-for), so ids are built from the row id. */
+  /* assignments — one card per row of the user's: the row's name, its value
+     (a color dot + label, with that choice's description) and the answer.
+     A row with a current value (source.currentColumn) is confirmed with a
+     checkbox, or changed through the dropdown (current value left out) and
+     changed back with "keep"; a row without one gets the dropdown straight
+     away. The card wears the hue of the value it shows. Rows arrive after
+     load (x-for), so ids are built from the row id. */
   function renderAssignments(f, S) {
-    var K = f.k, kq = esc(jstr(K)), base = f.domId;
+    var K = f.k, kq = esc(jstr(K)), base = f.domId, hasCur = !!f.source.currentColumn;
     var h = '<div class="field bspf-field--full bspf-asg" data-bspf-field="' + esc(K) + '">';
     if (f.label) {
       h += '<span class="field__label" id="' + esc(base) + '-lbl">' + esc(f.label) +
@@ -1540,12 +1575,14 @@
     c += '<div class="bspf-combo__control" role="combobox" tabindex="0" aria-haspopup="listbox"' +
       ' :id="' + esc(jstr(base + '-x')) + ' + row.id"' +
       ' :aria-labelledby="' + esc(jstr(base + '-c2 ' + base + '-r')) + ' + row.id"' +
-      ' :aria-expanded="row.open ? \'true\' : \'false\'" :aria-invalid="row.err ? \'true\' : \'false\'"' +
+      ' :aria-expanded="row.open ? \'true\' : \'false\'"' +
+      ' :aria-invalid="row.err && row.mode !== \'confirm\' ? \'true\' : \'false\'"' +
       ' :aria-disabled="row.saved ? \'true\' : \'false\'"' +
       ' @click="rowToggle(' + kq + ', row)" @keydown.enter.prevent="rowToggle(' + kq + ', row)"' +
       ' @keydown.space.prevent="rowToggle(' + kq + ', row)">';
     c += '<span class="bspf-combo__value">';
-    c += '<span class="bspf-combo__placeholder" x-show="!row.value">' + esc(f.placeholder || S.comboPlaceholder) + '</span>';
+    c += '<span class="bspf-combo__placeholder" x-show="!row.value && row.mode !== \'change\'">' + esc(f.placeholder || S.comboPlaceholder) + '</span>';
+    if (hasCur) c += '<span class="bspf-combo__placeholder" x-show="!row.value && row.mode === \'change\'" x-cloak>' + esc(S.assignNewPlaceholder) + '</span>';
     f.choices.forEach(function (ch) {
       c += '<span class="bspf-zone" x-show="row.value===' + esc(jstr(ch.value)) + '" x-cloak>' +
         dotHtml(ch.color) + '<span>' + esc(ch.label) + '</span></span>';
@@ -1557,8 +1594,6 @@
       ' aria-label="' + esc(S.assignClear) + '" title="' + esc(S.assignClear) + '"' +
       ' @click.stop="rowPick(' + kq + ', row, \'\')" @keydown.enter.stop @keydown.space.stop>' +
       icon('ic-fluent-dismiss-24-regular', 16) + '</button>';
-    c += '<span class="bspf-asg__savedmark" x-show="row.saved" x-cloak>' + icon('ic-fluent-checkmark-circle-24-filled', 16) +
-      '<span class="bspf-sr">' + esc(S.assignSaved) + '</span></span>';
     c += icon('ic-fluent-chevron-down-24-regular', 16).replace('class="icon', 'class="bspf-combo__chevron icon') + '</div>';
     c += '<div class="bspf-combo__menu" x-show="row.open" x-cloak role="listbox">';
     c += '<button type="button" class="bspf-combo__option bspf-combo__option--clear" role="option" aria-selected="false"' +
@@ -1566,27 +1601,78 @@
       icon('ic-fluent-dismiss-24-regular', 16) + '<span>' + esc(S.assignClear) + '</span></button>';
     f.choices.forEach(function (ch) {
       var vq = esc(jstr(ch.value));
+      // the current value isn't offered: picking it would just be "confirm"
       c += '<button type="button" class="bspf-combo__option" role="option"' +
+        (hasCur ? ' x-show="row.current !== ' + vq + '"' : '') +
         ' :aria-selected="row.value===' + vq + ' ? \'true\' : \'false\'" @click="rowPick(' + kq + ', row, ' + vq + ')">' +
         dotHtml(ch.color) + '<span>' + esc(ch.label) + '</span>' +
         '<span class="bspf-combo__check" x-show="row.value===' + vq + '" x-cloak>' + icon('ic-fluent-checkmark-24-regular') + '</span></button>';
     });
     c += '</div></div>';
 
-    h += '<div class="bspf-asg__table" role="table" x-show="asg.state===\'ready\'" x-cloak' +
+    // the value line: the current value (struck through once changed), an
+    // arrow, the new one; then the shown value's description
+    var zone = function (ch, cls, show) {
+      return '<span class="bspf-asg__zone' + cls + '" x-show="' + show + '" x-cloak' +
+        (cls ? ' :class="{ \'is-replaced\': rowChanged(row) }"' : '') + '>' +
+        dotHtml(ch.color) + '<span class="bspf-asg__zonename">' + esc(ch.label) + '</span></span>';
+    };
+    var body = '<div class="bspf-asg__body" x-show="row.current || row.value" x-cloak>';
+    if (hasCur) {
+      body += '<span class="bspf-asg__eyebrow" x-show="row.current">' + esc(S.assignCurrent) + '</span>' +
+        '<span class="bspf-asg__eyebrow" x-show="!row.current" x-cloak>' + esc(f.choiceLabel || '') + '</span>';
+    } else if (f.choiceLabel) {
+      body += '<span class="bspf-asg__eyebrow">' + esc(f.choiceLabel) + '</span>';
+    }
+    body += '<div class="bspf-asg__zones">';
+    if (hasCur) {
+      f.choices.forEach(function (ch) { body += zone(ch, ' bspf-asg__zone--was', 'row.current===' + esc(jstr(ch.value))); });
+      body += '<span class="bspf-asg__arrow" x-show="rowChanged(row)" x-cloak>' + icon('ic-fluent-arrow-right-24-regular', 16) +
+        '<span class="bspf-sr">' + esc(S.assignChanged) + '</span></span>';
+    }
+    f.choices.forEach(function (ch) {
+      body += zone(ch, '', 'row.value===' + esc(jstr(ch.value)) + (hasCur ? ' && row.value!==row.current' : ''));
+    });
+    body += '</div>';
+    f.choices.forEach(function (ch) {
+      if (ch.description) {
+        body += '<p class="bspf-asg__desc" x-show="(row.value || row.current)===' + esc(jstr(ch.value)) + '" x-cloak>' +
+          prose(ch.description) + '</p>';
+      }
+    });
+    body += '</div>';
+
+    // the answer: confirm / change (a current value), or the dropdown
+    var foot = '<div class="bspf-asg__foot">';
+    if (hasCur) {
+      foot += '<div class="bspf-asg__confirm" x-show="row.mode===\'confirm\'">' +
+        '<label class="check"><input type="checkbox" :id="' + esc(jstr(base + '-k')) + ' + row.id"' +
+        ' :checked="!!row.value" :disabled="row.saved" @change="rowConfirm(' + kq + ', row, $event.target.checked)"' +
+        ' :aria-invalid="row.err && row.mode === \'confirm\' ? \'true\' : \'false\'" :aria-describedby="' + esc(jstr(base + '-r')) + ' + row.id">' +
+        '<span>' + esc(S.assignConfirm) + '</span></label>' +
+        '<button type="button" class="btn btn--secondary btn--lg" :id="' + esc(jstr(base + '-g')) + ' + row.id"' +
+        ' x-show="!row.saved" @click="rowChange(' + kq + ', row)">' +
+        icon('ic-fluent-edit-24-regular', 16) + '<span>' + esc(S.assignChange) + '</span></button></div>';
+    }
+    foot += '<div class="bspf-asg__pick"' + (hasCur ? ' x-show="row.mode!==\'confirm\'" x-cloak' : '') + '>' + c;
+    if (hasCur) {
+      foot += '<button type="button" class="btn btn--tertiary btn--lg bspf-asg__keep" x-show="row.mode===\'change\' && !row.saved"' +
+        ' @click="rowKeep(' + kq + ', row)">' + icon('ic-fluent-dismiss-24-regular', 16) +
+        '<span>' + esc(S.assignKeep) + '</span></button>';
+    }
+    foot += '</div><p class="field__error" x-show="row.err" x-text="row.err" x-cloak></p></div>';
+
+    h += '<span class="bspf-sr" id="' + esc(base) + '-c2">' + esc(f.choiceLabel || '') + '</span>';
+    h += '<div class="bspf-asg__list" role="list" x-show="asg.state===\'ready\'" x-cloak' +
       (f.label ? ' aria-labelledby="' + esc(base) + '-lbl"' : '') + '>';
-    h += '<div class="bspf-asg__head" role="row">' +
-      '<span role="columnheader" id="' + esc(base) + '-c1">' + esc(f.rowLabel || '') + '</span>' +
-      '<span role="columnheader" id="' + esc(base) + '-c2">' + esc(f.choiceLabel || '') + '</span></div>';
     h += '<template x-for="(row, i) in values.' + K + '" :key="row.id">';
-    h += '<div class="bspf-asg__row" role="row" :class="rowClass(' + kq + ', row)" :style="{ \'--bspf-i\': i }">';
-    h += '<div class="bspf-asg__area" role="cell">' +
+    h += '<div class="bspf-asg__row" role="listitem" :class="rowClass(' + kq + ', row)" :style="{ \'--bspf-i\': i }">';
+    h += '<div class="bspf-asg__head"><div class="bspf-asg__area">' +
       '<span class="bspf-asg__label" :id="' + esc(jstr(base + '-r')) + ' + row.id" x-text="row.label"></span>';
     if (f.source.detailColumn) h += '<span class="bspf-asg__detail" x-show="row.detail" x-text="row.detail"></span>';
-    h += '</div>';
-    h += '<div class="bspf-asg__pick" role="cell">' + c +
-      '<p class="field__error" x-show="row.err" x-text="row.err" x-cloak></p></div>';
-    h += '</div></template></div>';
+    h += '</div><span class="bspf-asg__status" x-show="row.value || row.saved" x-cloak>' +
+      icon('ic-fluent-checkmark-24-regular', 16) + '<span x-text="rowStatus(row)"></span></span></div>';
+    h += body + foot + '</div></template></div>';
 
     h += '<div class="progress progress--subtle bspf-asg__progress" x-show="asg.state===\'ready\' && values.' + K + '.length > 1" x-cloak' +
       ' :class="{ \'progress--success\': rowsDone(' + kq + ')===values.' + K + '.length }"' +
@@ -1997,9 +2083,20 @@
           self.asg.warn = warn;
           var open = rows.filter(function (r) { return !done.has(self.rowKey(r)); });
           self.values[k] = open.map(function (r) {
+            // the row's current value counts only if it's one of the choices;
+            // anything else is treated as "no current value" (said in the console)
+            var cur = src.currentColumn && r[src.currentColumn] != null ? String(r[src.currentColumn]) : '';
+            if (cur && !f.choices.some(function (ch) { return ch.value === cur; })) {
+              console.warn('[BSP Forms] assignments: row ' + r.ID + ' has ' + src.currentColumn + ' "' + cur + '", which isn\'t a choice value; shown without a current value');
+              cur = '';
+            }
             return {
               id: String(r.ID), label: String(r[src.labelColumn] == null ? '' : r[src.labelColumn]),
               detail: src.detailColumn ? String(r[src.detailColumn] == null ? '' : r[src.detailColumn]) : '',
+              // mode: 'confirm' (a current value: checkbox + Change), 'change'
+              // (its dropdown is open for a new value), 'pick' (no current value).
+              // value is always the answer: the current value once confirmed.
+              current: cur, mode: cur ? 'confirm' : 'pick',
               data: r, value: '', err: '', open: false, saved: false
             };
           });
@@ -2069,15 +2166,43 @@
         row.err = '';
         if (this.errors[k]) this.check(k);
       },
+      // a current value: the checkbox makes it the answer, or clears it
+      rowConfirm: function (k, row, on) {
+        if (row.saved || this.busy || row.mode !== 'confirm') return;
+        row.value = on ? row.current : '';
+        row.err = '';
+        if (this.errors[k]) this.check(k);
+      },
+      // "Change": unconfirms, opens the dropdown and moves focus into it
+      rowChange: function (k, row) {
+        if (row.saved || this.busy) return;
+        this.values[k].forEach(function (r) { r.open = false; });
+        row.mode = 'change'; row.value = ''; row.open = true;
+        var id = cfg._byKey[k].domId + '-x' + row.id;
+        this.$nextTick(function () { var el = document.getElementById(id); if (el) el.focus(); });
+      },
+      // "Keep current": back to the untouched row (not confirmed), focus on Change
+      rowKeep: function (k, row) {
+        if (row.saved || this.busy) return;
+        row.mode = 'confirm'; row.value = ''; row.open = false; row.err = '';
+        var id = cfg._byKey[k].domId + '-g' + row.id;
+        this.$nextTick(function () { var el = document.getElementById(id); if (el) el.focus(); });
+      },
+      rowChanged: function (row) { return !!(row.current && row.value && row.value !== row.current); },
+      rowStatus: function (row) {
+        return row.saved ? S.assignSaved : row.mode === 'confirm' ? S.assignConfirmed
+          : row.mode === 'change' ? S.assignChanged : S.assignSelected;
+      },
       choiceColor: function (k, v) {
         var c = (cfg._byKey[k].choices || []).filter(function (x) { return x.value === v; })[0];
         return c ? c.color : '';
       },
       rowClass: function (k, row) {
-        var color = row.value ? this.choiceColor(k, row.value) : '';
+        // the card wears the hue of the value it shows: the answer, else the current value
+        var color = this.choiceColor(k, row.value || row.current);
         // is-open lifts the row over its siblings so the menu isn't covered
-        return (color ? 'is-set bspf-asg__row--' + color : '') + (row.saved ? ' is-saved' : '') +
-          (row.err ? ' is-error' : '') + (row.open ? ' is-open' : '');
+        return (color ? 'has-hue has-value bspf-asg__row--' + color : '') + (row.value ? ' is-set' : '') +
+          (row.saved ? ' is-saved' : '') + (row.err ? ' is-error' : '') + (row.open ? ' is-open' : '');
       },
       rowsDone: function (k) {
         return (this.values[k] || []).filter(function (r) { return !!r.value; }).length;
@@ -2518,7 +2643,11 @@
           if (this.asg.state !== 'ready') msg = this.asg.state === 'error' ? (this.asg.msg || S.assignLoadError) : S.assignLoading;
           else if (f.required) {
             var missing = 0;
-            v.forEach(function (r) { r.err = r.value || r.saved ? '' : S.assignRowRequired; if (r.err) missing++; });
+            // a row with a current value is confirmed or changed; one without is picked
+            v.forEach(function (r) {
+              r.err = r.value || r.saved ? '' : r.current ? S.assignRowConfirmRequired : S.assignRowRequired;
+              if (r.err) missing++;
+            });
             if (missing) msg = S.assignAllRequired;
           }
           this.errors[k] = msg;
@@ -2638,11 +2767,15 @@
         var k = this.pageFieldKeys(this.page).filter(function (x) { return self.errors[x]; })[0];
         if (!k) return;
         if (cfg._byKey[k].type === 'assignments') {
-          // the first row missing a choice (or the retry button) — after the
-          // tick that renders the rows' aria-invalid
+          // the first row's invalid control (only the visible one carries
+          // aria-invalid), else the load error's retry button — after the tick
+          // that renders the rows' aria-invalid. Two queries, not one selector
+          // list: a list returns whichever matches first in the document, and
+          // the cards' Change buttons are .btn too.
           var root = this.$root;
           this.$nextTick(function () {
-            var r = root.querySelector('[data-bspf-field="' + k + '"] [aria-invalid="true"], [data-bspf-field="' + k + '"] .btn');
+            var sel = '[data-bspf-field="' + k + '"] ';
+            var r = root.querySelector(sel + '[aria-invalid="true"]') || root.querySelector(sel + '.msgbar .btn');
             if (r) r.focus();
           });
           return;
@@ -2754,6 +2887,12 @@
               if (col === 'Title') titleMapped = true;
             });
             payload[fa.column] = row.value;
+            // the row's value before this answer, and whether the answer differs
+            // (a row with no current value counts as changed)
+            if (fa.previousColumn && row.current) payload[fa.previousColumn] = row.current;
+            if (fa.changedColumn) payload[fa.changedColumn] = row.value !== row.current;
+            // a row column named Title wins over titleTemplate, like a field's
+            if ([fa.column, fa.previousColumn, fa.changedColumn].indexOf('Title') > -1 && 'Title' in payload) titleMapped = true;
           }
           if (!titleMapped && cfg.target.titleTemplate) {
             payload.Title = self.renderTemplate(cfg.target.titleTemplate, row);
@@ -3015,6 +3154,8 @@
       if (fa) Object.keys(fa.rowColumns).forEach(function (col) {
         extra[col] = { from: fa.id + ' · row', expected: isIdCol(fa.rowColumns[col]) ? ['Number', 'Text'] : ['Text', 'Note', 'Choice', 'Number'] };
       });
+      if (fa && fa.previousColumn) extra[fa.previousColumn] = { from: fa.id + ' · previous', expected: ['Text', 'Choice'] };
+      if (fa && fa.changedColumn) extra[fa.changedColumn] = { from: fa.id + ' · changed', expected: ['Boolean'] };
       Object.keys(extra).forEach(function (col) {
         var fd = byName[col], x = extra[col];
         rows.push({

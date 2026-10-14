@@ -3,9 +3,10 @@
 // /teams/FCUWebDatastores, the page on /sites/FCUPortal). Runs through the sp-env Playwright
 // profile, because the cert app is scoped to the dev site only. Idempotent. Rows are seeded by
 // live-zone.js (as the signed-in user, so the user filter has something to match).
-//   PS_Zone-Attestation-Assignments  UserEmail (indexed) · UserDescription · AreaName (unique)
+//   PS_Zone-Attestation-Assignments  UserEmail (indexed) · UserDescription · AreaName (unique) · CurrentZone
 //   PS_Zone-Attestation-Responses    LookupID · UserName · UserEmail (indexed) · UserDescription ·
-//                                    AreaName · ZoneSelection · Attestation · AttestationTime
+//                                    AreaName · ZoneSelection · PreviousZone · ZoneChanged ·
+//                                    Attestation · AttestationTime
 // Responses gets the prod item-level setting: users see only their own items. (Prod also gives
 // users Add + View without Edit there.)
 //
@@ -26,7 +27,8 @@ const LISTS = {
     fields: {
       UserEmail: text('UserEmail', 'Indexed="TRUE"'),
       UserDescription: text('UserDescription'),
-      AreaName: text('AreaName', 'Indexed="TRUE" EnforceUniqueValues="TRUE"')
+      AreaName: text('AreaName', 'Indexed="TRUE" EnforceUniqueValues="TRUE"'),
+      CurrentZone: text('CurrentZone')
     }
   },
   'PS_Zone-Attestation-Responses': {
@@ -38,6 +40,8 @@ const LISTS = {
       UserDescription: text('UserDescription'),
       AreaName: text('AreaName'),
       ZoneSelection: text('ZoneSelection'),
+      PreviousZone: text('PreviousZone'),
+      ZoneChanged: '<Field Type="Boolean" Name="ZoneChanged" StaticName="ZoneChanged" DisplayName="ZoneChanged" />',
       Attestation: text('Attestation'),
       AttestationTime: '<Field Type="DateTime" Name="AttestationTime" StaticName="AttestationTime" DisplayName="AttestationTime" Format="DateTime" />'
     }

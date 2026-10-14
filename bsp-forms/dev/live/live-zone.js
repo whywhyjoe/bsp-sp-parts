@@ -3,10 +3,11 @@
 // end to end and read the saved rows back via REST. Lists come from live-zone-lists.js: a cross-site
 // twin of prod on the tenant ROOT site (prod: /teams/FCUWebDatastores), the page on the dev site.
 // Each run, as the signed-in test user: recycles that user's earlier responses, makes sure the
-// assignment rows exist (three for this user — one stored with different email casing, names with
-// an apostrophe and accents — plus one for someone else, which the form must not show), then:
-//   EN submit of all three → read back → reload shows "already submitted" →
-//   one response recycled → FR shows only that row → FR submit saves the English value.
+// assignment rows exist (three for this user, one stored with different email casing, plus one
+// for someone else, which the form must not show), then:
+//   EN submit (row 1 confirmed as is, row 2 changed, row 3 had no current zone: picked) → read
+//   back, incl. PreviousZone / ZoneChanged → reload shows "already submitted" →
+//   one response recycled → FR shows only that row → FR change saves the English value.
 //
 //   node live-zone.js --as <profile>   run the FORM as a non-admin: the Playwright profile
 //     <sp-env>/auth/<profile>, signed in once by hand. Arranging, recycling and read-back stay on
@@ -29,8 +30,12 @@ const ROOT = tenants.dev.tenantRoot.replace(/\/$/, '');
 const listApi = name => ROOT + "/_api/web/lists/getbytitle('" + encodeURIComponent(name) + "')";
 const A = listApi('PS_Zone-Attestation-Assignments');
 const R = listApi('PS_Zone-Attestation-Responses');
-const MINE = ['Floor 2 — Trading floor', "Floor 7 — D'Arcy executive suite", 'Parking P1 — Entrée sud'];
+// the example areas (sorted: Concourse Podium, Tower 10, Tower 37). Quotes and accents in list data
+// are covered by the harness's hostile-text test.
+const MINE = ['FCP - Concourse Podium', 'FCP - Tower 10', 'FCP - Tower 37'];
 const OTHER = 'Data centre — Hall B (not yours)';
+// CurrentZone per row of MINE (by index, after sorting): confirm, change, none (pick)
+const CUR = ['High Security', 'Public Plus', ''];
 const asIx = process.argv.indexOf('--as');
 const AS = asIx > -1 ? process.argv[asIx + 1] : null;
 if (asIx > -1 && !/^[\w-]+$/.test(AS || '')) { console.error('--as needs a profile folder name under sp-env/auth'); process.exit(1); }
@@ -45,7 +50,8 @@ async function rest(page, method, url, body) {
       h['X-RequestDigest'] = ci.FormDigestValue;
       if (body) h['content-type'] = J;
     }
-    const r = await fetch(url, { method, headers: h, body: body ? JSON.stringify(body) : undefined });
+    if (method === 'MERGE') { h['X-HTTP-Method'] = 'MERGE'; h['IF-MATCH'] = '*'; }
+    const r = await fetch(url, { method: method === 'MERGE' ? 'POST' : method, headers: h, body: body ? JSON.stringify(body) : undefined });
     const t = await r.text();
     if (!r.ok) throw new Error(method + ' ' + url + ' → ' + r.status + ' ' + t.slice(0, 300));
     return t ? JSON.parse(t) : null;
@@ -67,13 +73,23 @@ async function open(ctx, qs) {
   await page.waitForTimeout(600);
   return page;
 }
+// a row with a current zone: Change first (that opens the dropdown)
 async function pick(page, label, zone) {
   await page.evaluate(async ({ label, zone }) => {
     const row = [...document.querySelectorAll('.bspf-asg__row')].find(r => r.querySelector('.bspf-asg__label').textContent === label);
-    row.querySelector('[role="combobox"]').click();
+    const conf = row.querySelector('.bspf-asg__confirm');
+    if (conf && getComputedStyle(conf).display !== 'none') conf.querySelector('button').click();
+    else row.querySelector('[role="combobox"]').click();
     await new Promise(x => setTimeout(x, 80));
     [...row.querySelectorAll('.bspf-combo__option')].find(b => b.innerText.trim() === zone).click();
   }, { label, zone });
+  await page.waitForTimeout(120);
+}
+async function confirmRow(page, label) {
+  await page.evaluate(label => {
+    const row = [...document.querySelectorAll('.bspf-asg__row')].find(r => r.querySelector('.bspf-asg__label').textContent === label);
+    row.querySelector('.bspf-asg__confirm input').click();
+  }, label);
   await page.waitForTimeout(120);
 }
 async function clickBtn(page, text) {
@@ -117,7 +133,7 @@ async function submitAndConfirm(page, confirmText) {
   const mine = await rest(admin, 'GET', R + '/items?$select=Id&$top=500&$filter=UserEmail eq ' + q(me.Email));
   for (const it of mine.value) await rest(admin, 'POST', R + '/items(' + it.Id + ')/recycle()');
   console.log('recycled earlier responses:', mine.value.length);
-  const rows = (await rest(admin, 'GET', A + '/items?$select=Id,AreaName,UserEmail,UserDescription&$top=500')).value;
+  const rows = (await rest(admin, 'GET', A + '/items?$select=Id,AreaName,UserEmail,UserDescription,CurrentZone&$top=500')).value;
   const ids = {}, desc = {};
   if (AS) {
     // the non-admin's rows are seeded by live-zone-lists.js --user; use whatever is there
@@ -125,7 +141,6 @@ async function submitAndConfirm(page, confirmText) {
     rows.filter(r => String(r.UserEmail).toLowerCase() === me.Email.toLowerCase())
       .forEach(r => { MINE.push(r.AreaName); ids[r.AreaName] = r.Id; desc[r.AreaName] = r.UserDescription; });
     if (MINE.length < 2) { console.log('need at least 2 assignment rows for ' + me.Email + ' — run live-zone-lists.js --user'); process.exit(1); }
-    MINE.sort();
   } else {
     const want = MINE.map((n, i) => ({ AreaName: n, UserEmail: i === 0 ? me.Email.toUpperCase() : me.Email, UserDescription: 'Live test — branch lead' }))
       .concat([{ AreaName: OTHER, UserEmail: 'someone.else@example.invalid', UserDescription: 'Facilities' }]);
@@ -136,6 +151,12 @@ async function submitAndConfirm(page, confirmText) {
       ids[w.AreaName] = made.Id; desc[w.AreaName] = w.UserDescription;
       console.log('seeded assignment:', w.AreaName);
     }
+  }
+  MINE.sort();
+  // each row's current zone, set (as admin) whether the row was just made or already there
+  for (let i = 0; i < MINE.length; i++) {
+    const want = CUR[i] || null, hit = rows.find(r => r.AreaName === MINE[i]);
+    if (!hit || (hit.CurrentZone || null) !== want) await rest(admin, 'MERGE', A + '/items(' + ids[MINE[i]] + ')', { CurrentZone: want });
   }
   const others = rows.filter(r => String(r.UserEmail).toLowerCase() !== me.Email.toLowerCase()).map(r => r.AreaName);
   await page.close();
@@ -155,8 +176,13 @@ async function submitAndConfirm(page, confirmText) {
   check('job aid card → configured URL, new tab', (await page.locator('a.bspf-tipcard').getAttribute('href')) === SITE &&
     (await page.locator('a.bspf-tipcard').getAttribute('target')) === '_blank');
   await page.locator('.bspf').screenshot({ path: path.join(OUT, 'zone-form-empty.png') });
-  const ZONES = ['Green', 'Yellow', 'Orange', 'Red'];
-  for (let i = 0; i < MINE.length; i++) await pick(page, MINE[i], ZONES[i % 4]);
+  check('row 1: its current zone with confirm + Change', (await page.locator('.bspf-asg__row').nth(0).locator('.bspf-asg__zone:visible').textContent()) === 'High Security' &&
+    await page.locator('.bspf-asg__row').nth(0).locator('.bspf-asg__confirm input').isVisible());
+  // row 1 confirmed as is · row 2 changed · row 3 (no current zone) picked
+  const ANSWER = ['High Security', 'Standards', 'Public'];
+  await confirmRow(page, MINE[0]);
+  await pick(page, MINE[1], 'Standards - Restricted Operation');
+  if (MINE[2]) await pick(page, MINE[2], 'Public - General Access');
   await page.locator('[data-bspf-field="attestation"] input').check();
   await page.locator('.bspf').screenshot({ path: path.join(OUT, 'zone-form-filled.png') });
   const before = Date.now();
@@ -169,13 +195,16 @@ async function submitAndConfirm(page, confirmText) {
   check('no page errors (EN)', !page.__errors.length, page.__errors.join(' | '));
 
   // ---- read back
-  const sel = '$select=Id,Title,LookupID,UserName,UserEmail,UserDescription,AreaName,ZoneSelection,Attestation,AttestationTime';
+  const sel = '$select=Id,Title,LookupID,UserName,UserEmail,UserDescription,AreaName,ZoneSelection,PreviousZone,ZoneChanged,Attestation,AttestationTime';
   let saved = (await rest(admin, 'GET', R + '/items?' + sel + '&$top=50&$orderby=Id&$filter=UserEmail eq ' + q(me.Email))).value;
   console.log('SAVED:', JSON.stringify(saved, null, 1));
   check(MINE.length + ' responses saved', saved.length === MINE.length, saved.length);
   const by = Object.fromEntries(saved.map(s => [s.AreaName, s]));
   check('LookupID = the assignment item ID', MINE.every(n => by[n] && by[n].LookupID === ids[n]));
-  check('ZoneSelection per row', MINE.every((n, i) => by[n] && by[n].ZoneSelection === ZONES[i % 4]));
+  check('ZoneSelection per row', MINE.every((n, i) => by[n] && by[n].ZoneSelection === ANSWER[i]));
+  check('PreviousZone = the current zone (empty when none)', MINE.every((n, i) => by[n] && (by[n].PreviousZone || '') === CUR[i]));
+  check('ZoneChanged: false when confirmed, true when changed or newly set',
+    MINE.every((n, i) => by[n] && by[n].ZoneChanged === (i > 0)), JSON.stringify(MINE.map(n => by[n] && by[n].ZoneChanged)));
   check('UserName / UserEmail / UserDescription / Attestation', saved.every(s => s.UserName === me.Title && s.UserEmail === me.Email &&
     s.UserDescription === desc[s.AreaName] && s.Attestation === 'Confirmed'));
   if (AS) {
@@ -190,7 +219,7 @@ async function submitAndConfirm(page, confirmText) {
       if (merge) { h['X-HTTP-Method'] = 'MERGE'; h['IF-MATCH'] = '*'; }
       return (await fetch(url, { method: 'POST', headers: h, body: JSON.stringify(body) })).status;
     }, { url, body, merge, site: ROOT });
-    const edit = await post(R + '/items(' + saved[0].Id + ')', { ZoneSelection: 'Green' }, true);
+    const edit = await post(R + '/items(' + saved[0].Id + ')', { ZoneSelection: 'Public' }, true);
     check('non-admin cannot edit its own response (Add + View, no Edit)', edit === 401 || edit === 403, 'HTTP ' + edit);
     const add = await post(A + '/items', { Title: 'should not exist', AreaName: 'should not exist ' + Date.now() }, false);
     check('non-admin cannot add to the lookup list', add === 401 || add === 403, 'HTTP ' + add);
@@ -221,20 +250,22 @@ async function submitAndConfirm(page, confirmText) {
 
   // ---- FR: only the reopened row; French UI; English value saved
   page = await open(ctx, '?lang=fr');
-  check('FR: French title + headers', (await page.locator('.bspf__title').textContent()) === 'Attestation des zones de sécurité physique' &&
-    /zone de sécurité physique/i.test(await page.locator('.bspf-asg__head').textContent()));
+  check('FR: French title + zone labels', (await page.locator('.bspf__title').textContent()) === 'Attestation des zones de sécurité physique' &&
+    (await page.locator('.bspf-asg__eyebrow:visible').textContent()) === 'Zone actuelle' &&
+    (await page.locator('.bspf-asg__zone:visible').textContent()) === 'Public Plus - Entrée autorisée');
   const frLabels = await page.$$eval('.bspf-asg__label', els => els.map(e => e.textContent));
   check('FR: only the reopened row, plus the "already attested" note', JSON.stringify(frLabels) === JSON.stringify([MINE[1]]) &&
     new RegExp((MINE.length - 1) + ' de vos emplacements').test(await page.locator('[data-bspf-field="zones"]').textContent()), JSON.stringify(frLabels));
   check('FR: form root lang="fr"', (await page.getAttribute('.bspf', 'lang')) === 'fr');
-  await pick(page, MINE[1], 'Rouge');
+  await pick(page, MINE[1], 'Haute sécurité');
   await page.locator('.bspf').screenshot({ path: path.join(OUT, 'zone-form-fr.png') });
   await submitAndConfirm(page, 'Confirmer');
   check('FR: confirmation in French', /Merci/.test(await page.locator('.bspf-done:visible').textContent()));
   check('no page errors (FR)', !page.__errors.length, page.__errors.join(' | '));
   saved = (await rest(admin, 'GET', R + '/items?' + sel + '&$top=50&$orderby=Id&$filter=UserEmail eq ' + q(me.Email))).value;
   const fr = saved.find(s => s.AreaName === MINE[1]);
-  check('FR submit saved the English value "Red"', fr && fr.ZoneSelection === 'Red' && saved.length === MINE.length, fr && fr.ZoneSelection);
+  check('FR submit saved the English value "High Security"', fr && fr.ZoneSelection === 'High Security' && fr.PreviousZone === 'Public Plus' &&
+    fr.ZoneChanged === true && saved.length === MINE.length, fr && fr.ZoneSelection);
   await page.close();
 
   const failed = results.filter(r => !r.ok).length;
